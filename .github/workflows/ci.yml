@@ -1,0 +1,77 @@
+name: CI
+
+on:
+    push:
+        branches: [main, master]
+    pull_request:
+        branches: [main, master]
+
+jobs:
+    validate:
+        name: Validate Git Conventions
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Make scripts executable
+              run: chmod +x scripts/*.sh
+
+            - name: Validate commit messages
+              run: |
+                  if [ "${{ github.event_name }}" = "pull_request" ]; then
+                    # For PRs, check all commits in the PR
+                    base_ref="origin/${{ github.base_ref }}"
+                    git log --format=%s $base_ref..HEAD | while IFS= read -r commit_msg; do
+                      if [ -n "$commit_msg" ]; then
+                        echo "$commit_msg" > /tmp/commit_msg.txt
+                        scripts/validate-commit-msg.sh /tmp/commit_msg.txt
+                      fi
+                    done
+                  else
+                    # For pushes, check the latest commit
+                    git log -1 --format=%s > /tmp/commit_msg.txt
+                    scripts/validate-commit-msg.sh /tmp/commit_msg.txt
+                  fi
+
+            - name: Validate branch name
+              if: github.event_name == 'pull_request'
+              run: |
+                  # Create a temporary branch to validate the name
+                  branch_name="${{ github.head_ref }}"
+                  git checkout -b "$branch_name" 2>/dev/null || git checkout "$branch_name" 2>/dev/null || true
+                  scripts/validate-branch-name.sh
+
+    check:
+        name: Check
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@master
+              with:
+                  toolchain: nightly
+                  components: rustfmt, clippy
+
+            - name: Install just
+              uses: extractions/setup-just@v2
+              with:
+                  just-version: 1.30.0
+
+            - name: Cache cargo registry
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.cargo/bin/
+                      ~/.cargo/registry/index/
+                      ~/.cargo/registry/cache/
+                      ~/.cargo/git/db/
+                      target/
+                  key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+                  restore-keys: |
+                      ${{ runner.os }}-cargo-
+
+            - name: Run all checks
+              run: just check

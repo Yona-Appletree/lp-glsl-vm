@@ -1,0 +1,5 @@
+#!/bin/sh
+# Git hook to validate semantic commit messages
+
+exec "$(git rev-parse --show-toplevel)/scripts/validate-commit-msg.sh" "$1"
+

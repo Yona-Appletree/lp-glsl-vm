@@ -1,0 +1,5 @@
+#!/bin/sh
+# Git hook to validate branch naming conventions
+
+exec "$(git rev-parse --show-toplevel)/scripts/validate-branch-name.sh"
+

@@ -1,0 +1,15 @@
+#!/bin/sh
+# Git hook to run checks before committing
+# This hook is intentionally minimal - use 'just all' for full validation
+
+echo "🔍 Running pre-commit checks..."
+echo "⚠️  Note: For full validation, run 'just all' before committing"
+
+# Just run the basic checks that are fast
+if ! cargo fmt --all -- --check > /dev/null 2>&1; then
+    echo "❌ Code is not formatted. Run 'just fmt' to fix."
+    exit 1
+fi
+
+exit 0
+

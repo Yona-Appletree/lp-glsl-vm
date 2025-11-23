@@ -1,0 +1,114 @@
+# Pre-commit Checklist
+
+Before committing any changes, you MUST:
+
+1. **Format the code** using nightly rustfmt:
+
+   ```bash
+   just fmt
+   ```
+
+   This ensures consistent formatting and proper import sorting.
+
+2. **Run all checks** to ensure code quality:
+
+   ```bash
+   just check
+   ```
+
+   This runs:
+
+   - Formatting check (`fmt-check`)
+   - Clippy lints (`clippy`)
+   - Build verification (`build`)
+   - Tests (`test`)
+
+3. **Fix any issues** that arise from the checks before committing.
+
+## Quick Command
+
+To format and verify everything in one go:
+
+```bash
+just all
+```
+
+## Commit Messages
+
+**MUST use semantic commit messages** following the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+### Format
+
+```
+<type>[optional scope]: <description>
+
+[optional body - only when needed for complex commits]
+```
+
+### Guidelines
+
+- **Keep messages short and clear** - most commits should be a single line
+- **Only include a body** when the commit is complex and needs explanation
+- Use imperative mood ("add" not "added" or "adds")
+- Keep the description under 72 characters when possible
+
+### Types
+
+- `feat`: A new feature
+- `fix`: A bug fix
+- `docs`: Documentation only changes
+- `style`: Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc.)
+- `refactor`: A code change that neither fixes a bug nor adds a feature
+- `perf`: A code change that improves performance
+- `test`: Adding missing tests or correcting existing tests
+- `build`: Changes that affect the build system or external dependencies
+- `ci`: Changes to CI configuration files and scripts
+- `chore`: Other changes that don't modify src or test files
+- `revert`: Reverts a previous commit
+
+### Examples
+
+**Simple (preferred - single line):**
+
+```
+feat(vm): add support for GLSL functions
+fix(parser): handle edge case in expression parsing
+docs: update README with installation instructions
+refactor: simplify error handling logic
+test: add unit tests for VM execution
+chore: update dependencies
+```
+
+**Complex (with body - only when needed):**
+
+```
+feat(vm): implement GLSL function execution
+
+This commit adds support for executing GLSL functions in the VM,
+including proper handling of function parameters, return values,
+and nested function calls. The implementation includes:
+- Function call stack management
+- Parameter validation
+- Return value handling
+```
+
+### Branch Naming
+
+Branch names MUST be one of:
+
+- `main` - Main branch
+- `renovate/<description>` - Dependency updates (e.g., `renovate/dependencies`)
+- `feature/<description>` - New features (e.g., `feature/add-vm-execution`)
+
+**Examples:**
+
+- `main`
+- `renovate/dependencies`
+- `feature/add-vm-execution`
+
+## Important Notes
+
+- Always use `just` commands rather than direct `cargo` commands for consistency
+- The project uses nightly Rust for advanced rustfmt features (import sorting, etc.)
+- All checks must pass before committing - the CI will enforce this on GitHub
+- Commit messages and branch names are validated by git hooks (install with `just install-hooks`)
