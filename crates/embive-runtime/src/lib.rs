@@ -1,9 +1,9 @@
 #![no_std]
 #![allow(dead_code)]
+#![feature(alloc_error_handler)]
 
 use core::{
     arch::{asm, global_asm},
-    fmt::{self, Write},
     mem::zeroed,
     num::NonZeroI32,
     option::Option::{None, Some},
@@ -12,6 +12,12 @@ use core::{
 };
 
 use critical_section::{set_impl, Impl, RawRestoreState};
+
+mod print;
+mod alloc;
+
+pub use print::_print;
+pub use alloc::init_allocator;
 
 /// Number of syscall arguments
 pub const SYSCALL_ARGS: usize = 7;
@@ -126,40 +132,6 @@ pub fn get_heap() -> usize {
     addr_of!(_end) as usize
 }
 
-/// Writer that sends output to the host via syscall
-///
-/// Syscall 2: Write string to host
-/// - args[0] = pointer to string (as i32)
-/// - args[1] = length of string
-pub struct EmbiveWriter;
-
-impl Write for EmbiveWriter {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        // Syscall 2: Write string to host
-        // args[0] = pointer to string (as i32)
-        // args[1] = length of string
-        let ptr = s.as_ptr() as usize as i32;
-        let len = s.len() as i32;
-
-        let _ = syscall(2, &[ptr, len, 0, 0, 0, 0, 0]);
-        Ok(())
-    }
-}
-
-/// Global writer instance
-static mut WRITER: EmbiveWriter = EmbiveWriter;
-
-/// Print function used by print!/println! macros
-///
-/// This function is called by the print! and println! macros
-/// when used in a no_std environment.
-#[no_mangle]
-pub fn _print(args: fmt::Arguments) {
-    unsafe {
-        let _ = WRITER.write_fmt(args);
-    }
-}
-
 // Binary entry point
 // Initializes the global, stack, and frame pointers; and then calls the _code_entry function
 global_asm! {
@@ -268,6 +240,9 @@ unsafe extern "C" fn _code_entry() -> ! {
         sdata = sdata.offset(1);
         sdatas = sdatas.offset(1);
     }
+
+    // Initialize allocator before calling main
+    init_allocator();
 
     // Call user's main function (must be provided by the program crate)
     extern "Rust" {

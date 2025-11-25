@@ -43,11 +43,22 @@ fn run_embive_test() -> Result<(), String> {
 
     // Build the program (cargo handles dependency tracking automatically)
     // If embive-program or embive-runtime changes, cargo will rebuild automatically
-    std::process::Command::new("cargo")
+    let output = std::process::Command::new("cargo")
         .args(&["build", "--package", "embive-program", "--target", "riscv32imac-unknown-none-elf"])
         .current_dir(workspace_root)
         .output()
         .map_err(|e| format!("Failed to build embive-program: {}", e))?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!(
+            "Build failed with exit code {:?}\nSTDOUT:\n{}\nSTDERR:\n{}",
+            output.status.code(),
+            stdout,
+            stderr
+        ));
+    }
 
     // Load ELF
     let elf_path = workspace_root.join("target/riscv32imac-unknown-none-elf/debug/embive-program");

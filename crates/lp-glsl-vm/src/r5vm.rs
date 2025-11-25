@@ -46,6 +46,13 @@ impl R5Vm {
             self.ram[..ram_size]
                 .copy_from_slice(&combined[ram_offset_in_combined..ram_offset_in_combined + ram_size]);
         }
+        
+        // Ensure the heap region is zero-initialized
+        // The .heap section is (NOLOAD) so it won't be in the binary, but we need
+        // to ensure the RAM buffer covers it. The RAM is already zero-initialized
+        // in new(), so the heap region should be ready for use.
+        // Note: The heap starts at _end (after .data) and extends to __heap_end.
+        // Since the RAM buffer is 4MB and heap is 512KB, there should be plenty of space.
 
         Ok(())
     }
@@ -225,5 +232,30 @@ impl R5Vm {
             }
         }
         Ok(buf)
+    }
+
+    /// Write bytes to guest memory at the specified address
+    ///
+    /// Addresses < RAM_OFFSET are in the code section (ROM, read-only), addresses >= RAM_OFFSET are in RAM.
+    /// Returns an error if trying to write to ROM or if address is out of bounds.
+    pub fn write_memory(&mut self, addr: u32, data: &[u8]) -> Result<(), Error> {
+        if addr < RAM_OFFSET {
+            return Err(Error::Custom("Cannot write to ROM section"));
+        }
+        
+        let offset = (addr - RAM_OFFSET) as usize;
+        if offset + data.len() > self.ram.len() {
+            return Err(Error::Custom("Address out of bounds in RAM section"));
+        }
+        
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                data.as_ptr(),
+                self.ram.as_mut_ptr().add(offset),
+                data.len(),
+            );
+        }
+        
+        Ok(())
     }
 }

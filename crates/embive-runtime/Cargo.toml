@@ -9,6 +9,7 @@ test = false
 
 [dependencies]
 critical-section = { version = "1.2.0", features = ["restore-state-bool"] }
+linked_list_allocator = "0.10"
 
 [profile.release]
 opt-level = "s"

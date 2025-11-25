@@ -1,6 +1,6 @@
 ENTRY(_entry)
 
-STACK_SIZE = 0x800; /* Default stack size is 2048 bytes */
+STACK_SIZE = 0x10000;
 
 MEMORY {
     ROM (rx)  : ORIGIN = 0x00000000, LENGTH = 0x80000000 /* Set to maximum possible length */
@@ -75,6 +75,16 @@ SECTIONS {
         _end = .;
     } > RAM AT > ROM
     __data_source_start = LOADADDR(.data);
+
+    /* Heap section - reserve space for dynamic allocation */
+    /* We reserve 512KB for the heap, which should be enough for most programs */
+    /* NOLOAD means this section won't be loaded from the ELF, but space is reserved */
+    .heap (NOLOAD) : ALIGN(16) {
+        __heap_start = .;
+        . += 512 * 1024; /* 512KB heap */
+        . = ALIGN(16);
+        __heap_end = .;
+    } > RAM
 
     _ram  = ORIGIN(RAM);
     _eram = ORIGIN(RAM) + LENGTH(RAM);
