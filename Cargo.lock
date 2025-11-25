@@ -37,6 +37,9 @@ dependencies = [
  "elf",
  "embive 0.6.0",
  "embive-runtime",
+ "r5-builder",
+ "r5-ir",
+ "r5-target-riscv32",
 ]
 
 [[package]]
@@ -101,6 +104,29 @@ dependencies = [
  "memchr",
  "minimal-lexical",
 ]
+
+[[package]]
+name = "r5-builder"
+version = "0.1.0"
+dependencies = [
+ "r5-ir",
+]
+
+[[package]]
+name = "r5-ir"
+version = "0.1.0"
+
+[[package]]
+name = "r5-target-riscv32"
+version = "0.1.0"
+dependencies = [
+ "r5-ir",
+ "riscv32-encoder",
+]
+
+[[package]]
+name = "riscv32-encoder"
+version = "0.1.0"
 
 [[package]]
 name = "scopeguard"

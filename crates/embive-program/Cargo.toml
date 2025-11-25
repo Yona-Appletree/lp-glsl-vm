@@ -13,6 +13,9 @@ test = false
 embive-runtime = { path = "../embive-runtime" }
 embive = { path = "/Users/yona/dev/opensource/embive", default-features = false, features = ["transpiler"] }
 elf = { version = "0.8.0", default-features = false }
+r5-builder = { path = "../r5-builder" }
+r5-target-riscv32 = { path = "../r5-target-riscv32" }
+r5-ir = { path = "../r5-ir" }
 
 [build-dependencies]
 

@@ -1,0 +1,12 @@
+[package]
+name = "riscv32-encoder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "RISC-V 32-bit instruction encoder"
+
+[lib]
+
+[dependencies]
+
+[dev-dependencies]

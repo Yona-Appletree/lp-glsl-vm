@@ -3,6 +3,10 @@ members = [
     "crates/lp-glsl-vm",
     "crates/embive-runtime",
     "crates/embive-program",
+    "crates/riscv32-encoder",
+    "crates/r5-ir",
+    "crates/r5-builder",
+    "crates/r5-target-riscv32",
 ]
 # Exclude RISC-V-only crates from default builds
 default-members = [

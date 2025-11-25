@@ -1,0 +1,13 @@
+[package]
+name = "r5-ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "RISC-V 5 Intermediate Representation"
+
+[lib]
+
+[dependencies]
+
+[dev-dependencies]
+

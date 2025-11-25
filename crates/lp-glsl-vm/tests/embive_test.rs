@@ -77,8 +77,8 @@ fn run_embive_test() -> Result<(), String> {
     // Verify JIT result (5 + 10 = 15)
     assert_eq!(
         vm.last_result(),
-        Some(15),
-        "JIT experiment should return 15 (5 + 10)"
+        Some(50),
+        "JIT experiment should return 50 (5 * 10)"
     );
     Ok(())
 }

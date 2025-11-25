@@ -1,0 +1,15 @@
+[package]
+name = "r5-target-riscv32"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "RISC-V 32-bit target implementation"
+
+[lib]
+
+[dependencies]
+r5-ir = { path = "../r5-ir" }
+riscv32-encoder = { path = "../riscv32-encoder" }
+
+[dev-dependencies]
+
