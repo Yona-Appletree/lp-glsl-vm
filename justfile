@@ -43,6 +43,12 @@ install-hooks:
     @chmod +x scripts/*.sh
     @echo "✅ Git hooks installed successfully!"
 
+# Build embive-program for riscv32imac-unknown-none-elf target
+# Cargo automatically handles dependency tracking, so this will rebuild
+# if embive-program or embive-runtime source files change
+embive-program:
+    cargo build --package embive-program --target riscv32imac-unknown-none-elf
+
 # Default recipe (run when just called without arguments)
 default: check
 

@@ -35,7 +35,7 @@ fn test_embive() {
 fn run_embive_test() -> Result<(), String> {
     use core::num::NonZeroI32;
     use embive::interpreter::{
-        memory::{Memory, SliceMemory, RAM_OFFSET},
+        memory::{SliceMemory, RAM_OFFSET},
         Error, Interpreter, State, SYSCALL_ARGS,
     };
     use embive::transpiler::transpile_elf;
@@ -49,14 +49,13 @@ fn run_embive_test() -> Result<(), String> {
     let elf_path = workspace_root
         .join("target/riscv32imac-unknown-none-elf/debug/embive-program");
     
-    // Build the program if it doesn't exist
-    if !elf_path.exists() {
-        std::process::Command::new("cargo")
-            .args(&["build", "--package", "embive-program", "--target", "riscv32imac-unknown-none-elf"])
-            .current_dir(workspace_root)
-            .output()
-            .map_err(|e| format!("Failed to build embive-program: {}", e))?;
-    }
+    // Build the program (cargo handles dependency tracking automatically)
+    // If embive-program or embive-runtime changes, cargo will rebuild automatically
+    std::process::Command::new("cargo")
+        .args(&["build", "--package", "embive-program", "--target", "riscv32imac-unknown-none-elf"])
+        .current_dir(workspace_root)
+        .output()
+        .map_err(|e| format!("Failed to build embive-program: {}", e))?;
     
     let elf_data = std::fs::read(&elf_path)
         .map_err(|e| format!("Failed to read ELF file {:?}: {}", elf_path, e))?;
@@ -86,17 +85,27 @@ fn run_embive_test() -> Result<(), String> {
     // Entry point is 0x00000000, code starts there (in code section)
     interpreter.program_counter = 0;
 
+    // Track syscall invocations to verify it's actually being called
+    use std::cell::Cell;
+    let syscall_count = Cell::new(0);
+    let syscall_args = Cell::new((0, 0));
+    let syscall_result = Cell::new(None);
+
     // Syscall handler: syscall 1 adds two numbers
-    fn syscall<M: Memory>(
-        nr: i32,
-        args: &[i32; SYSCALL_ARGS],
-        _memory: &mut M,
-    ) -> Result<Result<i32, NonZeroI32>, Error> {
+    let mut syscall = |nr: i32, args: &[i32; SYSCALL_ARGS], _memory: &mut _| -> Result<Result<i32, NonZeroI32>, Error> {
         match nr {
-            1 => Ok(Ok(args[0] + args[1])),
+            1 => {
+                let count = syscall_count.get();
+                syscall_count.set(count + 1);
+                syscall_args.set((args[0], args[1]));
+                let result = args[0] + args[1];
+                syscall_result.set(Some(result));
+                println!("syscall add2(1): {} + {} = {}", args[0], args[1], result);
+                Ok(Ok(result))
+            },
             _ => Err(Error::Custom("Unknown syscall")),
         }
-    }
+    };
 
     // Run the program (exactly like embive examples)
     loop {
@@ -106,7 +115,33 @@ fn run_embive_test() -> Result<(), String> {
                 interpreter.syscall(&mut syscall).map_err(|e| format!("Syscall error: {:?}", e))?;
             }
             State::Waiting => {}
-            State::Halted => return Ok(()),
+            State::Halted => break,
         }
     }
+
+    // Verify the syscall was actually called
+    let count = syscall_count.get();
+    if count == 0 {
+        return Err("Syscall was never called".to_string());
+    }
+    
+    // Verify the syscall was called exactly once
+    if count != 1 {
+        return Err(format!("Expected syscall to be called once, but it was called {} times", count));
+    }
+
+    // Verify the arguments passed to the syscall
+    let (arg0, arg1) = syscall_args.get();
+    if arg0 != 5 || arg1 != 10 {
+        return Err(format!("Expected syscall args (5, 10), but got ({}, {})", arg0, arg1));
+    }
+
+    // Verify the return value
+    let result = syscall_result.get().ok_or("Syscall result was not set")?;
+    if result != 15 {
+        return Err(format!("Expected syscall result 15, but got {}", result));
+    }
+
+    println!("✅ Syscall verification passed: called {} time(s) with args ({}, {}) = {}", count, arg0, arg1, result);
+    Ok(())
 }
