@@ -190,6 +190,12 @@ pub fn ecall() -> u32 {
     0x00000073
 }
 
+/// EBREAK: Environment break (halt/debug breakpoint)
+/// Encoding: opcode=0x73, funct3=0, rs1=0, rd=0, imm=1
+pub fn ebreak() -> u32 {
+    0x00100073
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -167,4 +167,3 @@ mod tests {
         module.set_entry_function("nonexistent".to_string());
     }
 }
-

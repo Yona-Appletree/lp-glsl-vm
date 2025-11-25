@@ -258,9 +258,10 @@ impl VmRunner {
          -> Result<Result<i32, NonZeroI32>, Error> {
             match nr {
                 0 => {
-                    // Syscall 0: Done - store result
+                    // Syscall 0: Done - store result and halt
                     last_result = Some(args[0]);
-                    Ok(Ok(0))
+                    // Return error code to halt the VM
+                    Ok(Err(NonZeroI32::new(1).unwrap()))
                 }
                 1 => {
                     // Syscall 1: Panic

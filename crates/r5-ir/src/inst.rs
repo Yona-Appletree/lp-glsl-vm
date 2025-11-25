@@ -103,8 +103,17 @@ pub enum Inst {
         /// Result values (SSA)
         results: Vec<Value>,
     },
+    /// System call: syscall(number, args...)
+    Syscall {
+        /// Syscall number
+        number: i32,
+        /// Argument values (passed in a0-a7)
+        args: Vec<Value>,
+    },
     /// Return with values
     Return { values: Vec<Value> },
+    /// Halt execution (ebreak)
+    Halt,
 
     // Memory
     /// Load from memory: result = mem[address]
@@ -140,7 +149,8 @@ impl Inst {
             | Inst::Fconst { result, .. }
             | Inst::Load { result, .. } => vec![*result],
             Inst::Call { results, .. } => results.clone(),
-            Inst::Jump { .. } | Inst::Br { .. } | Inst::Store { .. } => Vec::new(),
+            Inst::Syscall { .. } => Vec::new(),
+            Inst::Jump { .. } | Inst::Br { .. } | Inst::Store { .. } | Inst::Halt => Vec::new(),
             Inst::Return { values } => values.clone(),
         }
     }
@@ -159,9 +169,10 @@ impl Inst {
             | Inst::IcmpLe { arg1, arg2, .. }
             | Inst::IcmpGt { arg1, arg2, .. }
             | Inst::IcmpGe { arg1, arg2, .. } => vec![*arg1, *arg2],
-            Inst::Iconst { .. } | Inst::Fconst { .. } | Inst::Jump { .. } => Vec::new(),
+            Inst::Iconst { .. } | Inst::Fconst { .. } | Inst::Jump { .. } | Inst::Halt => Vec::new(),
             Inst::Br { condition, .. } => vec![*condition],
             Inst::Call { args, .. } => args.clone(),
+            Inst::Syscall { args, .. } => args.clone(),
             Inst::Return { values } => values.clone(),
             Inst::Load { address, .. } => vec![*address],
             Inst::Store { address, value, .. } => vec![*address, *value],
@@ -249,6 +260,16 @@ impl fmt::Display for Inst {
                 }
                 Ok(())
             }
+            Inst::Syscall { number, args } => {
+                write!(f, "syscall {}(", number)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "%{}", arg.index())?;
+                }
+                write!(f, ")")
+            }
             Inst::Return { values } => {
                 write!(f, "return")?;
                 if !values.is_empty() {
@@ -268,6 +289,7 @@ impl fmt::Display for Inst {
             Inst::Store { address, value, ty } => {
                 write!(f, "store {} %{}, %{}", ty, address.index(), value.index())
             }
+            Inst::Halt => write!(f, "halt"),
         }
     }
 }

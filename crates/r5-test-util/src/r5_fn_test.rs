@@ -257,10 +257,16 @@ impl R5FnTest {
             block_builder.call(test_func_name.to_string(), arg_values, vec![result_val]);
         }
 
-        // Return the result
+        // Call syscall 0 with the result value
         {
             let mut block_builder = builder.block_builder(block_idx);
-            block_builder.return_(&vec![result_val]);
+            block_builder.syscall(0, vec![result_val]);
+        }
+
+        // Halt execution
+        {
+            let mut block_builder = builder.block_builder(block_idx);
+            block_builder.halt();
         }
 
         builder.finish()

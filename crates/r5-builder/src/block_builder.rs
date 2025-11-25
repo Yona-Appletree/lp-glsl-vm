@@ -159,4 +159,14 @@ impl<'a> BlockBuilder<'a> {
             results,
         });
     }
+
+    /// System call: syscall(number, args...)
+    pub fn syscall(&mut self, number: i32, args: Vec<Value>) {
+        self.push_inst(Inst::Syscall { number, args });
+    }
+
+    /// Halt execution (ebreak)
+    pub fn halt(&mut self) {
+        self.push_inst(Inst::Halt);
+    }
 }
