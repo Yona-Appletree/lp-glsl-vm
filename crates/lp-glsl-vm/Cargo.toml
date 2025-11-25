@@ -1,0 +1,16 @@
+[package]
+name = "lp-glsl-vm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+glsl = { path = "../../../glsl-parser/glsl", default-features = false }
+embive = { version = "0.6.0", default-features = false, features = ["interpreter", "transpiler"] }
+
+[dev-dependencies]
+

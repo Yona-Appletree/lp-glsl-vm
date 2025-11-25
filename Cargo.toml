@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "crates/lp-glsl-vm",
+    "crates/embive-runtime",
+    "crates/embive-program",
+]
+# Exclude RISC-V-only crates from default builds
+default-members = [
+    "crates/lp-glsl-vm",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
