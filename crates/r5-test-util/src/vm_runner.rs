@@ -61,8 +61,10 @@ impl Expectation {
                 }
             }
             Expectation::ReturnValues(expected) => {
-                // For now, we only support single return value
-                // TODO: Support multiple return values once calling convention is implemented
+                // Note: Multiple return values are not yet supported.
+                // The calling convention currently only supports a single return value in a0.
+                // This is a known limitation that will be addressed when the calling convention
+                // is fully implemented to support multiple return values.
                 if expected.len() == 1 {
                     Expectation::ReturnValue(expected[0]).check(result, func, args)
                 } else {
@@ -232,7 +234,7 @@ impl VmRunner {
 
     /// Run interpreter with cycle and timeout limits.
     fn run_with_limits(
-        mut code_vec: Vec<u8>,
+        code_vec: Vec<u8>,
         mut ram: Vec<u8>,
         max_cycles: u64,
     ) -> Result<TestResult, String> {

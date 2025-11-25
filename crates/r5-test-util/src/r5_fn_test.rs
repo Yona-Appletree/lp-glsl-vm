@@ -5,9 +5,9 @@ extern crate alloc;
 use alloc::{string::String, vec::Vec};
 
 use r5_builder::FunctionBuilder;
-use r5_ir::{Function, Inst, Module, Signature, Type, Value};
+use r5_ir::{Function, Module, Signature, Type};
 use r5_target_riscv32::{compile_module, debug_elf, generate_elf};
-use riscv32_encoder::{disassemble_code, Gpr};
+use riscv32_encoder::disassemble_code;
 
 use crate::vm_runner::{Expectation, VmRunner};
 
@@ -164,7 +164,7 @@ impl R5FnTest {
         let test_func_name = "test_function".to_string();
         let mut test_func = self.func.clone();
         test_func.set_name(test_func_name.clone());
-        module.add_function(test_func_name.clone(), test_func);
+        module.add_function(test_func_name.clone(), test_func.clone());
 
         // Generate bootstrap wrapper function in IR
         let wrapper_func =
@@ -270,92 +270,5 @@ impl R5FnTest {
         }
 
         builder.finish()
-    }
-
-    /// Generate bootstrap code that wraps the test function (legacy method, deprecated).
-    ///
-    /// The bootstrap:
-    /// 1. Sets up function arguments in a0, a1, etc.
-    /// 2. Calls the test function (using jal)
-    /// 3. Takes return value from a0 and calls syscall 0
-    #[allow(dead_code)]
-    fn generate_bootstrap(func_code: &[u8], args: &[i32]) -> Vec<u8> {
-        use r5_target_riscv32::CodeBuffer;
-        use riscv32_encoder;
-
-        let mut bootstrap = CodeBuffer::new();
-
-        // Set up function arguments in a0, a1, a2, etc.
-        // For now, we'll use constants (lui + addi for large values)
-        for (i, &arg) in args.iter().take(8).enumerate() {
-            let reg = match i {
-                0 => Gpr::A0,
-                1 => Gpr::A1,
-                2 => Gpr::A2,
-                3 => Gpr::A3,
-                4 => Gpr::A4,
-                5 => Gpr::A5,
-                6 => Gpr::A6,
-                7 => Gpr::A7,
-                _ => break,
-            };
-
-            if arg >= -2048 && arg < 2048 {
-                // Small immediate, use addi
-                bootstrap.emit(riscv32_encoder::addi(reg, Gpr::ZERO, arg));
-            } else {
-                // Large immediate, use lui + addi
-                let arg_u32 = arg as u32;
-                let imm_hi = (arg_u32 >> 12) & 0xfffff;
-                let imm_lo = (arg_u32 & 0xfff) as i32;
-                let imm_lo_signed = if imm_lo & 0x800 != 0 {
-                    imm_lo | (-4096i32)
-                } else {
-                    imm_lo
-                };
-
-                bootstrap.emit(riscv32_encoder::lui(reg, imm_hi << 12));
-                if imm_lo_signed != 0 {
-                    bootstrap.emit(riscv32_encoder::addi(reg, reg, imm_lo_signed));
-                }
-            }
-        }
-
-        // Store bootstrap size before emitting jal
-        let bootstrap_before_jal = bootstrap.len();
-
-        // Emit placeholder jal (will be fixed up)
-        // jal ra, offset - sets ra = pc + 4, then jumps to pc + offset
-        bootstrap.emit(0); // Placeholder
-
-        // After function returns, a0 contains the return value
-        // Call syscall 0: set a7 = 0, then ecall
-        bootstrap.emit(riscv32_encoder::addi(Gpr::A7, Gpr::ZERO, 0));
-        bootstrap.emit(riscv32_encoder::ecall());
-
-        // Halt loop (shouldn't be reached, but ensures program stops)
-        bootstrap.emit(riscv32_encoder::jal(Gpr::ZERO, -4));
-
-        // Append the function code
-        let mut result = bootstrap.as_bytes().to_vec();
-        result.extend_from_slice(func_code);
-
-        // Fix up jal offset
-        // jal is PC-relative: pc = pc + offset
-        // When jal executes, PC points to the jal instruction
-        // We want to jump to the function code start
-        // offset = target_address - jal_address
-        // target_address = bootstrap.len() (where function code starts in result)
-        // jal_address = bootstrap_before_jal (where jal instruction is in result)
-        let func_start = bootstrap.len();
-        let jal_address = bootstrap_before_jal;
-        let jal_offset = func_start as i32 - jal_address as i32;
-
-        // Update the jal instruction
-        let jal_inst = riscv32_encoder::jal(Gpr::RA, jal_offset);
-        let jal_bytes = jal_inst.to_le_bytes();
-        result[bootstrap_before_jal..bootstrap_before_jal + 4].copy_from_slice(&jal_bytes);
-
-        result
     }
 }

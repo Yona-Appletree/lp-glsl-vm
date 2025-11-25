@@ -25,8 +25,6 @@ pub struct Lowerer {
     function_addresses: BTreeMap<String, u32>,
     /// Relocations that need to be fixed up (call sites).
     relocations: Vec<Relocation>,
-    /// Current function being compiled (for tracking offsets).
-    current_function_start: usize,
 }
 
 impl Lowerer {
@@ -37,7 +35,6 @@ impl Lowerer {
             module: None,
             function_addresses: BTreeMap::new(),
             relocations: Vec::new(),
-            current_function_start: 0,
         }
     }
 
@@ -61,62 +58,63 @@ impl Lowerer {
         self.relocations.clear();
     }
 
-    /// Set the current function start offset (for calculating relative addresses).
-    pub fn set_function_start(&mut self, offset: usize) {
-        self.current_function_start = offset;
+    /// Map function parameters to argument registers (a0-a7).
+    fn map_parameters_to_registers(regalloc: &mut SimpleRegAllocator, entry_block: &r5_ir::Block) {
+        for (i, param) in entry_block.params.iter().enumerate() {
+            let arg_reg = match i {
+                0 => Gpr::A0,
+                1 => Gpr::A1,
+                2 => Gpr::A2,
+                3 => Gpr::A3,
+                4 => Gpr::A4,
+                5 => Gpr::A5,
+                6 => Gpr::A6,
+                7 => Gpr::A7,
+                _ => break, // More than 8 parameters not supported yet
+            };
+            regalloc.map_value_to_register(*param, arg_reg);
+        }
     }
 
-    /// Lower a function to RISC-V 32-bit code.
-    pub fn lower_function(&mut self, func: &Function) -> CodeBuffer {
-        let mut code = CodeBuffer::new();
-        self.regalloc.clear();
-        self.current_function_start = 0; // Will be set by caller
-
-        // Map function parameters to argument registers (a0-a7)
-        // The entry block's parameters correspond to function parameters
-        if let Some(entry_block) = func.blocks.first() {
-            for (i, param) in entry_block.params.iter().enumerate() {
-                let arg_reg = match i {
-                    0 => Gpr::A0,
-                    1 => Gpr::A1,
-                    2 => Gpr::A2,
-                    3 => Gpr::A3,
-                    4 => Gpr::A4,
-                    5 => Gpr::A5,
-                    6 => Gpr::A6,
-                    7 => Gpr::A7,
-                    _ => break, // More than 8 parameters not supported yet
-                };
-                // Map the parameter value to the argument register
-                self.regalloc.map_value_to_register(*param, arg_reg);
+    /// Estimate the size of an instruction in bytes (for block address computation).
+    fn estimate_instruction_size(inst: &Inst) -> usize {
+        match inst {
+            Inst::Iadd { .. }
+            | Inst::Isub { .. }
+            | Inst::Imul { .. }
+            | Inst::Iconst { .. }
+            | Inst::Jump { .. }
+            | Inst::Return { .. }
+            | Inst::Halt => 4, // Single instruction
+            Inst::Call { .. } => 4, // jal instruction (plus argument moves, but we don't count those here)
+            Inst::Syscall { number, args } => {
+                // Estimate: argument moves + syscall number setup + ecall
+                let mut size = args.len().min(8) * 4; // Each arg may need a move
+                if *number >= -2048 && *number < 2048 {
+                    size += 4; // addi
+                } else {
+                    size += 8; // lui + addi
+                }
+                size += 4; // ecall
+                size
             }
+            _ => 4, // Default: single instruction
         }
+    }
 
-        // Two-pass approach: first pass to compute block addresses, second pass to emit code
-        // First pass: compute block start addresses
+    /// Compute block start addresses using a first pass.
+    /// This estimates instruction sizes to determine where each block will start.
+    fn compute_block_addresses(func: &Function) -> Vec<usize> {
         let mut block_starts = Vec::new();
         let mut temp_code = CodeBuffer::new();
         let mut temp_regalloc = SimpleRegAllocator::new();
 
         // Map function parameters for first pass
         if let Some(entry_block) = func.blocks.first() {
-            for (i, param) in entry_block.params.iter().enumerate() {
-                let arg_reg = match i {
-                    0 => Gpr::A0,
-                    1 => Gpr::A1,
-                    2 => Gpr::A2,
-                    3 => Gpr::A3,
-                    4 => Gpr::A4,
-                    5 => Gpr::A5,
-                    6 => Gpr::A6,
-                    7 => Gpr::A7,
-                    _ => break,
-                };
-                temp_regalloc.map_value_to_register(*param, arg_reg);
-            }
+            Self::map_parameters_to_registers(&mut temp_regalloc, entry_block);
         }
 
-        for (block_idx, block) in func.blocks.iter().enumerate() {
+        for block in &func.blocks {
             block_starts.push(temp_code.len());
 
             // Handle block parameters
@@ -126,18 +124,18 @@ impl Lowerer {
                 }
             }
 
-            // Lower instructions to temp code to compute sizes
+            // Estimate instruction sizes
             for inst in &block.insts {
+                let size = Self::estimate_instruction_size(inst);
+                // Allocate registers for values used/produced
                 match inst {
                     Inst::Iadd { result, arg1, arg2 } => {
                         let _ = temp_regalloc.allocate(*arg1);
                         let _ = temp_regalloc.allocate(*arg2);
                         let _ = temp_regalloc.allocate(*result);
-                        temp_code.emit(0); // placeholder
                     }
                     Inst::Iconst { result, .. } => {
                         let _ = temp_regalloc.allocate(*result);
-                        temp_code.emit(0); // placeholder
                     }
                     Inst::Call { args, results, .. } => {
                         for arg in args {
@@ -146,49 +144,37 @@ impl Lowerer {
                         for res in results {
                             let _ = temp_regalloc.allocate(*res);
                         }
-                        temp_code.emit(0); // placeholder for jal
                     }
                     Inst::Syscall { args, .. } => {
                         for arg in args {
                             let _ = temp_regalloc.allocate(*arg);
                         }
-                        // syscall: addi a7 + ecall (2 instructions)
-                        temp_code.emit(0);
-                        temp_code.emit(0);
                     }
-                    Inst::Jump { .. } => {
-                        temp_code.emit(0); // placeholder
-                    }
-                    Inst::Return { .. } => {
-                        temp_code.emit(0); // placeholder
-                    }
-                    Inst::Halt => {
-                        temp_code.emit(0); // placeholder
-                    }
-                    _ => {
-                        temp_code.emit(0); // placeholder
-                    }
+                    _ => {}
+                }
+                // Emit placeholder bytes
+                for _ in 0..size {
+                    temp_code.emit(0);
                 }
             }
         }
 
+        block_starts
+    }
+
+    /// Lower a function to RISC-V 32-bit code.
+    pub fn lower_function(&mut self, func: &Function) -> CodeBuffer {
+        let mut code = CodeBuffer::new();
+        self.regalloc.clear();
+
+        // Two-pass approach: first pass to compute block addresses, second pass to emit code
+        // First pass: compute block start addresses
+        let mut block_starts = Self::compute_block_addresses(func);
+
         // Second pass: emit actual code with correct jump offsets
         self.regalloc.clear();
         if let Some(entry_block) = func.blocks.first() {
-            for (i, param) in entry_block.params.iter().enumerate() {
-                let arg_reg = match i {
-                    0 => Gpr::A0,
-                    1 => Gpr::A1,
-                    2 => Gpr::A2,
-                    3 => Gpr::A3,
-                    4 => Gpr::A4,
-                    5 => Gpr::A5,
-                    6 => Gpr::A6,
-                    7 => Gpr::A7,
-                    _ => break,
-                };
-                self.regalloc.map_value_to_register(*param, arg_reg);
-            }
+            Self::map_parameters_to_registers(&mut self.regalloc, entry_block);
         }
 
         for (block_idx, block) in func.blocks.iter().enumerate() {
@@ -444,8 +430,9 @@ impl Lowerer {
         current_block: usize,
         block_starts: &[usize],
     ) {
-        // If jumping to the same block, emit a halt loop
-        // jal zero, 0 jumps to itself (PC + 0 = same instruction)
+        // If jumping to the same block, emit an infinite loop (halt behavior).
+        // This is intentional: `jal zero, 0` jumps to itself, creating a halt loop.
+        // This is used for functions that should never return (e.g., main loops).
         if target_block == current_block {
             code.emit(riscv32_encoder::jal(Gpr::ZERO, 0));
             return;
@@ -502,7 +489,6 @@ impl Default for Lowerer {
             module: None,
             function_addresses: BTreeMap::new(),
             relocations: Vec::new(),
-            current_function_start: 0,
         }
     }
 }
@@ -544,5 +530,204 @@ mod tests {
 
         // Should have at least an add instruction
         assert!(code.instruction_count() > 0);
+    }
+
+    #[test]
+    fn test_lower_syscall_small_number() {
+        let sig = Signature::new(vec![Type::I32], vec![]);
+        let mut func = Function::new(sig);
+        let mut block = Block::new();
+
+        let arg = Value::new(0);
+        block.params.push(arg);
+        block.push_inst(Inst::Syscall {
+            number: 42,
+            args: vec![arg],
+        });
+        block.push_inst(Inst::Halt);
+
+        func.add_block(block);
+
+        let mut lowerer = Lowerer::new();
+        let code = lowerer.lower_function(&func);
+
+        // Should have: arg is already in a0 (no move needed), addi a7, ecall, ebreak
+        // Or: move arg to a0, addi a7, ecall, ebreak
+        // Minimum: addi a7, ecall, ebreak = 3 instructions
+        assert!(code.instruction_count() >= 3);
+    }
+
+    #[test]
+    fn test_lower_syscall_large_number() {
+        let sig = Signature::new(vec![Type::I32], vec![]);
+        let mut func = Function::new(sig);
+        let mut block = Block::new();
+
+        let arg = Value::new(0);
+        block.params.push(arg);
+        // Use a large syscall number that requires lui + addi
+        block.push_inst(Inst::Syscall {
+            number: 0x12345,
+            args: vec![arg],
+        });
+        block.push_inst(Inst::Halt);
+
+        func.add_block(block);
+
+        let mut lowerer = Lowerer::new();
+        let code = lowerer.lower_function(&func);
+
+        // Should have: arg is already in a0 (no move needed), lui a7, addi a7, ecall, ebreak
+        // Or: move arg to a0, lui a7, addi a7, ecall, ebreak
+        // Minimum: lui a7, addi a7, ecall, ebreak = 4 instructions
+        assert!(code.instruction_count() >= 4);
+    }
+
+    #[test]
+    fn test_lower_halt() {
+        let sig = Signature::empty();
+        let mut func = Function::new(sig);
+        let mut block = Block::new();
+
+        block.push_inst(Inst::Halt);
+
+        func.add_block(block);
+
+        let mut lowerer = Lowerer::new();
+        let code = lowerer.lower_function(&func);
+
+        // Should have exactly one instruction: ebreak
+        assert_eq!(code.instruction_count(), 1);
+        // Verify it's ebreak (0x00100073)
+        let bytes = code.as_bytes();
+        assert_eq!(bytes.len(), 4);
+        let inst = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        assert_eq!(inst, 0x00100073);
+    }
+
+    #[test]
+    fn test_lower_jump_forward() {
+        let sig = Signature::empty();
+        let mut func = Function::new(sig);
+
+        // Block 0: jump to block 1
+        let mut block0 = Block::new();
+        block0.push_inst(Inst::Jump { target: 1 });
+        func.add_block(block0);
+
+        // Block 1: halt
+        let mut block1 = Block::new();
+        block1.push_inst(Inst::Halt);
+        func.add_block(block1);
+
+        let mut lowerer = Lowerer::new();
+        let code = lowerer.lower_function(&func);
+
+        // Should have at least 2 instructions: jal + ebreak
+        assert!(code.instruction_count() >= 2);
+    }
+
+    #[test]
+    fn test_lower_jump_same_block() {
+        let sig = Signature::empty();
+        let mut func = Function::new(sig);
+
+        // Block that jumps to itself (infinite loop)
+        let mut block = Block::new();
+        block.push_inst(Inst::Jump { target: 0 });
+        func.add_block(block);
+
+        let mut lowerer = Lowerer::new();
+        let code = lowerer.lower_function(&func);
+
+        // Should have jal zero, 0 (infinite loop)
+        assert!(code.instruction_count() >= 1);
+        let bytes = code.as_bytes();
+        assert!(bytes.len() >= 4);
+    }
+
+    #[test]
+    fn test_relocation_recording() {
+        let sig = Signature::new(vec![Type::I32], vec![Type::I32]);
+        let mut func = Function::new(sig);
+        let mut block = Block::new();
+
+        let arg = Value::new(0);
+        let result = Value::new(1);
+        block.params.push(arg);
+        block.push_inst(Inst::Call {
+            callee: alloc::string::String::from("other_func"),
+            args: vec![arg],
+            results: vec![result],
+        });
+        block.push_inst(Inst::Return {
+            values: vec![result],
+        });
+
+        func.add_block(block);
+
+        let mut lowerer = Lowerer::new();
+        let _code = lowerer.lower_function(&func);
+
+        // Should have recorded a relocation
+        let relocations = lowerer.relocations();
+        assert_eq!(relocations.len(), 1);
+        assert_eq!(relocations[0].callee, "other_func");
+    }
+
+    #[test]
+    fn test_compute_block_addresses() {
+        let sig = Signature::empty();
+        let mut func = Function::new(sig);
+
+        // Block 0: iconst + jump
+        let mut block0 = Block::new();
+        let v = Value::new(0);
+        block0.push_inst(Inst::Iconst {
+            result: v,
+            value: 42,
+        });
+        block0.push_inst(Inst::Jump { target: 1 });
+        func.add_block(block0);
+
+        // Block 1: halt
+        let mut block1 = Block::new();
+        block1.push_inst(Inst::Halt);
+        func.add_block(block1);
+
+        let block_starts = Lowerer::compute_block_addresses(&func);
+
+        // Should have 2 block starts
+        assert_eq!(block_starts.len(), 2);
+        // Block 0 should start at 0
+        assert_eq!(block_starts[0], 0);
+        // Block 1 should start after block 0's instructions
+        assert!(block_starts[1] > block_starts[0]);
+    }
+
+    #[test]
+    fn test_map_parameters_to_registers() {
+        let sig = Signature::new(vec![Type::I32, Type::I32, Type::I32], vec![Type::I32]);
+        let mut func = Function::new(sig);
+        let mut block = Block::new();
+
+        let p0 = Value::new(0);
+        let p1 = Value::new(1);
+        let p2 = Value::new(2);
+        block.params.push(p0);
+        block.params.push(p1);
+        block.params.push(p2);
+
+        func.add_block(block);
+
+        let mut regalloc = SimpleRegAllocator::new();
+        if let Some(entry_block) = func.blocks.first() {
+            Lowerer::map_parameters_to_registers(&mut regalloc, entry_block);
+        }
+
+        // Parameters should be mapped to a0, a1, a2
+        assert_eq!(regalloc.get(p0).unwrap().num(), 10); // a0
+        assert_eq!(regalloc.get(p1).unwrap().num(), 11); // a1
+        assert_eq!(regalloc.get(p2).unwrap().num(), 12); // a2
     }
 }
