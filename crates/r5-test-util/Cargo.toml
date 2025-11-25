@@ -1,0 +1,16 @@
+[package]
+name = "r5-test-util"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Test utility for R5 compiler infrastructure"
+
+[lib]
+
+[dependencies]
+r5-ir = { path = "../r5-ir" }
+r5-builder = { path = "../r5-builder" }
+r5-target-riscv32 = { path = "../r5-target-riscv32" }
+riscv32-encoder = { path = "../riscv32-encoder" }
+embive = { path = "/Users/yona/dev/opensource/embive", default-features = false, features = ["transpiler", "interpreter"] }
+

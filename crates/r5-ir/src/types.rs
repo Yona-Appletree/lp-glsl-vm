@@ -1,5 +1,7 @@
 //! Type system for the IR.
 
+use core::fmt;
+
 /// A type in the IR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Type {
@@ -32,6 +34,17 @@ impl Type {
     /// Check if this is a floating point type.
     pub fn is_float(&self) -> bool {
         matches!(self, Type::F32 | Type::F64)
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Type::I32 => write!(f, "i32"),
+            Type::I64 => write!(f, "i64"),
+            Type::F32 => write!(f, "f32"),
+            Type::F64 => write!(f, "f64"),
+        }
     }
 }
 

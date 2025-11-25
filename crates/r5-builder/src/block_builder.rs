@@ -1,5 +1,7 @@
 //! Block builder.
 
+use alloc::{string::String, vec::Vec};
+
 use r5_ir::{Inst, Type, Value};
 
 use crate::function_builder::FunctionBuilder;
@@ -147,5 +149,14 @@ impl<'a> BlockBuilder<'a> {
     /// Store to memory: mem[address] = value
     pub fn store(&mut self, address: Value, value: Value, ty: Type) {
         self.push_inst(Inst::Store { address, value, ty });
+    }
+
+    /// Function call: results = callee(args...)
+    pub fn call(&mut self, callee: String, args: Vec<Value>, results: Vec<Value>) {
+        self.push_inst(Inst::Call {
+            callee,
+            args,
+            results,
+        });
     }
 }

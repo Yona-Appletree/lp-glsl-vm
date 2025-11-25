@@ -1,6 +1,7 @@
 //! Functions.
 
-use alloc::vec::Vec;
+use alloc::{format, string::String, vec::Vec};
+use core::fmt;
 
 use crate::{block::Block, signature::Signature};
 
@@ -10,12 +11,15 @@ use crate::{block::Block, signature::Signature};
 /// - A signature (parameters and return types)
 /// - A list of basic blocks
 /// - An entry block (the first block)
+/// - An optional name (for debugging and module lookup)
 #[derive(Debug, Clone)]
 pub struct Function {
     /// Function signature.
     pub signature: Signature,
     /// Basic blocks in this function.
     pub blocks: Vec<Block>,
+    /// Optional function name (for debugging and module lookup).
+    pub name: Option<String>,
 }
 
 impl Function {
@@ -24,7 +28,27 @@ impl Function {
         Self {
             signature,
             blocks: Vec::new(),
+            name: None,
         }
+    }
+
+    /// Create a new function with a name.
+    pub fn with_name(signature: Signature, name: String) -> Self {
+        Self {
+            signature,
+            blocks: Vec::new(),
+            name: Some(name),
+        }
+    }
+
+    /// Set the function name.
+    pub fn set_name(&mut self, name: String) {
+        self.name = Some(name);
+    }
+
+    /// Get the function name.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 
     /// Add a block to this function.
@@ -57,6 +81,48 @@ impl Function {
     /// Get the number of blocks in this function.
     pub fn block_count(&self) -> usize {
         self.blocks.len()
+    }
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Function name (if any)
+        if let Some(name) = &self.name {
+            write!(f, "function @{}", name)?;
+        } else {
+            write!(f, "function")?;
+        }
+
+        // Signature
+        write!(f, "(")?;
+        for (i, param_ty) in self.signature.params.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", param_ty)?;
+        }
+        write!(f, ")")?;
+
+        if !self.signature.returns.is_empty() {
+            write!(f, " -> ")?;
+            for (i, ret_ty) in self.signature.returns.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", ret_ty)?;
+            }
+        }
+
+        writeln!(f, " {{")?;
+
+        // Print each block
+        for (i, block) in self.blocks.iter().enumerate() {
+            writeln!(f, "block{}:", i)?;
+            write!(f, "{}", block)?;
+        }
+
+        writeln!(f, "}}")?;
+        Ok(())
     }
 }
 

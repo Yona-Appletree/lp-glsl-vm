@@ -1,6 +1,7 @@
 //! Basic blocks.
 
 use alloc::vec::Vec;
+use core::fmt;
 
 use crate::{inst::Inst, value::Value};
 
@@ -53,6 +54,29 @@ impl Block {
 impl Default for Block {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl fmt::Display for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Show block parameters (phi nodes) if any
+        if !self.params.is_empty() {
+            write!(f, "  params: ")?;
+            for (i, param) in self.params.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "%{}", param.index())?;
+            }
+            writeln!(f)?;
+        }
+
+        // Show instructions
+        for inst in &self.insts {
+            writeln!(f, "    {}", inst)?;
+        }
+
+        Ok(())
     }
 }
 

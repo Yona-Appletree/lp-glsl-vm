@@ -68,6 +68,16 @@ impl SimpleRegAllocator {
         self.value_to_reg.get(&value).copied()
     }
 
+    /// Check if a value is already mapped to a register.
+    pub fn is_mapped(&self, value: Value) -> bool {
+        self.value_to_reg.contains_key(&value)
+    }
+
+    /// Map a value to a specific register (for function parameters).
+    pub fn map_value_to_register(&mut self, value: Value, reg: Gpr) {
+        self.value_to_reg.insert(value, reg);
+    }
+
     /// Clear all allocations.
     pub fn clear(&mut self) {
         self.value_to_reg.clear();

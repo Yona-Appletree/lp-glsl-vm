@@ -8,6 +8,7 @@ members = [
     "crates/r5-builder",
     "crates/r5-target-riscv32",
     "crates/riscv-shared",
+    "crates/r5-test-util",
 ]
 # Exclude RISC-V-only crates and apps from default builds
 default-members = [

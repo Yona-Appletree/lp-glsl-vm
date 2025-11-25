@@ -1,6 +1,8 @@
 //! Lower IR to RISC-V 32-bit instructions.
 
-use r5_ir::{Function, Inst, Value};
+use alloc::{collections::BTreeMap, string::String};
+
+use r5_ir::{Function, Inst, Module, Value};
 use riscv32_encoder::{self, Gpr};
 
 use crate::{emit::CodeBuffer, regalloc::SimpleRegAllocator};
@@ -8,6 +10,10 @@ use crate::{emit::CodeBuffer, regalloc::SimpleRegAllocator};
 /// Lower IR to RISC-V 32-bit code.
 pub struct Lowerer {
     regalloc: SimpleRegAllocator,
+    /// Module context for function calls (optional).
+    module: Option<Module>,
+    /// Function addresses (for call relocations).
+    function_addresses: BTreeMap<String, u32>,
 }
 
 impl Lowerer {
@@ -15,7 +21,19 @@ impl Lowerer {
     pub fn new() -> Self {
         Self {
             regalloc: SimpleRegAllocator::new(),
+            module: None,
+            function_addresses: alloc::collections::BTreeMap::new(),
         }
+    }
+
+    /// Set the module context for function calls.
+    pub fn set_module(&mut self, module: Module) {
+        self.module = Some(module);
+    }
+
+    /// Set a function address for call relocations.
+    pub fn set_function_address(&mut self, name: String, address: u32) {
+        self.function_addresses.insert(name, address);
     }
 
     /// Lower a function to RISC-V 32-bit code.
@@ -23,12 +41,34 @@ impl Lowerer {
         let mut code = CodeBuffer::new();
         self.regalloc.clear();
 
+        // Map function parameters to argument registers (a0-a7)
+        // The entry block's parameters correspond to function parameters
+        if let Some(entry_block) = func.blocks.first() {
+            for (i, param) in entry_block.params.iter().enumerate() {
+                let arg_reg = match i {
+                    0 => Gpr::A0,
+                    1 => Gpr::A1,
+                    2 => Gpr::A2,
+                    3 => Gpr::A3,
+                    4 => Gpr::A4,
+                    5 => Gpr::A5,
+                    6 => Gpr::A6,
+                    7 => Gpr::A7,
+                    _ => break, // More than 8 parameters not supported yet
+                };
+                // Map the parameter value to the argument register
+                self.regalloc.map_value_to_register(*param, arg_reg);
+            }
+        }
+
         // For now, just lower each instruction in order
         // TODO: Handle basic blocks, control flow, etc.
         for block in &func.blocks {
-            // Handle block parameters (phi nodes) - for now, just allocate registers
+            // Handle block parameters (phi nodes) - allocate registers if not already mapped
             for param in &block.params {
-                self.regalloc.allocate(*param);
+                if !self.regalloc.is_mapped(*param) {
+                    self.regalloc.allocate(*param);
+                }
             }
 
             // Lower each instruction
@@ -54,6 +94,13 @@ impl Lowerer {
             }
             Inst::Iconst { result, value } => {
                 self.lower_iconst(code, *result, *value);
+            }
+            Inst::Call {
+                callee,
+                args,
+                results,
+            } => {
+                self.lower_call(code, callee, args, results);
             }
             Inst::Return { values } => {
                 self.lower_return(code, values);
@@ -121,6 +168,68 @@ impl Lowerer {
         code.emit(riscv32_encoder::lui(reg_result, imm_hi << 12));
         if imm_lo_signed != 0 {
             code.emit(riscv32_encoder::addi(reg_result, reg_result, imm_lo_signed));
+        }
+    }
+
+    /// Lower `call` instruction: results = callee(args...)
+    fn lower_call(
+        &mut self,
+        code: &mut CodeBuffer,
+        _callee: &str,
+        args: &[Value],
+        results: &[Value],
+    ) {
+        // Save caller-saved registers if needed (for now, assume we don't need to)
+        // TODO: Implement proper caller-saved register handling
+
+        // Set up arguments in a0-a7
+        for (i, arg) in args.iter().take(8).enumerate() {
+            let arg_reg = match i {
+                0 => Gpr::A0,
+                1 => Gpr::A1,
+                2 => Gpr::A2,
+                3 => Gpr::A3,
+                4 => Gpr::A4,
+                5 => Gpr::A5,
+                6 => Gpr::A6,
+                7 => Gpr::A7,
+                _ => break,
+            };
+
+            // Get the register for the argument value
+            let arg_value_reg = self.regalloc.get(*arg).unwrap_or_else(|| {
+                // If not allocated, allocate it now
+                self.regalloc.allocate(*arg)
+            });
+
+            // Move argument to the appropriate argument register
+            if arg_value_reg.num() != arg_reg.num() {
+                code.emit(riscv32_encoder::add(arg_reg, arg_value_reg, Gpr::ZERO));
+            }
+        }
+
+        // Call the function
+        // For now, we'll use a placeholder that needs to be fixed up
+        // We'll emit jal ra, offset where offset will be calculated during linking
+        let call_offset = 0; // Placeholder - will be fixed up
+        code.emit(riscv32_encoder::jal(Gpr::RA, call_offset));
+
+        // Get return value(s) from a0, a1, etc.
+        for (i, result) in results.iter().enumerate() {
+            let ret_reg = match i {
+                0 => Gpr::A0,
+                1 => Gpr::A1,
+                2 => Gpr::A2,
+                3 => Gpr::A3,
+                4 => Gpr::A4,
+                5 => Gpr::A5,
+                6 => Gpr::A6,
+                7 => Gpr::A7,
+                _ => break,
+            };
+
+            // Map the result value to the return register
+            self.regalloc.map_value_to_register(*result, ret_reg);
         }
     }
 

@@ -123,6 +123,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "r5-test-util"
+version = "0.1.0"
+dependencies = [
+ "embive 0.6.0",
+ "r5-builder",
+ "r5-ir",
+ "r5-target-riscv32",
+ "riscv32-encoder",
+]
+
+[[package]]
 name = "riscv-shared"
 version = "0.1.0"
 dependencies = [

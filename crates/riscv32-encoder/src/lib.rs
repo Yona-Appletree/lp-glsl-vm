@@ -5,8 +5,12 @@
 
 #![no_std]
 
+extern crate alloc;
+
+mod disasm;
 mod encode;
 mod regs;
 
+pub use disasm::{disassemble_code, disassemble_instruction};
 pub use encode::*;
 pub use regs::Gpr;

@@ -182,6 +182,14 @@ pub fn auipc(rd: Gpr, imm: u32) -> u32 {
     encode_u(0x17, rd, imm)
 }
 
+// System instructions
+
+/// ECALL: Environment call (syscall)
+/// Encoding: opcode=0x73, funct3=0, rs1=0, rd=0, imm=0
+pub fn ecall() -> u32 {
+    0x00000073
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

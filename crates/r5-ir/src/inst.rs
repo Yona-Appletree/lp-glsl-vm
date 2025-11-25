@@ -1,6 +1,7 @@
 //! IR instructions.
 
-use alloc::{vec, vec::Vec};
+use alloc::{string::String, vec, vec::Vec};
+use core::fmt;
 
 use crate::{types::Type, value::Value};
 
@@ -93,6 +94,15 @@ pub enum Inst {
         target_true: u32,
         target_false: u32,
     },
+    /// Function call: results = callee(args...)
+    Call {
+        /// Function name to call (must exist in module)
+        callee: String,
+        /// Argument values
+        args: Vec<Value>,
+        /// Result values (SSA)
+        results: Vec<Value>,
+    },
     /// Return with values
     Return { values: Vec<Value> },
 
@@ -129,6 +139,7 @@ impl Inst {
             | Inst::Iconst { result, .. }
             | Inst::Fconst { result, .. }
             | Inst::Load { result, .. } => vec![*result],
+            Inst::Call { results, .. } => results.clone(),
             Inst::Jump { .. } | Inst::Br { .. } | Inst::Store { .. } => Vec::new(),
             Inst::Return { values } => values.clone(),
         }
@@ -150,9 +161,113 @@ impl Inst {
             | Inst::IcmpGe { arg1, arg2, .. } => vec![*arg1, *arg2],
             Inst::Iconst { .. } | Inst::Fconst { .. } | Inst::Jump { .. } => Vec::new(),
             Inst::Br { condition, .. } => vec![*condition],
+            Inst::Call { args, .. } => args.clone(),
             Inst::Return { values } => values.clone(),
             Inst::Load { address, .. } => vec![*address],
             Inst::Store { address, value, .. } => vec![*address, *value],
+        }
+    }
+}
+
+impl fmt::Display for Inst {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Inst::Iadd { result, arg1, arg2 } => {
+                write!(f, "%{} = iadd %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::Isub { result, arg1, arg2 } => {
+                write!(f, "%{} = isub %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::Imul { result, arg1, arg2 } => {
+                write!(f, "%{} = imul %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::Idiv { result, arg1, arg2 } => {
+                write!(f, "%{} = idiv %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::Irem { result, arg1, arg2 } => {
+                write!(f, "%{} = irem %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::IcmpEq { result, arg1, arg2 } => {
+                write!(f, "%{} = icmp_eq %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::IcmpNe { result, arg1, arg2 } => {
+                write!(f, "%{} = icmp_ne %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::IcmpLt { result, arg1, arg2 } => {
+                write!(f, "%{} = icmp_lt %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::IcmpLe { result, arg1, arg2 } => {
+                write!(f, "%{} = icmp_le %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::IcmpGt { result, arg1, arg2 } => {
+                write!(f, "%{} = icmp_gt %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::IcmpGe { result, arg1, arg2 } => {
+                write!(f, "%{} = icmp_ge %{}, %{}", result.index(), arg1.index(), arg2.index())
+            }
+            Inst::Iconst { result, value } => {
+                write!(f, "%{} = iconst {}", result.index(), value)
+            }
+            Inst::Fconst { result, value_bits } => {
+                // Decode f64 from bits
+                let f64_value = f64::from_bits(*value_bits);
+                write!(f, "%{} = fconst {}", result.index(), f64_value)
+            }
+            Inst::Jump { target } => {
+                write!(f, "jump block{}", target)
+            }
+            Inst::Br {
+                condition,
+                target_true,
+                target_false,
+            } => {
+                write!(
+                    f,
+                    "br %{}, block{}, block{}",
+                    condition.index(),
+                    target_true,
+                    target_false
+                )
+            }
+            Inst::Call { callee, args, results } => {
+                write!(f, "call @{}(", callee)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "%{}", arg.index())?;
+                }
+                write!(f, ")")?;
+                if !results.is_empty() {
+                    write!(f, " -> ")?;
+                    for (i, res) in results.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "%{}", res.index())?;
+                    }
+                }
+                Ok(())
+            }
+            Inst::Return { values } => {
+                write!(f, "return")?;
+                if !values.is_empty() {
+                    write!(f, " ")?;
+                    for (i, val) in values.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "%{}", val.index())?;
+                    }
+                }
+                Ok(())
+            }
+            Inst::Load { result, address, ty } => {
+                write!(f, "%{} = load {} %{}", result.index(), ty, address.index())
+            }
+            Inst::Store { address, value, ty } => {
+                write!(f, "store {} %{}, %{}", ty, address.index(), value.index())
+            }
         }
     }
 }
