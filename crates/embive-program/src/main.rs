@@ -42,20 +42,22 @@ fn interrupt_handler(_value: i32) {
 }
 
 /// Simple program that adds two numbers using a syscall
-/// Syscall 1: Add two numbers (args[0] + args[1])
+/// Syscall 1000: Add two numbers (args[0] + args[1])
+/// Syscall 0: Done - signals completion with result value
 #[no_mangle]
 pub extern "Rust" fn main() {
-    // Test with a simple static string first
     println!("[guest] Hello!");
     
-    // System Call 1: Add two numbers (5 + 10 = 15)
-    let result = syscall(1, &[5, 10, 0, 0, 0, 0, 0]);
+    // System Call 1000: Add two numbers (5 + 10 = 15)
+    let result = syscall(1000, &[5, 10, 0, 0, 0, 0, 0]);
     
     if let Ok(value) = result {
         RESULT.store(value, Ordering::SeqCst);
         println!("[guest] The result is: {}", value);
     }
-
+    
+    // Signal completion with result 42
+    let _ = syscall(0, &[42, 0, 0, 0, 0, 0, 0]);
     
     // Exit
     ebreak()
