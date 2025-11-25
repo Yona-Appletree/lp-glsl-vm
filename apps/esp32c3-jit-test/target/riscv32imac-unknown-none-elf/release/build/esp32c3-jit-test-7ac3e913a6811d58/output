@@ -1,0 +1,2 @@
+cargo:rustc-link-arg=-Tdefmt.x
+cargo:rustc-link-arg=-Tlinkall.x

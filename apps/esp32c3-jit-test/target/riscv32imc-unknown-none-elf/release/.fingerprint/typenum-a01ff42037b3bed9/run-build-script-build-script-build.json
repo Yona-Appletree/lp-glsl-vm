@@ -1,0 +1,1 @@
+{"rustc":13024827784998065198,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[857979250431893282,"build_script_build",false,11681064385490516783]],"local":[{"RerunIfChanged":{"output":"riscv32imc-unknown-none-elf/release/build/typenum-a01ff42037b3bed9/output","paths":["tests"]}}],"rustflags":[],"config":0,"compile_kind":0}

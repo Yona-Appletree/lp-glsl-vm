@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use r5_ir::{Block, Function, Signature, Type, Value};
+use r5_ir::{Block, Function, Signature, Value};
 
 use crate::{block_builder::BlockBuilder, ssa::SSABuilder};
 

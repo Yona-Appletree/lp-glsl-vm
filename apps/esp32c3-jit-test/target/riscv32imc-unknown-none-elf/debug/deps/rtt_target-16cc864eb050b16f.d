@@ -1,0 +1,10 @@
+/Users/yona/dev/photomancer/lp-glsl-vm/apps/esp32c3-jit-test/target/riscv32imc-unknown-none-elf/debug/deps/rtt_target-16cc864eb050b16f.d: /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/lib.rs /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/debug.rs /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/defmt.rs /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/rtt.rs /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/init.rs /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/print.rs
+
+/Users/yona/dev/photomancer/lp-glsl-vm/apps/esp32c3-jit-test/target/riscv32imc-unknown-none-elf/debug/deps/librtt_target-16cc864eb050b16f.rmeta: /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/lib.rs /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/debug.rs /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/defmt.rs /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/rtt.rs /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/init.rs /Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/print.rs
+
+/Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/lib.rs:
+/Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/debug.rs:
+/Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/defmt.rs:
+/Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/rtt.rs:
+/Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/init.rs:
+/Users/yona/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rtt-target-0.6.2/src/print.rs:

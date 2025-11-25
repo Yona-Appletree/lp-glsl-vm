@@ -1,0 +1,4 @@
+cargo:rustc-link-search=/Users/yona/dev/photomancer/lp-glsl-vm/apps/esp32c3-jit-test/target/riscv32imc-unknown-none-elf/release/build/defmt-e50b72d930a7fd27/out
+cargo:rustc-cfg=no_cas
+cargo:rustc-check-cfg=cfg(c_variadic)
+cargo:rustc-check-cfg=cfg(no_cas)

@@ -128,7 +128,6 @@ impl<'a> BlockBuilder<'a> {
 
     /// Return with values.
     pub fn return_(&mut self, values: &[Value]) {
-        use alloc::vec::Vec;
         self.push_inst(Inst::Return {
             values: values.to_vec(),
         });

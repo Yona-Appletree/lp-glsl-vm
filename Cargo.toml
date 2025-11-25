@@ -7,10 +7,15 @@ members = [
     "crates/r5-ir",
     "crates/r5-builder",
     "crates/r5-target-riscv32",
+    "crates/riscv-shared",
 ]
-# Exclude RISC-V-only crates from default builds
+# Exclude RISC-V-only crates and apps from default builds
 default-members = [
     "crates/lp-glsl-vm",
+]
+# Exclude ESP32-C3 app (has different dependencies)
+exclude = [
+    "apps/esp32c3-jit-test",
 ]
 resolver = "2"
 

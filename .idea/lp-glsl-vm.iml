@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="EMPTY_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/cranelift-jit-no-std/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/embive-program/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/embive-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lp-glsl-vm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lp-glsl-vm/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/r5-builder/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/r5-ir/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/r5-target-riscv32/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/riscv-shared/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/riscv32-codegen/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/riscv32-encoder/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>

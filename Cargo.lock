@@ -37,9 +37,7 @@ dependencies = [
  "elf",
  "embive 0.6.0",
  "embive-runtime",
- "r5-builder",
- "r5-ir",
- "r5-target-riscv32",
+ "riscv-shared",
 ]
 
 [[package]]
@@ -122,6 +120,15 @@ version = "0.1.0"
 dependencies = [
  "r5-ir",
  "riscv32-encoder",
+]
+
+[[package]]
+name = "riscv-shared"
+version = "0.1.0"
+dependencies = [
+ "r5-builder",
+ "r5-ir",
+ "r5-target-riscv32",
 ]
 
 [[package]]
