@@ -11,6 +11,8 @@ test = false
 
 [dependencies]
 embive-runtime = { path = "../embive-runtime" }
+embive = { path = "/Users/yona/dev/opensource/embive", default-features = false, features = ["transpiler"] }
+elf = { version = "0.8.0", default-features = false }
 
 [build-dependencies]
 

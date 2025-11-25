@@ -16,5 +16,5 @@ fn test_glsl_parser() {
     let translation_unit = result.unwrap();
     // TranslationUnit contains a NonEmpty<ExternalDeclaration>, which always has at least one element
     // NonEmpty wraps a Vec, so we access it via .0
-    assert!(translation_unit.0.0.len() > 0, "Translation unit should not be empty");
+    assert!(!translation_unit.0.0.is_empty(), "Translation unit should not be empty");
 }

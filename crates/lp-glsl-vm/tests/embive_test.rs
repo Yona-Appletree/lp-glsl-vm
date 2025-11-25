@@ -44,7 +44,7 @@ fn run_embive_test() -> Result<(), String> {
     // Build the program (cargo handles dependency tracking automatically)
     // If embive-program or embive-runtime changes, cargo will rebuild automatically
     let output = std::process::Command::new("cargo")
-        .args(&["build", "--package", "embive-program", "--target", "riscv32imac-unknown-none-elf"])
+        .args(["build", "--package", "embive-program", "--target", "riscv32imac-unknown-none-elf"])
         .current_dir(workspace_root)
         .output()
         .map_err(|e| format!("Failed to build embive-program: {}", e))?;
@@ -70,7 +70,7 @@ fn run_embive_test() -> Result<(), String> {
     vm.load(&elf_data)?;
     vm.run()?;
 
-    // Verify result
-    assert_eq!(vm.last_result(), Some(42));
+    // Verify JIT result (5 + 10 = 15)
+    assert_eq!(vm.last_result(), Some(15), "JIT experiment should return 15 (5 + 10)");
     Ok(())
 }

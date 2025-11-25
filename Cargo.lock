@@ -17,6 +17,13 @@ checksum = "55dd888a213fc57e957abf2aa305ee3e8a28dbe05687a251f33b637cd46b0070"
 [[package]]
 name = "embive"
 version = "0.6.0"
+dependencies = [
+ "elf",
+]
+
+[[package]]
+name = "embive"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7fa78e8d76d48d17c015b78967d710b9dbf6c111bb03b6c846f22f935d5f075"
 dependencies = [
@@ -27,6 +34,8 @@ dependencies = [
 name = "embive-program"
 version = "0.1.0"
 dependencies = [
+ "elf",
+ "embive 0.6.0",
  "embive-runtime",
 ]
 
@@ -67,7 +76,7 @@ dependencies = [
 name = "lp-glsl-vm"
 version = "0.1.0"
 dependencies = [
- "embive",
+ "embive 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "glsl",
 ]
 
