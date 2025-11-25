@@ -9,11 +9,23 @@ use embive::{
     transpiler::transpile_elf,
 };
 
+/// Panic information from guest code
+#[derive(Debug, Clone)]
+pub struct PanicInfo {
+    /// Panic message
+    pub message: String,
+    /// File where panic occurred (if available)
+    pub file: Option<String>,
+    /// Line number where panic occurred (if available)
+    pub line: Option<u32>,
+}
+
 /// RISC-V VM for running embive programs
 pub struct R5Vm {
     code_vec: Vec<u8>,
     ram: Vec<u8>,
     last_result: Option<i32>,
+    panic_info: Option<PanicInfo>,
 }
 
 impl R5Vm {
@@ -23,6 +35,7 @@ impl R5Vm {
             code_vec: Vec::new(),
             ram: vec![0u8; ram_size],
             last_result: None,
+            panic_info: None,
         }
     }
 
@@ -77,6 +90,9 @@ impl R5Vm {
         let mut interpreter = Interpreter::new(&mut memory, 0);
         interpreter.program_counter = 0;
 
+        // Capture panic_info for panic syscall handling
+        let panic_info = &mut self.panic_info;
+
         // Syscall handler - inline the logic from handle_syscall
         let mut syscall = |nr: i32,
                            args: &[i32; SYSCALL_ARGS],
@@ -87,6 +103,81 @@ impl R5Vm {
                     // Syscall 0: Done - store result
                     *last_result = Some(args[0]);
                     Ok(Ok(0))
+                }
+                1 => {
+                    // Syscall 1: Panic - store panic information
+                    let msg_ptr = args[0] as u32;
+                    let msg_len = args[1] as usize;
+                    let file_ptr = args[2] as u32;
+                    let file_len = args[3] as usize;
+                    let line = args[4] as u32;
+
+                    // Read panic message from guest memory
+                    let msg = if msg_len > 0 {
+                        let mut buf = vec![0u8; msg_len];
+                        unsafe {
+                            if msg_ptr < RAM_OFFSET {
+                                let offset = msg_ptr as usize;
+                                if offset + msg_len <= code_vec_len {
+                                    core::ptr::copy_nonoverlapping(
+                                        code_vec_ptr.add(offset),
+                                        buf.as_mut_ptr(),
+                                        msg_len,
+                                    );
+                                }
+                            } else {
+                                let offset = (msg_ptr - RAM_OFFSET) as usize;
+                                if offset + msg_len <= ram_len {
+                                    core::ptr::copy_nonoverlapping(
+                                        ram_ptr.add(offset),
+                                        buf.as_mut_ptr(),
+                                        msg_len,
+                                    );
+                                }
+                            }
+                        }
+                        String::from_utf8_lossy(&buf).to_string()
+                    } else {
+                        "panic occurred".to_string()
+                    };
+
+                    // Read file name if available
+                    let file = if file_len > 0 {
+                        let mut buf = vec![0u8; file_len];
+                        unsafe {
+                            if file_ptr < RAM_OFFSET {
+                                let offset = file_ptr as usize;
+                                if offset + file_len <= code_vec_len {
+                                    core::ptr::copy_nonoverlapping(
+                                        code_vec_ptr.add(offset),
+                                        buf.as_mut_ptr(),
+                                        file_len,
+                                    );
+                                }
+                            } else {
+                                let offset = (file_ptr - RAM_OFFSET) as usize;
+                                if offset + file_len <= ram_len {
+                                    core::ptr::copy_nonoverlapping(
+                                        ram_ptr.add(offset),
+                                        buf.as_mut_ptr(),
+                                        file_len,
+                                    );
+                                }
+                            }
+                        }
+                        Some(String::from_utf8_lossy(&buf).to_string())
+                    } else {
+                        None
+                    };
+
+                    *panic_info = Some(PanicInfo {
+                        message: msg,
+                        file,
+                        line: if line > 0 { Some(line) } else { None },
+                    });
+
+                    // Return error to indicate panic
+                    Ok(Err(NonZeroI32::new(1).unwrap()))
                 }
                 2 => {
                     // Syscall 2: Write string to host
@@ -159,12 +250,30 @@ impl R5Vm {
             }
         }
 
+        // Check if panic occurred
+        if self.panic_info.is_some() {
+            return Err(format!(
+                "Guest panic: {:?}",
+                self.panic_info.as_ref().unwrap()
+            ));
+        }
+
         Ok(())
     }
 
     /// Get the last result from syscall 0 (done)
     pub fn last_result(&self) -> Option<i32> {
         self.last_result
+    }
+
+    /// Check if a panic occurred during execution
+    pub fn has_panic(&self) -> bool {
+        self.panic_info.is_some()
+    }
+
+    /// Get panic information if a panic occurred
+    pub fn panic_info(&self) -> Option<&PanicInfo> {
+        self.panic_info.as_ref()
     }
 
     /// Handle a syscall from the guest program

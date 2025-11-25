@@ -23,6 +23,11 @@ pub use print::_print;
 /// Number of syscall arguments
 pub const SYSCALL_ARGS: usize = 7;
 
+/// Syscall numbers
+pub const SYSCALL_DONE: i32 = 0;
+pub const SYSCALL_PANIC: i32 = 1;
+pub const SYSCALL_WRITE: i32 = 2;
+
 // Critical section implementation
 struct EmbiveCriticalSection;
 set_impl!(EmbiveCriticalSection);
@@ -81,6 +86,34 @@ pub fn wfi() {
     unsafe {
         asm!("wfi", options(nostack));
     }
+}
+
+/// Report a panic to the host VM
+///
+/// This should be called from the panic handler before ebreak.
+/// args[0] = panic message pointer (as i32)
+/// args[1] = panic message length
+/// args[2] = file pointer (as i32, 0 if unavailable)
+/// args[3] = file length
+/// args[4] = line number (0 if unavailable)
+pub fn panic_syscall(
+    msg_ptr: *const u8,
+    msg_len: usize,
+    file_ptr: *const u8,
+    file_len: usize,
+    line: u32,
+) -> ! {
+    let args = [
+        msg_ptr as i32,
+        msg_len as i32,
+        file_ptr as i32,
+        file_len as i32,
+        line as i32,
+        0,
+        0,
+    ];
+    let _ = syscall(SYSCALL_PANIC, &args);
+    ebreak()
 }
 
 /// Exit the interpreter
