@@ -3,7 +3,28 @@
 
 use core::{panic::PanicInfo, sync::atomic::{AtomicI32, Ordering}};
 
-use embive_runtime::{ebreak, syscall};
+use embive_runtime::{ebreak, syscall, _print};
+
+/// Print macro for no_std environments
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {
+        unsafe {
+            $crate::_print(core::format_args!($($arg)*));
+        }
+    };
+}
+
+/// Println macro for no_std environments
+#[macro_export]
+macro_rules! println {
+    () => {
+        $crate::print!("\n");
+    };
+    ($($arg:tt)*) => {
+        $crate::print!("{}\n", core::format_args!($($arg)*));
+    };
+}
 
 static RESULT: AtomicI32 = AtomicI32::new(0);
 
@@ -24,12 +45,17 @@ fn interrupt_handler(_value: i32) {
 /// Syscall 1: Add two numbers (args[0] + args[1])
 #[no_mangle]
 pub extern "Rust" fn main() {
+    // Test with a simple static string first
+    println!("[guest] Hello!");
+    
     // System Call 1: Add two numbers (5 + 10 = 15)
     let result = syscall(1, &[5, 10, 0, 0, 0, 0, 0]);
     
     if let Ok(value) = result {
         RESULT.store(value, Ordering::SeqCst);
+        println!("[guest] The result is: {}", value);
     }
+
     
     // Exit
     ebreak()

@@ -63,22 +63,36 @@ fn run_embive_test() -> Result<(), String> {
     // Transpile ELF to embive bytecode
     // The transpiler writes sections relative to entry point (0x00000000)
     // ROM sections (< RAM_OFFSET) go in code section, RAM sections (>= RAM_OFFSET) go in RAM
-    let mut combined = vec![0u8; 64 * 1024];
+    // Use 4MB buffer to ensure we can handle large binaries
+    const MAX_BINARY_SIZE: usize = 4 * 1024 * 1024;
+    let mut combined = vec![0u8; MAX_BINARY_SIZE];
     let binary_size = transpile_elf(&elf_data, &mut combined)
         .map_err(|e| format!("Failed to transpile ELF: {:?}", e))?;
     
     // Split ROM (low addresses) and RAM (high addresses)
     let code_size = RAM_OFFSET.min(binary_size as u32) as usize;
-    let code_copy_len = code_size.min(4096);
-    let mut code_vec = vec![0u8; code_copy_len.max(4096)];
-    code_vec[..code_copy_len].copy_from_slice(&combined[..code_copy_len]);
+    // Load the full code section - allocate enough space for the entire code section
+    // Ensure minimum size to avoid zero-sized allocation issues
+    let mut code_vec = vec![0u8; code_size.max(1)];
+    if code_size > 0 {
+        code_vec[..code_size].copy_from_slice(&combined[..code_size]);
+    }
     
-    let mut ram = [0u8; 32 * 1024];
+    // Allocate 4MB for RAM section
+    const RAM_SIZE: usize = 4 * 1024 * 1024;
+    let mut ram = vec![0u8; RAM_SIZE];
     if binary_size > code_size {
         let ram_offset_in_combined = code_size;
         let ram_size = (binary_size - ram_offset_in_combined).min(ram.len());
         ram[..ram_size].copy_from_slice(&combined[ram_offset_in_combined..ram_offset_in_combined + ram_size]);
     }
+
+    // Store raw pointers to memory slices for reading in syscall handler
+    // This is safe because we only read from these pointers and the memory outlives the closure
+    let code_vec_ptr = code_vec.as_ptr();
+    let code_vec_len = code_vec.len();
+    let ram_ptr = ram.as_ptr();
+    let ram_len = ram.len();
 
     let mut memory = SliceMemory::new(&code_vec, &mut ram);
     let mut interpreter = Interpreter::new(&mut memory, 0);
@@ -91,7 +105,39 @@ fn run_embive_test() -> Result<(), String> {
     let syscall_args = Cell::new((0, 0));
     let syscall_result = Cell::new(None);
 
-    // Syscall handler: syscall 1 adds two numbers
+    // Helper function to read bytes from guest memory
+    // Addresses < RAM_OFFSET are in code_vec (ROM), addresses >= RAM_OFFSET are in ram
+    let read_memory = |addr: u32, len: usize| -> Result<Vec<u8>, Error> {
+        let mut buf = vec![0u8; len];
+        unsafe {
+            if addr < RAM_OFFSET {
+                // Read from code section (ROM)
+                let offset = addr as usize;
+                if offset + len > code_vec_len {
+                    return Err(Error::Custom("Address out of bounds in code section"));
+                }
+                core::ptr::copy_nonoverlapping(
+                    code_vec_ptr.add(offset),
+                    buf.as_mut_ptr(),
+                    len,
+                );
+            } else {
+                // Read from RAM section
+                let offset = (addr - RAM_OFFSET) as usize;
+                if offset + len > ram_len {
+                    return Err(Error::Custom("Address out of bounds in RAM section"));
+                }
+                core::ptr::copy_nonoverlapping(
+                    ram_ptr.add(offset),
+                    buf.as_mut_ptr(),
+                    len,
+                );
+            }
+        }
+        Ok(buf)
+    };
+
+    // Syscall handler: syscall 1 adds two numbers, syscall 2 writes strings
     let mut syscall = |nr: i32, args: &[i32; SYSCALL_ARGS], _memory: &mut _| -> Result<Result<i32, NonZeroI32>, Error> {
         match nr {
             1 => {
@@ -102,6 +148,23 @@ fn run_embive_test() -> Result<(), String> {
                 syscall_result.set(Some(result));
                 println!("syscall add2(1): {} + {} = {}", args[0], args[1], result);
                 Ok(Ok(result))
+            },
+            2 => {
+                // Syscall 2: Write string to host
+                // args[0] = pointer to string (as i32)
+                // args[1] = length of string
+                let ptr = args[0] as u32;
+                let len = args[1] as usize;
+                
+                // Read string from guest memory
+                let buf = read_memory(ptr, len)?;
+                
+                // Convert to string and print
+                let s = core::str::from_utf8(&buf)
+                    .map_err(|_| Error::Custom("Invalid UTF-8 string"))?;
+                print!("{}", s);
+                
+                Ok(Ok(0))
             },
             _ => Err(Error::Custom("Unknown syscall")),
         }
