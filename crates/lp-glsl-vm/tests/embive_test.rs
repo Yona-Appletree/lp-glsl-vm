@@ -4,13 +4,11 @@ mod test_glsl_parser;
 
 #[test]
 fn test_embive() {
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time::Duration;
+    use std::{sync::mpsc, thread, time::Duration};
 
     // Run the test in a separate thread with a timeout
     let (tx, rx) = mpsc::channel();
-    
+
     let handle = thread::spawn(move || {
         let result = run_embive_test();
         let _ = tx.send(result);
@@ -44,11 +42,17 @@ fn run_embive_test() -> Result<(), String> {
     // Build the program (cargo handles dependency tracking automatically)
     // If embive-program or embive-runtime changes, cargo will rebuild automatically
     let output = std::process::Command::new("cargo")
-        .args(["build", "--package", "embive-program", "--target", "riscv32imac-unknown-none-elf"])
+        .args([
+            "build",
+            "--package",
+            "embive-program",
+            "--target",
+            "riscv32imac-unknown-none-elf",
+        ])
         .current_dir(workspace_root)
         .output()
         .map_err(|e| format!("Failed to build embive-program: {}", e))?;
-    
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -71,6 +75,10 @@ fn run_embive_test() -> Result<(), String> {
     vm.run()?;
 
     // Verify JIT result (5 + 10 = 15)
-    assert_eq!(vm.last_result(), Some(15), "JIT experiment should return 15 (5 + 10)");
+    assert_eq!(
+        vm.last_result(),
+        Some(15),
+        "JIT experiment should return 15 (5 + 10)"
+    );
     Ok(())
 }

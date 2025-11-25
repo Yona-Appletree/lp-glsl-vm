@@ -27,11 +27,10 @@ fn interrupt_handler(_value: i32) {
 #[no_mangle]
 pub extern "Rust" fn main() {
     println!("[guest] Hello!");
-    
+
     // Run JIT experiment
     jit_test::jit_add_experiment();
-    
+
     // Exit
     ebreak()
 }
-

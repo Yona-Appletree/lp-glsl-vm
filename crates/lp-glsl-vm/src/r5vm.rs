@@ -1,8 +1,13 @@
-use std::io::Write;
 use core::num::NonZeroI32;
-use embive::transpiler::transpile_elf;
-use embive::interpreter::memory::{SliceMemory, RAM_OFFSET};
-use embive::interpreter::{Error, Interpreter, State, SYSCALL_ARGS};
+use std::io::Write;
+
+use embive::{
+    interpreter::{
+        memory::{SliceMemory, RAM_OFFSET},
+        Error, Interpreter, State, SYSCALL_ARGS,
+    },
+    transpiler::transpile_elf,
+};
 
 /// RISC-V VM for running embive programs
 pub struct R5Vm {
@@ -43,10 +48,11 @@ impl R5Vm {
         if binary_size > code_size {
             let ram_offset_in_combined = code_size;
             let ram_size = (binary_size - ram_offset_in_combined).min(self.ram.len());
-            self.ram[..ram_size]
-                .copy_from_slice(&combined[ram_offset_in_combined..ram_offset_in_combined + ram_size]);
+            self.ram[..ram_size].copy_from_slice(
+                &combined[ram_offset_in_combined..ram_offset_in_combined + ram_size],
+            );
         }
-        
+
         // Ensure the heap region is zero-initialized
         // The .heap section is (NOLOAD) so it won't be in the binary, but we need
         // to ensure the RAM buffer covers it. The RAM is already zero-initialized
@@ -65,14 +71,17 @@ impl R5Vm {
         let code_vec_len = self.code_vec.len();
         let ram_ptr = self.ram.as_ptr();
         let ram_len = self.ram.len();
-        
+
         // Create memory and interpreter
         let mut memory = SliceMemory::new(&self.code_vec, &mut self.ram);
         let mut interpreter = Interpreter::new(&mut memory, 0);
         interpreter.program_counter = 0;
-        
+
         // Syscall handler - inline the logic from handle_syscall
-        let mut syscall = |nr: i32, args: &[i32; SYSCALL_ARGS], _memory: &mut _| -> Result<Result<i32, NonZeroI32>, Error> {
+        let mut syscall = |nr: i32,
+                           args: &[i32; SYSCALL_ARGS],
+                           _memory: &mut _|
+         -> Result<Result<i32, NonZeroI32>, Error> {
             match nr {
                 0 => {
                     // Syscall 0: Done - store result
@@ -102,7 +111,11 @@ impl R5Vm {
                             if offset + len > ram_len {
                                 return Err(Error::Custom("Address out of bounds in RAM section"));
                             }
-                            core::ptr::copy_nonoverlapping(ram_ptr.add(offset), buf.as_mut_ptr(), len);
+                            core::ptr::copy_nonoverlapping(
+                                ram_ptr.add(offset),
+                                buf.as_mut_ptr(),
+                                len,
+                            );
                         }
                     }
 
@@ -131,7 +144,10 @@ impl R5Vm {
 
         // Run the program (exactly like embive examples)
         loop {
-            match interpreter.run().map_err(|e| format!("Interpreter error: {:?}", e))? {
+            match interpreter
+                .run()
+                .map_err(|e| format!("Interpreter error: {:?}", e))?
+            {
                 State::Running => {}
                 State::Called => {
                     interpreter
@@ -157,11 +173,7 @@ impl R5Vm {
     /// - 0: Done - stores args[0] in last_result
     /// - 2: Write - reads string from memory at args[0] with length args[1] and prints it
     /// - 1000: Add - returns args[0] + args[1]
-    pub fn handle_syscall(
-        &mut self,
-        nr: i32,
-        args: &[i32; SYSCALL_ARGS],
-    ) -> Result<i32, Error> {
+    pub fn handle_syscall(&mut self, nr: i32, args: &[i32; SYSCALL_ARGS]) -> Result<i32, Error> {
         match nr {
             0 => {
                 // Syscall 0: Done - store result
@@ -242,12 +254,12 @@ impl R5Vm {
         if addr < RAM_OFFSET {
             return Err(Error::Custom("Cannot write to ROM section"));
         }
-        
+
         let offset = (addr - RAM_OFFSET) as usize;
         if offset + data.len() > self.ram.len() {
             return Err(Error::Custom("Address out of bounds in RAM section"));
         }
-        
+
         unsafe {
             core::ptr::copy_nonoverlapping(
                 data.as_ptr(),
@@ -255,7 +267,7 @@ impl R5Vm {
                 data.len(),
             );
         }
-        
+
         Ok(())
     }
 }

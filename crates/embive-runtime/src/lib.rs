@@ -13,11 +13,12 @@ use core::{
 
 use critical_section::{set_impl, Impl, RawRestoreState};
 
-mod print;
 mod alloc;
+mod print;
+
+pub use alloc::init_allocator;
 
 pub use print::_print;
-pub use alloc::init_allocator;
 
 /// Number of syscall arguments
 pub const SYSCALL_ARGS: usize = 7;
@@ -248,7 +249,7 @@ unsafe extern "C" fn _code_entry() -> ! {
     extern "Rust" {
         fn main();
     }
-    
+
     unsafe {
         main();
     }
@@ -256,4 +257,3 @@ unsafe extern "C" fn _code_entry() -> ! {
     // Exit the interpreter
     ebreak()
 }
-
