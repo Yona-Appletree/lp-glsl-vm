@@ -7,7 +7,7 @@ extern crate embive_runtime;
 
 use core::panic::PanicInfo;
 
-use embive_runtime::{ebreak, syscall};
+use embive_runtime::ebreak;
 mod jit_test;
 
 /// Panics will simply exit the interpreter (ebreak)
