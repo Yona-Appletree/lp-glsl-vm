@@ -10,7 +10,7 @@ extern crate alloc;
 use alloc::string::String;
 
 use r5_ir::parse_module;
-use r5_target_riscv32::{compile_module, generate_elf};
+use r5_target_riscv32::{compile_module_to_insts, generate_elf};
 
 /// Result of JIT compilation
 pub struct JitResult {
@@ -18,6 +18,9 @@ pub struct JitResult {
     pub code: alloc::vec::Vec<u8>,
     /// ELF file data
     pub elf: alloc::vec::Vec<u8>,
+    /// Bootstrap code size in instructions (for entry function)
+    /// When calling as a function pointer, skip this many instructions
+    pub bootstrap_size: usize,
 }
 
 /// Compile an SSA string to an ELF file.
@@ -28,9 +31,12 @@ pub fn compile_ssa_to_elf(ssa: &str) -> Result<JitResult, String> {
     // Parse the SSA string into a module
     let module = parse_module(ssa).map_err(|e| alloc::format!("Parse error: {}", e))?;
 
-    // Compile IR to RISC-V code
-    let riscv_code =
-        compile_module(&module).map_err(|e| alloc::format!("Compilation failed: {}", e))?;
+    // Compile IR to RISC-V code (using compile_module_to_insts to get bootstrap_size)
+    let compiled_module = compile_module_to_insts(&module)
+        .map_err(|e| alloc::format!("Compilation failed: {}", e))?;
+    let riscv_code = compiled_module
+        .to_bytes()
+        .map_err(|e| alloc::format!("Failed to convert to bytes: {}", e))?;
 
     // Generate ELF file
     let elf_data = generate_elf(&riscv_code);
@@ -38,6 +44,7 @@ pub fn compile_ssa_to_elf(ssa: &str) -> Result<JitResult, String> {
     Ok(JitResult {
         code: riscv_code,
         elf: elf_data,
+        bootstrap_size: compiled_module.bootstrap_size,
     })
 }
 

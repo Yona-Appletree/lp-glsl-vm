@@ -55,6 +55,21 @@ async fn main(_spawner: Spawner) {
         defmt::panic!("Code buffer not properly aligned");
     }
 
+    // Skip bootstrap code when calling as function pointer
+    // Bootstrap sets up SP, but when called as a function pointer, SP is already set up
+    // PC-relative offsets work regardless of load address, so we can skip bootstrap
+    let bootstrap_byte_offset = jit_result.bootstrap_size * 4;
+    let function_ptr = unsafe { code_ptr.add(bootstrap_byte_offset) };
+
+    info!(
+        "Bootstrap size: {} instructions ({} bytes)",
+        jit_result.bootstrap_size, bootstrap_byte_offset
+    );
+    info!(
+        "Calling function at offset {} bytes from code start",
+        bootstrap_byte_offset
+    );
+
     unsafe {
         // Flush instruction cache to ensure code is visible
         // ESP32-C6 uses instruction cache, so we need to sync
@@ -65,7 +80,7 @@ async fn main(_spawner: Spawner) {
         // Bootstrap function signature: extern "C" fn() -> i32
         // It calls fib(10) and returns the result (55)
         type FibBootstrapFunc = extern "C" fn() -> i32;
-        let fib_func: FibBootstrapFunc = core::mem::transmute(code_ptr);
+        let fib_func: FibBootstrapFunc = core::mem::transmute(function_ptr);
 
         // Test the function
         let n = 10;
