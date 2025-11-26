@@ -717,8 +717,9 @@ mod tests {
         code[jal_offset..jal_offset + 4].copy_from_slice(&placeholder_bytes);
 
         // Create relocations
+        // jal_offset is 8 bytes, which is 2 instructions (8 / 4 = 2)
         let relocations = vec![Relocation {
-            offset: super::lower::InstOffset::from(jal_offset),
+            offset: super::lower::InstOffset::from(2),
             target: super::lower::RelocationTarget::Function(String::from("target_func")),
             inst_type: super::lower::RelocationInstType::Jal {
                 rd: crate::Gpr::RA,
@@ -754,7 +755,7 @@ mod tests {
         // Test with valid offset first
         let mut code = vec![0u8; 20];
         let relocations = vec![Relocation {
-            offset: super::lower::InstOffset::from(8), // This is valid (8 + 4 = 12 <= 20)
+            offset: super::lower::InstOffset::from(2), // 2 instructions = 8 bytes, valid (8 + 4 = 12 <= 20)
             target: super::lower::RelocationTarget::Function(String::from("target_func")),
             inst_type: super::lower::RelocationInstType::Jal {
                 rd: crate::Gpr::RA,
@@ -770,7 +771,7 @@ mod tests {
         // Now test with out-of-bounds offset
         let mut code2 = vec![0u8; 10];
         let relocations2 = vec![Relocation {
-            offset: super::lower::InstOffset::from(8), // This is out of bounds (8 + 4 = 12 > 10)
+            offset: super::lower::InstOffset::from(2), // 2 instructions = 8 bytes, out of bounds (8 + 4 = 12 > 10)
             target: super::lower::RelocationTarget::Function(String::from("target_func")),
             inst_type: super::lower::RelocationInstType::Jal {
                 rd: crate::Gpr::RA,
@@ -788,7 +789,7 @@ mod tests {
 
         let mut code = vec![0u8; 20];
         let relocations = vec![Relocation {
-            offset: super::lower::InstOffset::from(8),
+            offset: super::lower::InstOffset::from(2), // 2 instructions = 8 bytes
             target: super::lower::RelocationTarget::Function(String::from("nonexistent_func")),
             inst_type: super::lower::RelocationInstType::Jal {
                 rd: crate::Gpr::RA,

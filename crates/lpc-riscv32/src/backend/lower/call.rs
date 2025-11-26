@@ -63,12 +63,12 @@ impl super::Lowerer {
         }
 
         // Step 2: Store stack arguments (index >= 8) to outgoing args area
-        // Outgoing stack args are stored in the outgoing args area at the top of the frame.
-        // After prologue, SP points to the bottom of the frame. The callee reads incoming
-        // args at SP + offset before adjusting SP, where SP = caller's SP_after_prologue.
-        // The outgoing args area starts at: SP + (total_size - outgoing_args_size)
-        // Then we add the per-argument offset (0, 4, 8, ...) to get the specific argument.
-        let outgoing_args_base = (frame_layout.total_size() - frame_layout.outgoing_args_size) as i32;
+        // Stack arguments are stored at positive offsets from SP (above SP, per RISC-V convention).
+        // The callee reads them at positive offsets from SP before adjusting SP.
+        // Since the caller's SP (after prologue) equals the callee's SP (before prologue),
+        // we store at the same positive offsets that the callee will read from.
+        // Note: The outgoing args area is allocated in the frame, but we store above the frame
+        // because the callee reads at positive offsets from its SP before prologue.
         for (idx, arg) in args.iter().enumerate() {
             if idx >= 8 {
                 if let Some(offset) = frame_layout.outgoing_arg_offset(idx) {
@@ -76,15 +76,14 @@ impl super::Lowerer {
                     let temp_reg = Gpr::T0;
                     self.load_value_into_reg(code, *arg, temp_reg, allocation, frame_layout)?;
 
-                    // Store to outgoing args area
-                    // Stack arguments are stored at the top of the frame in the outgoing args area.
-                    // We compute the offset from SP (bottom) to the start of outgoing args area,
-                    // then add the per-argument offset.
-                    let actual_offset = outgoing_args_base + offset.as_i32();
+                    // Store to stack at positive offset (above frame)
+                    // The callee reads at positive offsets from SP before prologue.
+                    // Since caller's SP (after prologue) = callee's SP (before prologue),
+                    // we store at: offset (which is (idx - 8) * 4)
                     code.emit(RiscvInst::Sw {
                         rs1: Gpr::SP,
                         rs2: temp_reg,
-                        imm: actual_offset,
+                        imm: offset.as_i32(),
                     });
                 }
             }
