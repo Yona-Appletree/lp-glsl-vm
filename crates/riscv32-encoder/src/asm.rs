@@ -598,7 +598,7 @@ mod tests {
         let asm = "addi a0, zero, 5\nloop:\naddi a0, a0, 1\nbeq a0, a1, loop";
         let labels = BTreeMap::from([("loop".to_string(), 0x0008)]);
         let code = assemble_code(asm, Some(&labels)).unwrap();
-        assert_eq!(code.len(), 16);
+        assert_eq!(code.len(), 12); // 3 instructions: addi, addi, beq (label on own line doesn't generate code)
     }
 
     #[test]
@@ -660,6 +660,6 @@ mod tests {
     fn test_assemble_code_labels_inline() {
         let asm = "loop:\naddi a0, a0, 1\nbeq a0, a1, loop";
         let code = assemble_code(asm, None).unwrap();
-        assert_eq!(code.len(), 12);
+        assert_eq!(code.len(), 8); // 2 instructions: addi, beq (label on own line doesn't generate code)
     }
 }

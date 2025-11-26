@@ -17,16 +17,6 @@ use crate::vm_runner::{Expectation, VmRunner};
 ///
 /// ## Using a Function object
 ///
-/// ```rust
-/// use r5_test_util::R5FnTest;
-///
-/// let func = build_my_function();
-/// R5FnTest::new(func)
-///     .with_args(&[5, 10])
-///     .expect_return(15)
-///     .run();
-/// ```
-///
 /// ## Using IR module code
 ///
 /// ```rust
@@ -182,10 +172,6 @@ impl R5FnTest {
     /// Set function arguments.
     ///
     /// # Example
-    ///
-    /// ```rust
-    /// R5FnTest::new(func).with_args(&[5, 10]).run();
-    /// ```
     pub fn with_args(mut self, args: &[i32]) -> Self {
         self.args = args.to_vec();
         self
@@ -194,13 +180,6 @@ impl R5FnTest {
     /// Expect a single return value.
     ///
     /// # Example
-    ///
-    /// ```rust
-    /// R5FnTest::new(func)
-    ///     .with_args(&[5, 10])
-    ///     .expect_return(15)
-    ///     .run();
-    /// ```
     pub fn expect_return(mut self, value: i32) -> Self {
         self.expectations.push(Expectation::ReturnValue(value));
         self
@@ -209,13 +188,6 @@ impl R5FnTest {
     /// Expect multiple return values.
     ///
     /// # Example
-    ///
-    /// ```rust
-    /// R5FnTest::new(func)
-    ///     .with_args(&[5, 10])
-    ///     .expect_return_values(vec![15, 0])
-    ///     .run();
-    /// ```
     pub fn expect_return_values(mut self, values: Vec<i32>) -> Self {
         self.expectations.push(Expectation::ReturnValues(values));
         self
@@ -224,13 +196,6 @@ impl R5FnTest {
     /// Expect a panic with optional message.
     ///
     /// # Example
-    ///
-    /// ```rust
-    /// R5FnTest::new(func)
-    ///     .with_args(10, 0)
-    ///     .expect_panic("division by zero")
-    ///     .run();
-    /// ```
     pub fn expect_panic(mut self, message: impl Into<String>) -> Self {
         self.expectations.push(Expectation::Panic {
             message: Some(message.into()),
@@ -241,10 +206,6 @@ impl R5FnTest {
     /// Expect no panic.
     ///
     /// # Example
-    ///
-    /// ```rust
-    /// R5FnTest::new(func).with_args(10, 2).expect_no_panic().run();
-    /// ```
     pub fn expect_no_panic(mut self) -> Self {
         self.expectations.push(Expectation::NoPanic);
         self
@@ -253,13 +214,6 @@ impl R5FnTest {
     /// Expect a memory value at a specific address.
     ///
     /// # Example
-    ///
-    /// ```rust
-    /// R5FnTest::new(func)
-    ///     .with_args(&[42])
-    ///     .expect_memory_at(0x80000000, &[0x2a, 0x00, 0x00, 0x00])
-    ///     .run();
-    /// ```
     pub fn expect_memory_at(mut self, address: u32, value: &[u8]) -> Self {
         self.expectations.push(Expectation::Memory {
             address,
@@ -271,12 +225,6 @@ impl R5FnTest {
     /// Set VM RAM size.
     ///
     /// # Example
-    ///
-    /// ```rust
-    /// R5FnTest::new(func)
-    ///     .vm_ram_size(8 * 1024 * 1024) // 8MB
-    ///     .run();
-    /// ```
     pub fn vm_ram_size(mut self, size: usize) -> Self {
         self.vm_ram_size = size;
         self

@@ -10,7 +10,7 @@ use riscv32_encoder::Gpr;
 /// Frame layout for a RISC-V 32-bit function.
 ///
 /// The frame layout follows Cranelift's model:
-/// ```
+/// ```text
 /// ┌─────────────────────────────────────┐
 /// │  Caller's Stack Frame               │
 /// ├─────────────────────────────────────┤

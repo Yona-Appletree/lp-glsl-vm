@@ -11,12 +11,18 @@ members = [
     "crates/riscv-shared",
     "crates/r5-test-util",
 ]
-# Exclude cross-compile crates from default builds and tests
-# These crates require specific target architectures and cannot build for host
-exclude = [
-    "apps/esp32c3-jit-test",
-    "crates/embive-runtime",
-    "apps/embive-program",
+default-members = [
+    "crates/lp-glsl-vm",
+    "crates/riscv32-encoder",
+    "crates/riscv32-emulator",
+    "crates/r5-ir",
+    "crates/r5-builder",
+    "crates/r5-target-riscv32",
+    "crates/r5-test-util",
+
+# cross compile crates should not be default members
+#    "crates/embive-runtime",
+#    "apps/embive-program",
 ]
 resolver = "2"
 
