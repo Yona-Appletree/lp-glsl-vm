@@ -87,12 +87,28 @@ impl super::Lowerer {
             }
         }
 
-        // Step 2: Adjust SP for entire frame (if needed)
-        if frame_size > 0 {
+        // Step 2: Two-phase SP adjustment (following Cranelift's model)
+        // Phase 1: Ensure tail-args space is consistent with caller expectations
+        // Phase 2: Allocate local frame (setup/clobber/spills)
+        let tail_adjustment = frame_layout.tail_adjustment();
+        let local_frame_size = frame_layout.local_frame_size();
+
+        if tail_adjustment > 0 {
+            // Phase 1: Adjust SP for tail-args space
+            // This ensures the tail-args area is large enough for outgoing args + stack returns
             code.emit(RiscvInst::Addi {
                 rd: Gpr::Sp,
                 rs1: Gpr::Sp,
-                imm: -(frame_size as i32),
+                imm: -tail_adjustment,
+            });
+        }
+
+        if local_frame_size > 0 {
+            // Phase 2: Allocate local frame (setup/clobber/spills)
+            code.emit(RiscvInst::Addi {
+                rd: Gpr::Sp,
+                rs1: Gpr::Sp,
+                imm: -(local_frame_size as i32),
             });
 
             // Step 3: Store spilled stack args to their spill slots

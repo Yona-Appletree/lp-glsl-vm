@@ -1,7 +1,6 @@
 //! Basic tests for the RISC-V 32 emu.
 
-use lpc_riscv32::{LogLevel, Riscv32Emulator};
-use lpc_riscv32::{assemble_code, Gpr};
+use lpc_riscv32::{assemble_code, Gpr, LogLevel, Riscv32Emulator};
 
 #[test]
 fn test_add_instruction() {

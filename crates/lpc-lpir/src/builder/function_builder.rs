@@ -1,9 +1,11 @@
 //! Function builder.
 
 use alloc::vec::Vec;
-use crate::builder::ssa_builder::SSABuilder;
-use crate::{Block, Function, Signature, Value};
-use crate::builder::block_builder::BlockBuilder;
+
+use crate::{
+    builder::{block_builder::BlockBuilder, ssa_builder::SSABuilder},
+    Block, Function, Signature, Value,
+};
 
 /// Builder for constructing functions in IR.
 ///
@@ -80,9 +82,8 @@ impl FunctionBuilder {
 mod tests {
     use alloc::vec;
 
-    use crate::Type;
-
     use super::*;
+    use crate::Type;
 
     #[test]
     fn test_function_builder_creation() {

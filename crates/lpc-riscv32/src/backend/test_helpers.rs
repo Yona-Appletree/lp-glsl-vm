@@ -4,10 +4,11 @@ extern crate alloc;
 
 use alloc::{format, string::String, vec};
 
-use crate::emu::{EmulatorError, LogLevel, Riscv32Emulator};
-use crate::Gpr;
-
 use super::compile::compile_module_to_insts;
+use crate::{
+    emu::{EmulatorError, LogLevel, Riscv32Emulator},
+    Gpr,
+};
 
 /// Create an emu from IR code.
 pub fn debug_ir(ir: &str) -> Result<Riscv32Emulator, EmulatorError> {

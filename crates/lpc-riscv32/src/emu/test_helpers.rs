@@ -4,9 +4,8 @@ extern crate alloc;
 
 use alloc::{format, string::String, vec, vec::Vec};
 
-use crate::{assemble_code, Gpr, Inst};
-
 use super::{emulator::Riscv32Emulator, error::EmulatorError, logging::LogLevel};
+use crate::{assemble_code, Gpr, Inst};
 
 /// Create an emu from assembly code.
 pub fn debug_riscv32_asm(asm: &str) -> Result<Riscv32Emulator, EmulatorError> {

@@ -4,8 +4,6 @@ extern crate alloc;
 
 use alloc::{format, string::String, vec::Vec};
 
-use crate::Gpr;
-
 use super::{
     decoder::decode_instruction,
     error::EmulatorError,
@@ -13,6 +11,7 @@ use super::{
     logging::{InstLog, LogLevel},
     memory::Memory,
 };
+use crate::Gpr;
 
 /// Result of a single step.
 #[derive(Debug, Clone)]

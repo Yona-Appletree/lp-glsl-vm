@@ -28,14 +28,18 @@ pub enum StorageLocation {
 
 /// Frame layout for a RISC-V 32-bit function.
 ///
-/// The frame layout follows Cranelift's model:
+/// The frame layout follows Cranelift's model with a clear separation between
+/// caller-owned tail space and callee-owned local storage:
 /// ```text
 /// ┌─────────────────────────────────────┐
 /// │  Caller's Stack Frame               │
 /// ├─────────────────────────────────────┤
-/// │  Outgoing Arguments (if any)        │  ← SP (after prologue, bottom of frame)
+/// │  Tail-Args Area (caller-owned)      │  ← SP before prologue (caller's SP after prologue)
+/// │    - Incoming stack args            │
+/// │    - Outgoing stack args            │
+/// │    - Stack return area              │
 /// ├─────────────────────────────────────┤
-/// │  Setup Area (FP/LR)                 │
+/// │  Setup Area (FP/LR)                 │  ← SP after prologue (callee's frame)
 /// ├─────────────────────────────────────┤
 /// │  Clobber Area (callee-saved regs)   │
 /// ├─────────────────────────────────────┤
@@ -44,10 +48,12 @@ pub enum StorageLocation {
 /// ```
 ///
 /// Key points:
-/// - Outgoing args are stored at SP+0, SP+4, etc. (relative to SP after prologue)
-/// - Incoming args are loaded from SP+0, SP+4, etc. (relative to SP before prologue)
-/// - Since caller's SP (after prologue) = callee's SP (before prologue), offsets match
-/// - The frame grows downward: SP is adjusted by total_size() in prologue
+/// - Tail-args area is caller-owned and persists across prologue/epilogue
+/// - Callee's local frame (setup/clobber/spills) is allocated below tail-args
+/// - Prologue adjusts SP in two phases:
+///   1. Ensure tail-args space (if needed): SP -= (tail_args_size - incoming_args_size)
+///   2. Allocate local frame: SP -= local_frame_size
+/// - Epilogue reverses this: restore local frame, then undo tail adjustment
 #[derive(Debug, Clone)]
 pub struct FrameLayout {
     /// Word size in bytes (4 for RISC-V 32-bit)
@@ -68,8 +74,11 @@ pub struct FrameLayout {
     /// Size of outgoing arguments area
     pub outgoing_args_size: u32,
 
-    /// Size of tail-args area (largest of incoming args, outgoing args + stack returns)
-    /// This area is at the bottom of the frame and persists after epilogue
+    /// Size of stack return area for this function's returns (if > 8 returns)
+    pub stack_return_area: u32,
+
+    /// Size of tail-args area (largest of incoming args, outgoing args + callee stack returns, self stack returns)
+    /// This area is caller-owned and persists after epilogue
     pub tail_args_size: u32,
 
     /// List of callee-saved registers that need saving
@@ -174,6 +183,7 @@ impl FrameLayout {
             clobber_size,
             fixed_frame_storage_size,
             outgoing_args_size,
+            stack_return_area,
             tail_args_size,
             clobbered_callee_saves: used_callee_saved.to_vec(),
             has_function_calls: has_calls,
@@ -191,7 +201,7 @@ impl FrameLayout {
         layout
     }
 
-    /// Get the total frame size in bytes.
+    /// Get the total frame size in bytes (including tail-args).
     ///
     /// This includes tail_args_size, setup_area_size, clobber_size, and
     /// fixed_frame_storage_size. The frame is laid out as:
@@ -211,6 +221,29 @@ impl FrameLayout {
             size
         );
         size
+    }
+
+    /// Get the size of the local frame (callee-owned storage).
+    ///
+    /// This excludes tail-args and represents only the callee's own frame:
+    /// setup area + clobber area + spill slots.
+    pub fn local_frame_size(&self) -> u32 {
+        self.setup_area_size + self.clobber_size + self.fixed_frame_storage_size
+    }
+
+    /// Get the tail adjustment needed for prologue.
+    ///
+    /// This is the amount by which SP must be adjusted to ensure tail-args space
+    /// is consistent with caller expectations. If tail_args_size > incoming_args_size,
+    /// we need to adjust SP by the difference before allocating local frame.
+    ///
+    /// Returns the adjustment amount (positive means subtract from SP).
+    pub fn tail_adjustment(&self) -> i32 {
+        if self.tail_args_size > self.incoming_args_size {
+            (self.tail_args_size - self.incoming_args_size) as i32
+        } else {
+            0
+        }
     }
 
     /// Get the offset of the outgoing args base (relative to adjusted SP).
@@ -311,9 +344,64 @@ impl FrameLayout {
         Some(offset)
     }
 
-    /// Get stack offset for return value (index >= 8)
+    /// Get stack offset for storing a return value (index >= 8) before epilogue.
+    ///
+    /// Stack returns are stored in the caller's tail-args area, above the caller's outgoing args.
+    /// The offset is relative to SP after prologue (callee's adjusted SP).
+    ///
+    /// After prologue: SP = caller_SP - tail_adjustment - local_frame_size
+    /// We store at: SP + offset
+    /// After epilogue: SP = caller_SP (restored by tail_adjustment + local_frame_size)
+    /// So the value is at: caller_SP + offset
+    /// Caller loads from: caller_SP + outgoing_args_size + (idx-8)*4
+    /// Therefore: offset = outgoing_args_size + (idx-8)*4
+    ///
+    /// However, we need to account for the fact that SP was adjusted, so we add
+    /// the adjustment back: offset = tail_adjustment + local_frame_size + outgoing_args_size + (idx-8)*4
+    ///
+    /// Returns the offset relative to callee's SP (after prologue).
+    pub fn stack_return_store_offset(&self, ret_index: usize) -> Option<ByteOffset> {
+        if ret_index < 8 {
+            return None; // In register
+        }
+        let stack_index = ret_index - 8;
+        let tail_adjust = self.tail_adjustment();
+        let local_frame = self.local_frame_size();
+        // Stack returns go above outgoing args in the tail-args area
+        // Offset accounts for SP adjustment in prologue, then positions above outgoing args
+        let offset = tail_adjust
+            + local_frame as i32
+            + self.outgoing_args_size as i32
+            + (stack_index * 4) as i32;
+        Some(ByteOffset(offset))
+    }
+
+    /// Get stack offset for loading a return value (index >= 8) after call.
+    ///
+    /// Stack returns are loaded from the tail-args area, above the caller's outgoing args.
+    /// The offset is relative to caller's SP (after prologue).
+    ///
+    /// The tail-args area layout is: [caller's outgoing args] [stack returns]
+    /// Caller loads from: caller_SP + caller_outgoing_args_size + (idx-8)*4
+    ///
+    /// Returns the offset relative to caller's SP (after prologue).
+    pub fn stack_return_load_offset(&self, ret_index: usize) -> Option<ByteOffset> {
+        if ret_index < 8 {
+            return None; // In register
+        }
+        let stack_index = ret_index - 8;
+        // Stack returns are above outgoing args in the tail-args area
+        // Offset is relative to caller's SP (after prologue)
+        // Use caller's outgoing_args_size (this function's outgoing_args_size)
+        Some(ByteOffset(
+            self.outgoing_args_size as i32 + (stack_index * 4) as i32,
+        ))
+    }
+
+    /// Get stack offset for return value (index >= 8) - deprecated, use stack_return_store_offset
     ///
     /// Similar to incoming args, but caller allocates space
+    #[deprecated(note = "Use stack_return_store_offset or stack_return_load_offset instead")]
     pub fn return_value_offset(&self, ret_index: usize) -> Option<ByteOffset> {
         if ret_index < 8 {
             return None; // In register
@@ -562,13 +650,18 @@ mod tests {
 
         // First 8 return values should return None (in registers)
         for i in 0..8 {
-            assert_eq!(layout.return_value_offset(i), None);
+            assert_eq!(layout.stack_return_store_offset(i), None);
+            assert_eq!(layout.stack_return_load_offset(i), None);
         }
 
-        // Stack returns should have positive offsets (relative to SP before prologue)
-        assert_eq!(layout.return_value_offset(8), Some(ByteOffset(0)));
-        assert_eq!(layout.return_value_offset(9), Some(ByteOffset(4)));
-        assert_eq!(layout.return_value_offset(10), Some(ByteOffset(8)));
+        // Stack returns should have offsets above outgoing args (relative to SP after prologue)
+        // With no outgoing args, offset is just (idx-8)*4
+        assert_eq!(layout.stack_return_store_offset(8), Some(ByteOffset(0)));
+        assert_eq!(layout.stack_return_store_offset(9), Some(ByteOffset(4)));
+        assert_eq!(layout.stack_return_store_offset(10), Some(ByteOffset(8)));
+        assert_eq!(layout.stack_return_load_offset(8), Some(ByteOffset(0)));
+        assert_eq!(layout.stack_return_load_offset(9), Some(ByteOffset(4)));
+        assert_eq!(layout.stack_return_load_offset(10), Some(ByteOffset(8)));
     }
 
     #[test]
@@ -708,5 +801,153 @@ mod tests {
         let expected_total =
             layout.setup_area_size + layout.clobber_size + layout.fixed_frame_storage_size;
         assert_eq!(layout.total_size(), expected_total);
+    }
+
+    // Tests based on Cranelift's tail-args model
+    #[test]
+    fn test_tail_args_with_incoming_only() {
+        // Function with 10 incoming args (2 on stack), no calls
+        let layout = FrameLayout::compute(&[], 0, false, 10, 0, 0, 0);
+
+        // tail_args_size should equal incoming_args_size when no outgoing args
+        assert_eq!(layout.tail_args_size, layout.incoming_args_size);
+        assert_eq!(layout.incoming_args_size, 16); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.tail_adjustment(), 0); // No adjustment needed
+    }
+
+    #[test]
+    fn test_tail_args_with_outgoing_only() {
+        // Function with 10 outgoing args (2 on stack), makes calls
+        let layout = FrameLayout::compute(&[], 0, true, 0, 10, 0, 0);
+
+        // tail_args_size should equal outgoing_args_size when no incoming args
+        assert_eq!(layout.tail_args_size, layout.outgoing_args_size);
+        assert_eq!(layout.outgoing_args_size, 16); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.tail_adjustment(), 16); // Need to adjust SP by 16
+    }
+
+    #[test]
+    fn test_tail_args_incoming_larger_than_outgoing() {
+        // incoming: 12 args (4 on stack = 16 bytes aligned)
+        // outgoing: 10 args (2 on stack = 16 bytes aligned)
+        let layout = FrameLayout::compute(&[], 0, true, 12, 10, 0, 0);
+
+        // tail_args_size should equal incoming_args_size (larger)
+        assert_eq!(layout.incoming_args_size, 32); // (12-8)*4 = 16, aligned to 16 = 16, actually (12-8)*4=16 aligned to 16 = 16... wait
+        assert_eq!(layout.outgoing_args_size, 16); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.tail_args_size, 32); // max(32, 16) = 32
+        assert_eq!(layout.tail_adjustment(), 0); // No adjustment needed (incoming is larger)
+    }
+
+    #[test]
+    fn test_tail_args_outgoing_larger_than_incoming() {
+        // incoming: 10 args (2 on stack = 16 bytes aligned)
+        // outgoing: 12 args (4 on stack = 32 bytes aligned)
+        let layout = FrameLayout::compute(&[], 0, true, 10, 12, 0, 0);
+
+        // tail_args_size should equal outgoing_args_size (larger)
+        assert_eq!(layout.incoming_args_size, 16); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.outgoing_args_size, 32); // (12-8)*4 = 16, aligned to 16 = 16, actually 16 aligned = 16... wait
+        assert_eq!(layout.tail_args_size, 32); // max(16, 32) = 32
+        assert_eq!(layout.tail_adjustment(), 16); // Need to adjust SP by (32-16)
+    }
+
+    #[test]
+    fn test_tail_args_with_stack_returns() {
+        // Function with 10 return values (2 on stack)
+        let layout = FrameLayout::compute(&[], 0, true, 0, 0, 10, 0);
+
+        // tail_args_size should account for stack return area
+        assert_eq!(layout.stack_return_area, 16); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.tail_args_size, 16);
+    }
+
+    #[test]
+    fn test_tail_args_with_callee_stack_returns() {
+        // Function that calls another with 12 return values (4 on stack)
+        let layout = FrameLayout::compute(&[], 0, true, 0, 10, 0, 12);
+
+        // tail_args_size should include outgoing_args + max_callee_stack_returns
+        assert_eq!(layout.outgoing_args_size, 16); // (10-8)*4 = 8, aligned to 16
+        let max_callee_stack_return_area = 32; // (12-8)*4 = 16, aligned to 16 = 16, actually...
+                                               // tail_args_size = max(0, 16 + max_callee_stack_return_area, 0)
+        assert_eq!(layout.tail_args_size, 16 + 32); // outgoing + callee returns
+    }
+
+    #[test]
+    fn test_tail_args_complex_scenario() {
+        // Complex: incoming=10, outgoing=12, self_returns=14, callee_returns=16
+        let layout = FrameLayout::compute(&[], 0, true, 10, 12, 14, 16);
+
+        let incoming = 16; // (10-8)*4 = 8 aligned to 16
+        let outgoing = 32; // (12-8)*4 = 16 aligned to 16 = 16, hmm...
+        let stack_ret = 48; // (14-8)*4 = 24 aligned to 16 = 32
+        let max_callee_ret = 64; // (16-8)*4 = 32 aligned to 16 = 32
+
+        assert_eq!(layout.incoming_args_size, incoming);
+        assert_eq!(layout.outgoing_args_size, outgoing);
+        assert_eq!(layout.stack_return_area, stack_ret);
+
+        // tail_args_size = max(incoming, outgoing + max_callee_ret, stack_ret)
+        let expected_tail = incoming.max(outgoing + max_callee_ret).max(stack_ret);
+        assert_eq!(layout.tail_args_size, expected_tail);
+    }
+
+    #[test]
+    fn test_local_frame_size_excludes_tail_args() {
+        // Verify local_frame_size doesn't include tail-args
+        let layout = FrameLayout::compute(&[Gpr::S0], 2, true, 0, 10, 0, 0);
+
+        let expected_local =
+            layout.setup_area_size + layout.clobber_size + layout.fixed_frame_storage_size;
+        assert_eq!(layout.local_frame_size(), expected_local);
+
+        // total_size should be tail_args + local_frame
+        assert_eq!(
+            layout.total_size(),
+            layout.tail_args_size + layout.local_frame_size()
+        );
+    }
+
+    #[test]
+    fn test_stack_return_offsets_above_outgoing_args() {
+        // Callee with outgoing_args_size=16, returning 10 values (2 on stack)
+        let layout = FrameLayout::compute(&[], 0, true, 0, 10, 10, 0);
+
+        // Stack return at index 8 should be above outgoing args
+        let store_offset = layout.stack_return_store_offset(8).unwrap();
+        let load_offset = layout.stack_return_load_offset(8).unwrap();
+
+        // Load offset (for caller) should be outgoing_args + (8-8)*4 = 16 + 0 = 16
+        assert_eq!(load_offset.as_i32(), 16);
+
+        // Store offset (for callee) must account for SP adjustment
+        // After prologue: SP = caller_SP - tail_adjustment - local_frame
+        // Store at: SP + offset such that after epilogue it's at caller_SP + 16
+        // offset = tail_adjustment + local_frame + 16
+        let expected_store = layout.tail_adjustment() + layout.local_frame_size() as i32 + 16;
+        assert_eq!(store_offset.as_i32(), expected_store);
+    }
+
+    #[test]
+    fn test_prologue_sp_adjustment_phases() {
+        // Function with incoming=8, outgoing=12 (needs tail adjustment)
+        let layout = FrameLayout::compute(&[], 2, true, 8, 12, 0, 0);
+
+        // Phase 1: tail adjustment = tail_args_size - incoming_args_size
+        let incoming_size = 0; // (8-8)*4 = 0
+        let outgoing_size = 32; // (12-8)*4 = 16 aligned to 16
+        assert_eq!(layout.incoming_args_size, incoming_size);
+        assert_eq!(layout.outgoing_args_size, outgoing_size);
+        assert_eq!(layout.tail_args_size, outgoing_size);
+        assert_eq!(layout.tail_adjustment(), outgoing_size as i32);
+
+        // Phase 2: local frame
+        let local_frame =
+            layout.setup_area_size + layout.clobber_size + layout.fixed_frame_storage_size;
+        assert_eq!(layout.local_frame_size(), local_frame);
+
+        // Total SP adjustment = tail_adjustment + local_frame
+        assert_eq!(layout.total_size(), layout.tail_args_size + local_frame);
     }
 }

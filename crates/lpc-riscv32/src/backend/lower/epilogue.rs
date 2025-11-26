@@ -11,9 +11,14 @@ impl super::Lowerer {
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
     ) {
-        let frame_size = frame_layout.total_size();
+        let local_frame_size = frame_layout.local_frame_size();
+        let tail_adjustment = frame_layout.tail_adjustment();
 
-        if frame_size > 0 {
+        // Epilogue reverses the two-phase SP adjustment:
+        // Phase 1: Restore local frame (restore callee-saved regs, RA, then restore SP for local frame)
+        // Phase 2: Undo tail adjustment (if any)
+
+        if local_frame_size > 0 {
             // Restore callee-saved registers (reverse order)
             for reg in abi_info.used_callee_saved.iter().rev() {
                 if let Some(offset) = frame_layout.callee_saved_offset(*reg) {
@@ -43,11 +48,20 @@ impl super::Lowerer {
                 });
             }
 
-            // Restore stack pointer: addi sp, sp, frame_size
+            // Phase 1: Restore stack pointer for local frame
             code.emit(RiscvInst::Addi {
                 rd: Gpr::Sp,
                 rs1: Gpr::Sp,
-                imm: frame_size as i32,
+                imm: local_frame_size as i32,
+            });
+        }
+
+        // Phase 2: Undo tail adjustment (if any)
+        if tail_adjustment > 0 {
+            code.emit(RiscvInst::Addi {
+                rd: Gpr::Sp,
+                rs1: Gpr::Sp,
+                imm: tail_adjustment,
             });
         }
 

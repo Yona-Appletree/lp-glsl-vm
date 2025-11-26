@@ -1,5 +1,5 @@
-
 mod abi;
+mod compile;
 mod elf;
 mod emit;
 mod frame;
@@ -9,9 +9,9 @@ mod regalloc;
 mod register_role;
 mod spill_reload;
 mod test_helpers;
-mod compile;
 
 pub use abi::{Abi, AbiInfo};
+pub use compile::{compile_module, compile_module_to_insts, CompiledModule};
 pub use elf::{debug_elf, generate_elf};
 pub use emit::CodeBuffer;
 pub use frame::FrameLayout;
@@ -25,5 +25,3 @@ pub use test_helpers::{
     expect_ir_memory_error, expect_ir_memory_error_with_ram, expect_ir_ok, expect_ir_register,
     expect_ir_syscall, expect_ir_unaligned_error,
 };
-pub use compile::{compile_module, compile_module_to_insts, CompiledModule};
-

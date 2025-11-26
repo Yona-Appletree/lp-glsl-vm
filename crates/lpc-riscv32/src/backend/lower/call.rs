@@ -153,21 +153,16 @@ impl super::Lowerer {
         // Step 4: Load stack return values (index >= 8) from stack
         //
         // Stack return values are stored in the tail-args area, above outgoing args.
-        // The callee stores them at SP + outgoing_args_size + (idx-8)*4 before epilogue.
-        // After epilogue, SP is restored, so they're at caller_SP + outgoing_args_size + (idx-8)*4.
-        // We load from the same location: SP + outgoing_args_size + (idx-8)*4.
+        // Use FrameLayout helper to get the correct offset relative to caller's SP.
         for (idx, result) in results.iter().enumerate() {
             if idx >= 8 {
-                if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
-                    // Load from tail-args area: SP + outgoing_args_size + stack_offset
-                    let actual_offset = frame_layout.outgoing_args_size as i32 + *stack_offset;
-
-                    // Load from stack into temp register
+                if let Some(load_offset) = frame_layout.stack_return_load_offset(idx) {
+                    // Load from tail-args area using FrameLayout helper
                     let temp_reg = Gpr::T0;
                     code.emit(RiscvInst::Lw {
                         rd: temp_reg,
                         rs1: Gpr::Sp,
-                        imm: actual_offset,
+                        imm: load_offset.as_i32(),
                     });
 
                     // Store to result location (register or spill slot)

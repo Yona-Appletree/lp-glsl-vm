@@ -13,6 +13,7 @@
 extern crate alloc;
 
 mod block;
+mod builder;
 mod function;
 mod inst;
 mod module;
@@ -20,7 +21,6 @@ mod parser;
 mod signature;
 mod types;
 mod value;
-mod builder;
 
 pub use block::Block;
 pub use builder::function_builder::FunctionBuilder;

@@ -1,10 +1,12 @@
 //! Return instruction lowering.
 
 use lpc_lpir::Value;
-use crate::{Gpr, Inst as RiscvInst};
 
-use super::types::{LoweringError, Relocation, RelocationInstType, RelocationTarget};
-use super::super::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
+use super::{
+    super::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation},
+    types::{LoweringError, Relocation, RelocationInstType, RelocationTarget},
+};
+use crate::{Gpr, Inst as RiscvInst};
 
 impl super::Lowerer {
     /// Lower return instruction.
@@ -21,80 +23,27 @@ impl super::Lowerer {
     ) -> Result<(), LoweringError> {
         // Process all return values in a single pass:
         // - First 8 values go to return registers (a0-a7)
-        // - Values at index >= 8 go to stack at positive offsets from SP
+        // - Values at index >= 8 go to stack in the tail-args area
         for (idx, value) in values.iter().enumerate() {
             if let Some(return_reg) = abi_info.return_regs.get(&idx) {
                 // Move to return register (first 8 values)
                 self.load_value_into_reg(code, *value, *return_reg, allocation, frame_layout)?;
             } else if idx >= 8 {
                 // Store to stack (values at index >= 8)
-                // Stack returns are stored in the tail-args area, above outgoing args
-                // Before epilogue: SP points to bottom of tail-args area (SP = caller_SP - total_size)
-                // We store at SP + outgoing_args_size + (idx-8)*4
-                // After epilogue: SP is restored to caller_SP, so returns are at:
-                //   caller_SP - total_size + outgoing_args_size + (idx-8)*4
-                // But caller loads from caller_SP + (idx-8)*4, so we need:
-                //   caller_SP - total_size + outgoing_args_size + (idx-8)*4 = caller_SP + (idx-8)*4
-                //   => -total_size + outgoing_args_size = 0
-                //   => total_size = outgoing_args_size (not true!)
-                //
-                // Actually, the tail-args area persists after epilogue because it's part of the caller's frame.
-                // The caller reserves tail_args_size, which includes space for stack returns.
-                // Stack returns should be stored at a location that, after epilogue, is accessible at
-                // caller_SP + (idx-8)*4. Since tail-args is at caller_SP+0 to caller_SP+tail_args_size-1,
-                // and stack returns go above outgoing args, we store at:
-                //   SP + outgoing_args_size + (idx-8)*4 (before epilogue)
-                //   = (caller_SP - total_size) + outgoing_args_size + (idx-8)*4
-                // After epilogue, SP = caller_SP, so we need to load from:
-                //   caller_SP + outgoing_args_size + (idx-8)*4
-                // But the caller expects them at caller_SP + (idx-8)*4.
-                //
-                // Wait, I think the issue is that stack returns should be stored ABOVE the tail-args area,
-                // not within it. But that doesn't match Cranelift.
-                //
-                // Let me re-read Cranelift: they use StackAMode::OutgoingArg(offset + stack_arg_space),
-                // which means the offset already includes stack_arg_space. So for a return at index 8,
-                // offset is 0, and stack_arg_space is outgoing_args_size, so total offset is outgoing_args_size.
-                // They store at SP + outgoing_args_size, and load from SP + outgoing_args_size after epilogue.
-                // But the caller's tail-args area must be large enough to include this space.
-                //
-                // Actually, I think the issue is simpler: stack returns are stored in the caller's tail-args
-                // area, which is reserved by the caller. The callee stores them at SP + outgoing_args_size + offset,
-                // and after epilogue, the caller loads them from SP + outgoing_args_size + offset (where SP is caller_SP).
-                // But the ABI says they should be at SP + offset. So either:
-                // 1. The ABI is wrong, or
-                // 2. We need to store them differently
-                //
-                // Let me check: according to RISC-V ABI, stack returns go at (idx-8)*4 relative to SP.
-                // But Cranelift stores them at outgoing_args_size + (idx-8)*4. This suggests that
-                // the caller's tail-args area layout is: [outgoing args] [stack returns].
-                // So the caller loads from SP + outgoing_args_size + (idx-8)*4, not SP + (idx-8)*4.
-                //
-                // So the fix is: update call lowering to load from SP + outgoing_args_size + offset.
-                // But wait, we already do that! So the issue must be in return lowering.
-                //
-                // Actually, I think the real issue is that we're storing at the wrong location.
-                // We should store at SP + outgoing_args_size + offset, which we do.
-                // But after epilogue, SP is restored, so they're at caller_SP - total_size + outgoing_args_size + offset.
-                // For this to equal caller_SP + outgoing_args_size + offset (where caller loads from),
-                // we need total_size = 0, which is wrong.
-                //
-                // I think the issue is that tail-args area is NOT part of the callee's frame.
-                // It's part of the caller's frame, and the callee just uses it.
-                // So we should store at SP + total_size + outgoing_args_size + offset, so that after epilogue
-                // (when SP is restored by total_size), they're at caller_SP + outgoing_args_size + offset.
-                if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
+                // Use FrameLayout helper to get the correct offset for storing stack returns.
+                // Stack returns are stored in the tail-args area, above outgoing args.
+                // The offset is relative to SP after prologue (callee's adjusted SP).
+                if let Some(store_offset) = frame_layout.stack_return_store_offset(idx) {
                     // Load value into temp register
                     let temp_reg = Gpr::T0;
                     self.load_value_into_reg(code, *value, temp_reg, allocation, frame_layout)?;
 
-                    // Store above the frame: SP + total_size + outgoing_args_size + stack_offset
-                    // After epilogue restores SP by total_size, these will be at caller_SP + outgoing_args_size + stack_offset
-                    let storage_offset = frame_layout.total_size() as i32 + frame_layout.outgoing_args_size as i32 + *stack_offset;
+                    // Store to tail-args area using FrameLayout helper
+                    // The offset is already correct relative to SP after prologue
                     code.emit(RiscvInst::Sw {
                         rs1: Gpr::Sp,
                         rs2: temp_reg,
-                        imm: storage_offset,
+                        imm: store_offset.as_i32(),
                     });
                 }
             }
@@ -126,9 +75,8 @@ mod tests {
 
     use lpc_lpir::parse_function;
 
-    use crate::backend::Lowerer;
     use crate::backend::{
-        Abi, FrameLayout, compute_liveness, allocate_registers, create_spill_reload_plan,
+        allocate_registers, compute_liveness, create_spill_reload_plan, Abi, FrameLayout, Lowerer,
     };
 
     #[test]
@@ -171,7 +119,12 @@ block0:
         let epilogue_relocs: Vec<_> = lowerer
             .function_relocations
             .iter()
-            .filter(|reloc| matches!(reloc.target, crate::backend::lower::RelocationTarget::Epilogue))
+            .filter(|reloc| {
+                matches!(
+                    reloc.target,
+                    crate::backend::lower::RelocationTarget::Epilogue
+                )
+            })
             .collect();
         assert_eq!(
             epilogue_relocs.len(),
@@ -183,11 +136,7 @@ block0:
         let reloc = &epilogue_relocs[0];
         match &reloc.inst_type {
             crate::backend::lower::RelocationInstType::Jal { rd } => {
-                assert_eq!(
-                    rd,
-                    &crate::Gpr::Zero,
-                    "Return jal should have rd=ZERO"
-                );
+                assert_eq!(rd, &crate::Gpr::Zero, "Return jal should have rd=ZERO");
             }
             _ => panic!("Return relocation should be for jal instruction"),
         }
@@ -236,7 +185,8 @@ block0:
         }
         assert!(
             found_a0_usage,
-            "Return value should be in a0 (return register) before jal - either created there or moved"
+            "Return value should be in a0 (return register) before jal - either created there or \
+             moved"
         );
     }
 }

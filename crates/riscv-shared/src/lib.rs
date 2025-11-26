@@ -10,8 +10,7 @@ extern crate alloc;
 use alloc::string::String;
 
 use lpc_lpir::parse_module;
-use lpc_riscv32::generate_elf;
-use lpc_riscv32::compile_module_to_insts;
+use lpc_riscv32::{compile_module_to_insts, generate_elf};
 
 /// Result of JIT compilation
 pub struct JitResult {

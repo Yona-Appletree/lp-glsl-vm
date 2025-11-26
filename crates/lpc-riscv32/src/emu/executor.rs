@@ -1,12 +1,11 @@
 //! Instruction executor for RISC-V 32-bit instructions.
 
-use crate::{Gpr, Inst};
-
 use super::{
     error::EmulatorError,
     logging::{InstLog, SystemKind},
     memory::Memory,
 };
+use crate::{Gpr, Inst};
 
 /// Result of executing a single instruction.
 #[derive(Debug, Clone)]

@@ -1,12 +1,15 @@
 //! Helper methods for instruction lowering.
 
 use lpc_lpir::Value;
-use crate::{Gpr, Inst as RiscvInst};
 
-use super::types::LoweringError;
-use super::super::{
-    emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation, spill_reload::SpillReloadOp,
+use super::{
+    super::{
+        emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation,
+        spill_reload::SpillReloadOp,
+    },
+    types::LoweringError,
 };
+use crate::{Gpr, Inst as RiscvInst};
 
 /// Helper methods for Lowerer.
 impl super::Lowerer {

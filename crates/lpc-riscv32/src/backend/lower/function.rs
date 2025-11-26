@@ -3,13 +3,15 @@
 use alloc::collections::BTreeMap;
 
 use lpc_lpir::{Function, Value};
-use crate::Inst as RiscvInst;
 
-use super::types::{LoweringError, RelocationInstType, RelocationTarget};
-use super::super::{
-    abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, liveness::InstPoint,
-    regalloc::RegisterAllocation, spill_reload::SpillReloadPlan,
+use super::{
+    super::{
+        abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, liveness::InstPoint,
+        regalloc::RegisterAllocation, spill_reload::SpillReloadPlan,
+    },
+    types::{LoweringError, RelocationInstType, RelocationTarget},
 };
+use crate::Inst as RiscvInst;
 
 /// Lower a function to RISC-V 32-bit code.
 ///

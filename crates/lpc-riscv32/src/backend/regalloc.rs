@@ -5,12 +5,12 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
 use lpc_lpir::Value;
-use crate::Gpr;
 
 use super::{
     liveness::{InstPoint, LiveRange, LivenessInfo},
     register_role::RegisterRole,
 };
+use crate::Gpr;
 
 /// Register allocation result.
 #[derive(Debug, Clone)]
@@ -160,7 +160,10 @@ impl LinearScanAllocator {
 }
 
 /// Allocate registers for a function using linear scan.
-pub fn allocate_registers(_func: &lpc_lpir::Function, liveness: &LivenessInfo) -> RegisterAllocation {
+pub fn allocate_registers(
+    _func: &lpc_lpir::Function,
+    liveness: &LivenessInfo,
+) -> RegisterAllocation {
     let mut allocator = LinearScanAllocator::new();
     let mut value_to_reg = BTreeMap::new();
     let mut value_to_slot = BTreeMap::new();
@@ -361,9 +364,15 @@ block0:
         let allocation = allocate_registers(&func, &liveness);
 
         // All values should be allocated (no spills needed for simple case)
-        assert!(allocation.value_to_reg.contains_key(&lpc_lpir::Value::new(0)));
-        assert!(allocation.value_to_reg.contains_key(&lpc_lpir::Value::new(1)));
-        assert!(allocation.value_to_reg.contains_key(&lpc_lpir::Value::new(2)));
+        assert!(allocation
+            .value_to_reg
+            .contains_key(&lpc_lpir::Value::new(0)));
+        assert!(allocation
+            .value_to_reg
+            .contains_key(&lpc_lpir::Value::new(1)));
+        assert!(allocation
+            .value_to_reg
+            .contains_key(&lpc_lpir::Value::new(2)));
     }
 
     #[test]

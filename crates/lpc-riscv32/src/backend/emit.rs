@@ -2,8 +2,8 @@
 
 use alloc::vec::Vec;
 
-use crate::Inst;
 use super::lower::InstOffset;
+use crate::Inst;
 
 /// A code buffer that accumulates RISC-V 32-bit instructions.
 ///
@@ -90,9 +90,8 @@ impl Default for CodeBuffer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Gpr, Inst};
-
     use super::*;
+    use crate::{Gpr, Inst};
 
     #[test]
     fn test_code_buffer() {

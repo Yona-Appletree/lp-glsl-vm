@@ -1,7 +1,6 @@
 //! Memory access tests for the RISC-V 32 emu.
 
-use lpc_riscv32::Riscv32Emulator;
-use lpc_riscv32::assemble_code;
+use lpc_riscv32::{assemble_code, Riscv32Emulator};
 
 #[test]
 fn test_unaligned_access() {

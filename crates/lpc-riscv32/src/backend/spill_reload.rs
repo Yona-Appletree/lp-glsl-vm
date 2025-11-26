@@ -6,13 +6,13 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
 use lpc_lpir::{Function, Inst, Value};
-use crate::Gpr;
 
 use super::{
     liveness::{InstPoint, LivenessInfo},
     regalloc::RegisterAllocation,
     register_role::RegisterRole,
 };
+use crate::Gpr;
 
 /// Spill or reload operation.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -232,8 +232,7 @@ mod tests {
     use lpc_lpir::{parse_function, Block, Function, Signature};
 
     use super::*;
-    use crate::backend::{compute_liveness, allocate_registers};
-    use crate::backend::liveness::InstPoint;
+    use crate::backend::{allocate_registers, compute_liveness, liveness::InstPoint};
 
     #[test]
     fn test_spill_after_def() {

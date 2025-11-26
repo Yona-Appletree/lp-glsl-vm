@@ -168,4 +168,3 @@ mod tests {
         assert!(!Gpr::Sp.is_callee_saved());
     }
 }
-

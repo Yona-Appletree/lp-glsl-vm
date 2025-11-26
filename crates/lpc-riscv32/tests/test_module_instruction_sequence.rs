@@ -25,8 +25,7 @@ return v0
 }
 }"#;
 
-    use lpc_riscv32::expect_ir_syscall;
-    use lpc_riscv32::Gpr;
+    use lpc_riscv32::{expect_ir_syscall, Gpr};
 
     // Run until syscall and verify syscall info
     let mut emu = expect_ir_syscall(ir, 0, &[42]);

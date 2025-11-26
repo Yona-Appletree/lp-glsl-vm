@@ -2,8 +2,7 @@
 
 use alloc::{string::String, vec::Vec};
 
-use crate::builder::function_builder::FunctionBuilder;
-use crate::{Inst, Type, Value};
+use crate::{builder::function_builder::FunctionBuilder, Inst, Type, Value};
 
 /// Builder for adding instructions to a block.
 ///

@@ -1,10 +1,12 @@
 //! Syscall instruction lowering.
 
 use lpc_lpir::Value;
-use crate::{Gpr, Inst as RiscvInst};
 
-use super::types::LoweringError;
-use super::super::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
+use super::{
+    super::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation},
+    types::LoweringError,
+};
+use crate::{Gpr, Inst as RiscvInst};
 
 impl super::Lowerer {
     /// Lower syscall instruction.
