@@ -2,9 +2,37 @@
 
 use r5_builder::FunctionBuilder;
 use r5_ir::{parse_module, Module, Signature, Type};
-use r5_target_riscv32::{compile_module, generate_elf, CodeBuffer, Lowerer};
+use r5_target_riscv32::{
+    compile_module, generate_elf, Abi, CodeBuffer, FrameLayout, Lowerer, compute_liveness,
+    allocate_registers, create_spill_reload_plan,
+};
 use r5_test_util::VmRunner;
 use riscv32_encoder::{disassemble_code, Gpr, Inst};
+
+/// Helper to lower a function with all required analysis passes.
+fn lower_function(func: &r5_ir::Function) -> CodeBuffer {
+    let liveness = compute_liveness(func);
+    let allocation = allocate_registers(func, &liveness);
+    let spill_reload = create_spill_reload_plan(func, &allocation, &liveness);
+
+    let has_calls = func
+        .blocks
+        .iter()
+        .any(|block| block.insts.iter().any(|inst| matches!(inst, r5_ir::Inst::Call { .. })));
+
+    let frame_layout = FrameLayout::compute(
+        &allocation.used_callee_saved,
+        allocation.spill_slot_count,
+        has_calls,
+        func.signature.params.len(),
+        8, // TODO: Compute actual outgoing args
+    );
+
+    let abi_info = Abi::compute_abi_info(func, &allocation);
+
+    let mut lowerer = Lowerer::new();
+    lowerer.lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
+}
 
 /// Helper to test a module with multiple functions
 fn test_module(module: &Module, entry_func_name: &str, args: &[i32], expected: i32) {
@@ -298,9 +326,7 @@ module {
         .functions
         .get("main")
         .expect("main function not found");
-    let mut lowerer = Lowerer::new();
-    lowerer.set_module(module.clone());
-    let func_code = lowerer.lower_function(func);
+    let func_code = lower_function(func);
 
     // Get prologue instructions for inspection
     let prologue_insts = get_prologue_instructions(&func_code, 0, 20);
@@ -378,9 +404,7 @@ module {
         .functions
         .get("main")
         .expect("main function not found");
-    let mut lowerer = Lowerer::new();
-    lowerer.set_module(module.clone());
-    let func_code = lowerer.lower_function(func);
+    let func_code = lower_function(func);
 
     // Get epilogue instructions (last few instructions before return)
     let bytes = func_code.as_bytes();
@@ -534,9 +558,7 @@ module {
     
     // Compile the function and check spill slots
     let func = module.functions.get("main").expect("main function not found");
-    let mut lowerer = Lowerer::new();
-    lowerer.set_module(module.clone());
-    let func_code = lowerer.lower_function(func);
+    let func_code = lower_function(func);
     
     let bytes = func_code.as_bytes();
     eprintln!("\n=== Function Code (Call-Site Spills) ===");
@@ -608,9 +630,7 @@ module {
     
     // Compile the function and verify it works (even with large frame)
     let func = module.functions.get("main").expect("main function not found");
-    let mut lowerer = Lowerer::new();
-    lowerer.set_module(module.clone());
-    let func_code = lowerer.lower_function(func);
+    let func_code = lower_function(func);
     
     // The function should compile without panicking
     // Frame size should be handled correctly (even if > 2047 bytes)

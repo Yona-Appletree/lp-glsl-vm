@@ -10,16 +10,23 @@
 
 extern crate alloc;
 
+mod abi;
 mod elf;
 mod emit;
 mod frame;
+mod liveness;
 mod lower;
 mod regalloc;
+mod spill_reload;
 
+pub use abi::{Abi, AbiInfo};
 pub use elf::{debug_elf, generate_elf};
 pub use emit::CodeBuffer;
 pub use frame::FrameLayout;
+pub use liveness::{compute_liveness, LivenessInfo};
 pub use lower::Lowerer;
+pub use regalloc::{allocate_registers, is_callee_saved, is_caller_saved, RegisterAllocation};
+pub use spill_reload::{create_spill_reload_plan, SpillReloadPlan};
 
 /// Compile an IR function to RISC-V 32-bit code.
 ///
@@ -28,8 +35,31 @@ pub use lower::Lowerer;
 /// This function is deprecated. Use `compile_module` instead.
 #[deprecated(note = "Use compile_module instead")]
 pub fn compile_function(func: &r5_ir::Function) -> alloc::vec::Vec<u8> {
+    // Compute liveness, allocation, spill/reload, frame layout, and ABI info
+    let liveness = compute_liveness(func);
+    let allocation = allocate_registers(func, &liveness);
+    let spill_reload = create_spill_reload_plan(func, &allocation, &liveness);
+
+    // Check if function has calls
+    let has_calls = func.blocks.iter().any(|block| {
+        block
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, r5_ir::Inst::Call { .. }))
+    });
+
+    let frame_layout = FrameLayout::compute(
+        &allocation.used_callee_saved,
+        allocation.spill_slot_count,
+        has_calls,
+        func.signature.params.len(),
+        8, // TODO: Compute actual outgoing args
+    );
+
+    let abi_info = Abi::compute_abi_info(func, &allocation);
+
     let mut lowerer = Lowerer::new();
-    let code = lowerer.lower_function(func);
+    let code = lowerer.lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info);
     code.as_bytes().to_vec()
 }
 
@@ -111,7 +141,31 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
     if let Some(entry_name) = &module.entry_function {
         if let Some(func) = module.functions.get(entry_name) {
             lowerer.clear_relocations();
-            let code = lowerer.lower_function(func);
+
+            // Compute liveness, allocation, spill/reload, frame layout, and ABI info
+            let liveness = compute_liveness(func);
+            let allocation = allocate_registers(func, &liveness);
+            let spill_reload = create_spill_reload_plan(func, &allocation, &liveness);
+
+            let has_calls = func.blocks.iter().any(|block| {
+                block
+                    .insts
+                    .iter()
+                    .any(|inst| matches!(inst, r5_ir::Inst::Call { .. }))
+            });
+
+            let frame_layout = FrameLayout::compute(
+                &allocation.used_callee_saved,
+                allocation.spill_slot_count,
+                has_calls,
+                func.signature.params.len(),
+                8, // TODO: Compute actual outgoing args
+            );
+
+            let abi_info = Abi::compute_abi_info(func, &allocation);
+
+            let code =
+                lowerer.lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info);
             let mut code_bytes = code.as_bytes().to_vec();
 
             // Prepend SP initialization to entry function
@@ -196,7 +250,31 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
             continue;
         }
         lowerer.clear_relocations();
-        let code = lowerer.lower_function(func);
+
+        // Compute liveness, allocation, spill/reload, frame layout, and ABI info
+        let liveness = compute_liveness(func);
+        let allocation = allocate_registers(func, &liveness);
+        let spill_reload = create_spill_reload_plan(func, &allocation, &liveness);
+
+        let has_calls = func.blocks.iter().any(|block| {
+            block
+                .insts
+                .iter()
+                .any(|inst| matches!(inst, r5_ir::Inst::Call { .. }))
+        });
+
+        let frame_layout = FrameLayout::compute(
+            &allocation.used_callee_saved,
+            allocation.spill_slot_count,
+            has_calls,
+            func.signature.params.len(),
+            8, // TODO: Compute actual outgoing args
+        );
+
+        let abi_info = Abi::compute_abi_info(func, &allocation);
+
+        let code =
+            lowerer.lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info);
         let code_bytes = code.as_bytes().to_vec();
         let code_size = code_bytes.len();
         let relocations = lowerer.relocations().to_vec();
