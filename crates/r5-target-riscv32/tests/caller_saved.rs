@@ -9,6 +9,8 @@ use r5_target_riscv32::{
 use r5_test_util::VmRunner;
 use riscv32_encoder::{disassemble_code, Gpr, Inst};
 
+mod test_module_instruction_sequence;
+
 /// Helper to lower a function with all required analysis passes.
 fn lower_function(func: &r5_ir::Function) -> CodeBuffer {
     let liveness = compute_liveness(func);

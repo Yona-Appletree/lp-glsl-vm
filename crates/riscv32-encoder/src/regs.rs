@@ -1,5 +1,7 @@
 //! RISC-V 32-bit general-purpose registers.
 
+extern crate alloc;
+
 /// RISC-V 32-bit general-purpose register.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Gpr(u8);
@@ -86,6 +88,62 @@ impl Gpr {
     // x3: global pointer
     pub const TP: Gpr = Gpr(4);
     pub const ZERO: Gpr = Gpr(0); // x31: temporary
+
+    /// Parse a register name string into a Gpr.
+    ///
+    /// Supports both named registers (zero, ra, sp, a0-a7, s0-s11, t0-t6, etc.)
+    /// and numeric registers (x0-x31).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string if the register name is invalid.
+    pub fn from_name(name: &str) -> Result<Self, alloc::string::String> {
+        match name {
+            "zero" | "x0" => Ok(Gpr::ZERO),
+            "ra" | "x1" => Ok(Gpr::RA),
+            "sp" | "x2" => Ok(Gpr::SP),
+            "gp" | "x3" => Ok(Gpr::GP),
+            "tp" | "x4" => Ok(Gpr::TP),
+            "t0" | "x5" => Ok(Gpr::T0),
+            "t1" | "x6" => Ok(Gpr::T1),
+            "t2" | "x7" => Ok(Gpr::T2),
+            "s0" | "fp" | "x8" => Ok(Gpr::S0),
+            "s1" | "x9" => Ok(Gpr::S1),
+            "a0" | "x10" => Ok(Gpr::A0),
+            "a1" | "x11" => Ok(Gpr::A1),
+            "a2" | "x12" => Ok(Gpr::A2),
+            "a3" | "x13" => Ok(Gpr::A3),
+            "a4" | "x14" => Ok(Gpr::A4),
+            "a5" | "x15" => Ok(Gpr::A5),
+            "a6" | "x16" => Ok(Gpr::A6),
+            "a7" | "x17" => Ok(Gpr::A7),
+            "s2" | "x18" => Ok(Gpr::S2),
+            "s3" | "x19" => Ok(Gpr::S3),
+            "s4" | "x20" => Ok(Gpr::S4),
+            "s5" | "x21" => Ok(Gpr::S5),
+            "s6" | "x22" => Ok(Gpr::S6),
+            "s7" | "x23" => Ok(Gpr::S7),
+            "s8" | "x24" => Ok(Gpr::S8),
+            "s9" | "x25" => Ok(Gpr::S9),
+            "s10" | "x26" => Ok(Gpr::S10),
+            "s11" | "x27" => Ok(Gpr::S11),
+            "t3" | "x28" => Ok(Gpr::T3),
+            "t4" | "x29" => Ok(Gpr::T4),
+            "t5" | "x30" => Ok(Gpr::T5),
+            "t6" | "x31" => Ok(Gpr::T6),
+            _ => {
+                // Try parsing as xN or numeric
+                if let Some(num_str) = name.strip_prefix("x") {
+                    if let Ok(num) = num_str.parse::<u8>() {
+                        if num < 32 {
+                            return Ok(Gpr::new(num));
+                        }
+                    }
+                }
+                Err(alloc::format!("Invalid register name: {}", name))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

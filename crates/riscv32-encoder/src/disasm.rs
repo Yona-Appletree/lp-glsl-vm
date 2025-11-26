@@ -1,11 +1,28 @@
 //! RISC-V 32-bit instruction disassembly.
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String};
 
 /// Disassemble a single RISC-V 32-bit instruction.
 ///
 /// Returns a human-readable string like "add a0, a1, a2" or "jal ra, 16".
 pub fn disassemble_instruction(inst: u32) -> String {
+    disassemble_instruction_with_labels(inst, 0, None)
+}
+
+/// Disassemble a single RISC-V 32-bit instruction with label support.
+///
+/// # Arguments
+///
+/// * `inst` - The 32-bit instruction word
+/// * `pc` - Program counter (address) of this instruction
+/// * `labels` - Optional map of address -> label name, and reverse map for target lookups
+///
+/// Returns a human-readable string with labels substituted for offsets when available.
+fn disassemble_instruction_with_labels(
+    inst: u32,
+    pc: u32,
+    labels: Option<(&BTreeMap<u32, String>, &BTreeMap<u32, String>)>,
+) -> String {
     let opcode = inst & 0x7f;
     let rd = ((inst >> 7) & 0x1f) as u8;
     let funct3 = ((inst >> 12) & 0x7) as u8;
@@ -107,22 +124,45 @@ pub fn disassemble_instruction(inst: u32) -> String {
         }
         0x6f => {
             // J-type (jal)
-            format!("jal {}, {}", gpr_name(rd), imm_j)
+            let target = pc.wrapping_add(imm_j as u32);
+            let label = if let Some((_, rev)) = labels {
+                if let Some(name) = rev.get(&target) {
+                    name.clone()
+                } else {
+                    format!("label_{}", target / 4)
+                }
+            } else {
+                format!("label_{}", target / 4)
+            };
+            format!("jal {}, {}", gpr_name(rd), label)
         }
         0x67 => {
             // I-type (jalr)
             match funct3 {
-                0x0 => format!("jalr {}, {}({})", gpr_name(rd), imm_i, gpr_name(rs1)),
+                0x0 => {
+                    // For jalr, we can't determine the target statically, so just use the immediate
+                    format!("jalr {}, {}({})", gpr_name(rd), imm_i, gpr_name(rs1))
+                }
                 _ => format!("unknown_jalr 0x{:08x}", inst),
             }
         }
         0x63 => {
             // B-type (branch)
+            let target = pc.wrapping_add(imm_b as u32);
+            let label = if let Some((_, rev)) = labels {
+                if let Some(name) = rev.get(&target) {
+                    name.clone()
+                } else {
+                    format!("label_{}", target / 4)
+                }
+            } else {
+                format!("label_{}", target / 4)
+            };
             match funct3 {
-                0x0 => format!("beq {}, {}, {}", gpr_name(rs1), gpr_name(rs2), imm_b),
-                0x1 => format!("bne {}, {}, {}", gpr_name(rs1), gpr_name(rs2), imm_b),
-                0x4 => format!("blt {}, {}, {}", gpr_name(rs1), gpr_name(rs2), imm_b),
-                0x5 => format!("bge {}, {}, {}", gpr_name(rs1), gpr_name(rs2), imm_b),
+                0x0 => format!("beq {}, {}, {}", gpr_name(rs1), gpr_name(rs2), label),
+                0x1 => format!("bne {}, {}, {}", gpr_name(rs1), gpr_name(rs2), label),
+                0x4 => format!("blt {}, {}, {}", gpr_name(rs1), gpr_name(rs2), label),
+                0x5 => format!("bge {}, {}, {}", gpr_name(rs1), gpr_name(rs2), label),
                 _ => format!("unknown_branch 0x{:08x}", inst),
             }
         }
@@ -143,10 +183,128 @@ pub fn disassemble_instruction(inst: u32) -> String {
 /// Returns a formatted string with one instruction per line, showing
 /// the address/offset and the disassembled instruction.
 pub fn disassemble_code(code: &[u8]) -> String {
+    disassemble_code_with_labels(code, None)
+}
+
+/// Disassemble a code buffer containing RISC-V instructions with label support.
+///
+/// # Arguments
+///
+/// * `code` - Binary code buffer to disassemble
+/// * `labels` - Optional map of address -> label name
+///
+/// Returns a formatted string with labels printed at their addresses and
+/// used in branch/jump instructions. Auto-generates indexed labels for
+/// branch/jump targets if not provided.
+pub fn disassemble_code_with_labels(code: &[u8], labels: Option<&BTreeMap<u32, String>>) -> String {
     let mut result = String::new();
     let mut offset = 0;
 
+    // Build reverse map (address -> label) for efficient lookups
+    let label_map = labels.map(|map| {
+        let mut rev_map = BTreeMap::new();
+        for (addr, name) in map.iter() {
+            rev_map.insert(*addr, name.clone());
+        }
+        rev_map
+    });
+
+    // Collect all branch/jump targets to auto-generate labels
+    let mut auto_labels = BTreeMap::new();
+    let mut label_counter = 0;
+
+    // First pass: identify all branch/jump targets
+    let mut temp_offset = 0;
+    while temp_offset + 4 <= code.len() {
+        let inst_bytes = [
+            code[temp_offset],
+            code[temp_offset + 1],
+            code[temp_offset + 2],
+            code[temp_offset + 3],
+        ];
+        let inst = u32::from_le_bytes(inst_bytes);
+        let opcode = inst & 0x7f;
+
+        // Extract target addresses for branches and jumps
+        match opcode {
+            0x6f => {
+                // JAL
+                let imm_j = {
+                    let imm_20 = ((inst >> 31) & 0x1) as i32;
+                    let imm_10_1 = ((inst >> 21) & 0x3ff) as i32;
+                    let imm_11 = ((inst >> 20) & 0x1) as i32;
+                    let imm_19_12 = ((inst >> 12) & 0xff) as i32;
+                    let imm = (imm_20 << 20) | (imm_19_12 << 12) | (imm_11 << 11) | (imm_10_1 << 1);
+                    if (imm & 0x100000) != 0 {
+                        imm | (-2097152i32)
+                    } else {
+                        imm
+                    }
+                };
+                let target = (temp_offset as u32).wrapping_add(imm_j as u32);
+                if label_map
+                    .as_ref()
+                    .map_or(true, |m| !m.contains_key(&target))
+                {
+                    auto_labels.entry(target).or_insert_with(|| {
+                        label_counter += 1;
+                        format!("label_{}", label_counter - 1)
+                    });
+                }
+            }
+            0x63 => {
+                // Branch
+                let imm_b = {
+                    let imm_12 = ((inst >> 31) & 0x1) as i32;
+                    let imm_10_5 = ((inst >> 25) & 0x3f) as i32;
+                    let imm_4_1 = ((inst >> 8) & 0xf) as i32;
+                    let imm_11 = ((inst >> 7) & 0x1) as i32;
+                    let imm = (imm_12 << 12) | (imm_11 << 11) | (imm_10_5 << 5) | (imm_4_1 << 1);
+                    if (imm & 0x1000) != 0 {
+                        imm | (-8192i32)
+                    } else {
+                        imm
+                    }
+                };
+                let target = (temp_offset as u32).wrapping_add(imm_b as u32);
+                if label_map
+                    .as_ref()
+                    .map_or(true, |m| !m.contains_key(&target))
+                {
+                    auto_labels.entry(target).or_insert_with(|| {
+                        label_counter += 1;
+                        format!("label_{}", label_counter - 1)
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        temp_offset += 4;
+    }
+
+    // Merge provided labels with auto-generated ones
+    let mut all_labels = BTreeMap::new();
+    if let Some(provided) = labels {
+        for (addr, name) in provided.iter() {
+            all_labels.insert(*addr, name.clone());
+        }
+    }
+    for (addr, name) in auto_labels.iter() {
+        all_labels.entry(*addr).or_insert_with(|| name.clone());
+    }
+
+    // Build reverse map for instruction disassembly
+    let rev_map = all_labels.clone();
+
+    // Second pass: disassemble with labels
     while offset + 4 <= code.len() {
+        let offset_u32 = offset as u32;
+        // Check if there's a label at this address
+        if let Some(label_name) = all_labels.get(&offset_u32) {
+            result.push_str(&format!("{}:\n", label_name));
+        }
+
         // Read 32-bit instruction (little-endian)
         let inst_bytes = [
             code[offset],
@@ -156,7 +314,12 @@ pub fn disassemble_code(code: &[u8]) -> String {
         ];
         let inst = u32::from_le_bytes(inst_bytes);
 
-        let disasm = disassemble_instruction(inst);
+        let labels_for_inst = if labels.is_some() || !rev_map.is_empty() {
+            Some((&all_labels, &rev_map))
+        } else {
+            None
+        };
+        let disasm = disassemble_instruction_with_labels(inst, offset_u32, labels_for_inst);
         result.push_str(&format!("0x{:04x}: {}\n", offset, disasm));
 
         offset += 4;
@@ -164,6 +327,10 @@ pub fn disassemble_code(code: &[u8]) -> String {
 
     // Handle remaining bytes (if any)
     if offset < code.len() {
+        let offset_u32 = offset as u32;
+        if let Some(label_name) = all_labels.get(&offset_u32) {
+            result.push_str(&format!("{}:\n", label_name));
+        }
         result.push_str(&format!("0x{:04x}: <incomplete instruction>\n", offset));
     }
 
@@ -259,6 +426,8 @@ mod tests {
 
     #[test]
     fn test_disassemble_code() {
+        use alloc::vec::Vec;
+
         let mut code = Vec::new();
         code.extend_from_slice(&add(Gpr::A0, Gpr::A1, Gpr::A2).to_le_bytes());
         code.extend_from_slice(&addi(Gpr::A1, Gpr::A0, 10).to_le_bytes());
@@ -268,5 +437,69 @@ mod tests {
         assert!(disasm.contains("add a0, a1, a2"));
         assert!(disasm.contains("addi a1, a0, 10"));
         assert!(disasm.contains("ecall"));
+    }
+
+    #[test]
+    fn test_disassemble_code_with_labels() {
+        use alloc::{collections::BTreeMap, string::ToString, vec::Vec};
+
+        let mut code = Vec::new();
+        code.extend_from_slice(&addi(Gpr::A0, Gpr::ZERO, 5).to_le_bytes());
+        code.extend_from_slice(&addi(Gpr::A1, Gpr::ZERO, 10).to_le_bytes());
+        code.extend_from_slice(&beq(Gpr::A0, Gpr::A1, 8).to_le_bytes());
+        code.extend_from_slice(&addi(Gpr::A0, Gpr::A0, 1).to_le_bytes());
+
+        let labels = BTreeMap::from([(0x0008, "loop".to_string())]);
+        let disasm = disassemble_code_with_labels(&code, Some(&labels));
+
+        assert!(disasm.contains("loop:"));
+        assert!(disasm.contains("beq"));
+    }
+
+    #[test]
+    fn test_disassemble_code_auto_labels() {
+        use alloc::vec::Vec;
+
+        let mut code = Vec::new();
+        code.extend_from_slice(&addi(Gpr::A0, Gpr::ZERO, 5).to_le_bytes());
+        code.extend_from_slice(&jal(Gpr::RA, 8).to_le_bytes());
+        code.extend_from_slice(&addi(Gpr::A0, Gpr::A0, 1).to_le_bytes());
+
+        let disasm = disassemble_code_with_labels(&code, None);
+        // Should auto-generate label_2 for the jal target
+        assert!(disasm.contains("label_"));
+        assert!(disasm.contains("jal"));
+    }
+
+    #[test]
+    fn test_round_trip_assemble_disassemble() {
+        use crate::asm::assemble_code;
+
+        let asm = "addi a0, zero, 5\naddi a1, zero, 10\nadd a0, a0, a1\nebreak";
+        let code = assemble_code(asm, None).unwrap();
+        let disasm = disassemble_code(&code);
+
+        // Check that all instructions are present
+        assert!(disasm.contains("addi a0, zero, 5"));
+        assert!(disasm.contains("addi a1, zero, 10"));
+        assert!(disasm.contains("add a0, a0, a1"));
+        assert!(disasm.contains("ebreak"));
+    }
+
+    #[test]
+    fn test_round_trip_with_labels() {
+        use alloc::{collections::BTreeMap, string::ToString, vec::Vec};
+
+        use crate::asm::assemble_code;
+
+        let asm = "addi a0, zero, 5\nloop:\naddi a0, a0, 1\nbeq a0, a1, loop";
+        let code = assemble_code(asm, None).unwrap();
+
+        // Disassemble with labels
+        let labels = BTreeMap::from([(0x0004, "loop".to_string())]);
+        let disasm = disassemble_code_with_labels(&code, Some(&labels));
+
+        assert!(disasm.contains("loop:"));
+        assert!(disasm.contains("beq"));
     }
 }

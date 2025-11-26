@@ -1,0 +1,14 @@
+[package]
+name = "riscv32-emulator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "RISC-V 32-bit emulator for testing and debugging"
+
+[lib]
+
+[dependencies]
+riscv32-encoder = { path = "../riscv32-encoder" }
+
+[dev-dependencies]
+

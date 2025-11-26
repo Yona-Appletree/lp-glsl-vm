@@ -93,16 +93,25 @@ pub fn create_spill_reload_plan(
     // Handle call sites: spill caller-saved values before calls
     // Track maximum temporary spill slots needed across all call sites
     let mut max_temp_slots = 0;
-    
+
     for (block_idx, block) in func.blocks.iter().enumerate() {
         for (inst_idx, inst) in block.insts.iter().enumerate() {
             if matches!(inst, Inst::Call { .. }) {
                 let call_point = InstPoint::new(block_idx, inst_idx + 1);
 
                 // Find all live values in caller-saved registers
+                // BUT: Don't spill argument/return registers (a0-a7) before calls,
+                // as they're handled by the ABI and will be clobbered/used by the call.
+                // Only spill temporary registers (t0-t6) that are live across calls.
                 let mut to_spill = Vec::new();
                 for (value, reg) in &allocation.value_to_reg {
                     if crate::abi::Abi::is_caller_saved(*reg) {
+                        // Skip argument/return registers (a0-a7) - they're handled by the ABI
+                        let reg_num = reg.num();
+                        if reg_num >= 10 && reg_num <= 17 {
+                            // a0-a7: Don't spill these - they're used for arguments/returns
+                            continue;
+                        }
                         // Check if value is live across the call
                         if let Some(live_range) = liveness.live_range(*value) {
                             if live_range.last_use >= call_point {
@@ -117,7 +126,7 @@ pub fn create_spill_reload_plan(
                     let mut spills = Vec::new();
                     let mut temp_slot_counter = allocation.spill_slot_count as u32;
                     let mut temp_slots_needed = 0;
-                    
+
                     for (value, reg) in to_spill {
                         // Only spill if not already spilled
                         if !allocation.value_to_slot.contains_key(&value) {
@@ -128,34 +137,33 @@ pub fn create_spill_reload_plan(
                             let temp_slot = temp_slot_counter;
                             temp_slot_counter += 1;
                             temp_slots_needed += 1;
-                            
+
                             spills.push(SpillReloadOp::Spill {
                                 value,
                                 reg,
                                 slot: temp_slot,
                             });
-                            
+
                             // Also create a reload after the call if the value is still live
                             if let Some(live_range) = liveness.live_range(value) {
                                 if live_range.last_use > call_point {
                                     let after_point = InstPoint::new(block_idx, inst_idx + 2);
-                                    after
-                                        .entry(after_point)
-                                        .or_insert_with(Vec::new)
-                                        .push(SpillReloadOp::Reload {
+                                    after.entry(after_point).or_insert_with(Vec::new).push(
+                                        SpillReloadOp::Reload {
                                             value,
                                             reg,
                                             slot: temp_slot,
-                                        });
+                                        },
+                                    );
                                 }
                             }
                         }
                         // If value is already spilled, no need to do anything - it's already safe
                     }
-                    
+
                     // Track maximum temporary slots needed
                     max_temp_slots = max_temp_slots.max(temp_slots_needed);
-                    
+
                     if !spills.is_empty() {
                         before.insert(call_point, spills);
                     }
@@ -396,29 +404,29 @@ block0:
                 // Should have spill before call and reload after call
                 let call_point = InstPoint::new(0, 3); // Call instruction
                 let after_call_point = InstPoint::new(0, 4); // After call
-                
+
                 // Check for spill before call
                 let has_spill = plan
                     .before
                     .get(&call_point)
                     .map(|ops| {
-                        ops.iter().any(|op| {
-                            matches!(op, SpillReloadOp::Spill { value, .. } if *value == v1)
-                        })
+                        ops.iter().any(
+                            |op| matches!(op, SpillReloadOp::Spill { value, .. } if *value == v1),
+                        )
                     })
                     .unwrap_or(false);
-                
+
                 // Check for reload after call
                 let has_reload = plan
                     .after
                     .get(&after_call_point)
                     .map(|ops| {
-                        ops.iter().any(|op| {
-                            matches!(op, SpillReloadOp::Reload { value, .. } if *value == v1)
-                        })
+                        ops.iter().any(
+                            |op| matches!(op, SpillReloadOp::Reload { value, .. } if *value == v1),
+                        )
                     })
                     .unwrap_or(false);
-                
+
                 assert!(
                     has_spill || has_reload,
                     "Caller-saved value live across call should have spill/reload operations"
@@ -463,13 +471,14 @@ block0:
                 // Should not have duplicate spills for already-spilled values
                 let spill_count = ops
                     .iter()
-                    .filter(|op| {
-                        matches!(op, SpillReloadOp::Spill { value, .. } if *value == v1)
-                    })
+                    .filter(|op| matches!(op, SpillReloadOp::Spill { value, .. } if *value == v1))
                     .count();
                 // If there's a spill, it should be for a different reason (temporary spill)
                 // But the value is already spilled, so it shouldn't need another spill
-                assert_eq!(spill_count, 0, "Already-spilled value shouldn't need additional spill");
+                assert_eq!(
+                    spill_count, 0,
+                    "Already-spilled value shouldn't need additional spill"
+                );
             }
         }
     }
@@ -527,18 +536,16 @@ block0:
 
         // Verify that all temporary spill slots are within frame bounds
         // The maximum temporary slot number would be: allocation.spill_slot_count + max_temp_spill_slots - 1
-        let max_temp_slot = (allocation.spill_slot_count + spill_reload.max_temp_spill_slots) as u32;
+        let max_temp_slot =
+            (allocation.spill_slot_count + spill_reload.max_temp_spill_slots) as u32;
         if max_temp_slot > allocation.spill_slot_count as u32 {
             // Check that the maximum temporary slot offset is within the frame
             let max_offset = frame_layout.spill_slot_offset(max_temp_slot - 1);
             let frame_size = frame_layout.total_size();
-            
+
             // The offset should be negative and within the frame bounds
             // Frame starts at -frame_size (after SP adjustment)
-            assert!(
-                max_offset < 0,
-                "Spill slot offset should be negative"
-            );
+            assert!(max_offset < 0, "Spill slot offset should be negative");
             assert!(
                 max_offset.abs() as u32 <= frame_size,
                 "Spill slot offset {} should be within frame size {}",
@@ -567,8 +574,7 @@ block0:
 
         // Functions without calls shouldn't need temporary spill slots
         assert_eq!(
-            spill_reload.max_temp_spill_slots,
-            0,
+            spill_reload.max_temp_spill_slots, 0,
             "Functions without calls shouldn't need temporary spill slots"
         );
     }
@@ -619,7 +625,7 @@ block0:
             let max_slot = (total_spill_slots - 1) as u32;
             let max_offset = frame_layout.spill_slot_offset(max_slot);
             let frame_size = frame_layout.total_size();
-            
+
             assert!(
                 max_offset.abs() as u32 <= frame_size,
                 "All spill slots should be within frame bounds"

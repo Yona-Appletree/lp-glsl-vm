@@ -8,5 +8,6 @@ description = "RISC-V 32-bit instruction encoder"
 [lib]
 
 [dependencies]
+nom = { version = "7", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]

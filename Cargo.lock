@@ -135,6 +135,7 @@ dependencies = [
  "r5-builder",
  "r5-ir",
  "r5-target-riscv32",
+ "riscv32-emulator",
  "riscv32-encoder",
 ]
 
@@ -148,8 +149,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "riscv32-emulator"
+version = "0.1.0"
+dependencies = [
+ "riscv32-encoder",
+]
+
+[[package]]
 name = "riscv32-encoder"
 version = "0.1.0"
+dependencies = [
+ "nom",
+]
 
 [[package]]
 name = "scopeguard"

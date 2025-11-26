@@ -35,8 +35,10 @@
 //! }
 //! ```
 
+mod emulator_runner;
 mod r5_fn_test;
 mod vm_runner;
 
+pub use emulator_runner::EmulatorRunner;
 pub use r5_fn_test::R5FnTest;
 pub use vm_runner::VmRunner;

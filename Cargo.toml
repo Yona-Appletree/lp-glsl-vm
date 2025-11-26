@@ -4,6 +4,7 @@ members = [
     "crates/embive-runtime",
     "crates/embive-program",
     "crates/riscv32-encoder",
+    "crates/riscv32-emulator",
     "crates/r5-ir",
     "crates/r5-builder",
     "crates/r5-target-riscv32",
@@ -15,6 +16,7 @@ members = [
 default-members = [
     "crates/lp-glsl-vm",
     "crates/riscv32-encoder",
+    "crates/riscv32-emulator",
     "crates/r5-ir",
     "crates/r5-builder",
     "crates/r5-target-riscv32",

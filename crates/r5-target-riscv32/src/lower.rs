@@ -1227,7 +1227,7 @@ block0:
 function %test() -> i32 {
 block0:
     v0 = iconst 1
-    v1 = idiv v0, v0  // idiv is not implemented
+    v1 = idiv v0, v0
     return v1
 }"#;
 
@@ -1260,6 +1260,170 @@ block0:
             }
             Err(e) => panic!("Expected UnimplementedInstruction error, got {:?}", e),
             Ok(_) => panic!("Expected error but got Ok"),
+        }
+    }
+
+    #[test]
+    fn test_prologue_emits_valid_instructions() {
+        // Test that prologue emits only valid RISC-V instructions
+        let ir = r#"
+function %test() -> i32 {
+block0:
+    v0 = iconst 42
+    return v0
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR function");
+        let liveness = compute_liveness(&func);
+        let allocation = allocate_registers(&func, &liveness);
+        let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
+
+        let has_calls = false;
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
+        let frame_layout = FrameLayout::compute(
+            &allocation.used_callee_saved,
+            total_spill_slots,
+            has_calls,
+            func.signature.params.len(),
+            0,
+        );
+
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
+
+        let mut lowerer = Lowerer::new();
+        let code = lowerer
+            .lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info)
+            .expect("Failed to lower function");
+
+        // Check that all instructions are valid
+        let instructions = code.instructions();
+        for (idx, inst) in instructions.iter().enumerate() {
+            let encoded = inst.encode();
+
+            // Check that encoded instruction is not zero (except for very specific cases)
+            // Zero is not a valid RISC-V instruction
+            if encoded == 0 {
+                panic!(
+                    "Instruction {} at index {} encodes to zero (invalid): {:?}",
+                    idx, idx, inst
+                );
+            }
+
+            // Check that opcode is valid (not 0x00)
+            let opcode = encoded & 0x7f;
+            if opcode == 0 {
+                panic!(
+                    "Instruction {} at index {} has invalid opcode 0x00: encoded=0x{:08x}, \
+                     inst={:?}",
+                    idx, idx, encoded, inst
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_prologue_instruction_sequence() {
+        // Test that prologue emits correct sequence of instructions
+        let ir = r#"
+function %test() -> i32 {
+block0:
+    v0 = iconst 42
+    return v0
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR function");
+        let liveness = compute_liveness(&func);
+        let allocation = allocate_registers(&func, &liveness);
+        let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
+
+        let has_calls = false;
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
+        let frame_layout = FrameLayout::compute(
+            &allocation.used_callee_saved,
+            total_spill_slots,
+            has_calls,
+            func.signature.params.len(),
+            0,
+        );
+
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
+
+        let mut lowerer = Lowerer::new();
+        let code = lowerer
+            .lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info)
+            .expect("Failed to lower function");
+
+        let instructions = code.instructions();
+        let encoded: Vec<u32> = instructions.iter().map(|i| i.encode()).collect();
+
+        // Check that no instruction encodes to 0x00030000 or similar invalid values
+        for (idx, enc) in encoded.iter().enumerate() {
+            if *enc == 0x00030000 {
+                panic!(
+                    "Found invalid instruction 0x00030000 at index {}: {:?}",
+                    idx,
+                    instructions.get(idx)
+                );
+            }
+
+            // Check for other suspicious patterns
+            let opcode = enc & 0x7f;
+            if opcode == 0 && *enc != 0 {
+                panic!(
+                    "Found instruction with invalid opcode 0x00 at index {}: encoded=0x{:08x}, \
+                     inst={:?}",
+                    idx,
+                    enc,
+                    instructions.get(idx)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_function_with_call_prologue() {
+        // Test prologue for function that makes calls
+        let ir = r#"
+function %test() -> i32 {
+block0:
+    call %helper() -> v0
+    return v0
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR function");
+        let liveness = compute_liveness(&func);
+        let allocation = allocate_registers(&func, &liveness);
+        let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
+
+        let has_calls = true;
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
+        let frame_layout = FrameLayout::compute(
+            &allocation.used_callee_saved,
+            total_spill_slots,
+            has_calls,
+            func.signature.params.len(),
+            8, // Max outgoing args
+        );
+
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 8);
+
+        let mut lowerer = Lowerer::new();
+        let code = lowerer
+            .lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info)
+            .expect("Failed to lower function");
+
+        // Check that prologue instructions are valid
+        let instructions = code.instructions();
+        for (idx, inst) in instructions.iter().enumerate() {
+            let encoded = inst.encode();
+            let opcode = encoded & 0x7f;
+
+            if opcode == 0 && encoded != 0 {
+                panic!(
+                    "Invalid instruction at index {}: encoded=0x{:08x}, inst={:?}",
+                    idx, encoded, inst
+                );
+            }
         }
     }
 }

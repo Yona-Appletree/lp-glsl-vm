@@ -95,9 +95,231 @@ fn compute_max_outgoing_args(func: &r5_ir::Function, module: &r5_ir::Module) -> 
     max_args
 }
 
+/// A compiled module containing structured instructions and metadata.
+///
+/// This allows testing and inspection of generated code before converting to bytes.
+pub struct CompiledModule {
+    /// All instructions from all functions, concatenated
+    pub instructions: alloc::vec::Vec<riscv32_encoder::Inst>,
+    /// Relocations that need to be fixed up (instruction indices)
+    pub relocations: alloc::vec::Vec<lower::Relocation>,
+    /// Function addresses (instruction indices, not byte offsets)
+    pub function_addresses: alloc::collections::BTreeMap<alloc::string::String, usize>,
+    /// Bootstrap code size (instruction count for entry function)
+    pub bootstrap_size: usize,
+}
+
+impl CompiledModule {
+    /// Convert instructions to bytes.
+    ///
+    /// Note: Relocations are already fixed up in the instructions,
+    /// so this just encodes them to bytes.
+    pub fn to_bytes(&self) -> Result<alloc::vec::Vec<u8>, alloc::string::String> {
+        use alloc::vec::Vec;
+
+        // Convert instructions to bytes (relocations already fixed)
+        let mut bytes = Vec::with_capacity(self.instructions.len() * 4);
+        for inst in &self.instructions {
+            let encoded = inst.encode();
+            bytes.extend_from_slice(&encoded.to_le_bytes());
+        }
+
+        // Align to 4-byte boundary
+        let aligned_len = align_to_4_bytes(bytes.len());
+        bytes.resize(aligned_len, 0);
+
+        Ok(bytes)
+    }
+
+    /// Format a single instruction as assembly.
+    fn format_inst(inst: &riscv32_encoder::Inst) -> alloc::string::String {
+        use alloc::format;
+
+        use riscv32_encoder::Gpr;
+
+        fn gpr_name(gpr: &Gpr) -> &'static str {
+            match gpr.num() {
+                0 => "zero",
+                1 => "ra",
+                2 => "sp",
+                3 => "gp",
+                4 => "tp",
+                5 => "t0",
+                6 => "t1",
+                7 => "t2",
+                8 => "s0",
+                9 => "s1",
+                10 => "a0",
+                11 => "a1",
+                12 => "a2",
+                13 => "a3",
+                14 => "a4",
+                15 => "a5",
+                16 => "a6",
+                17 => "a7",
+                18 => "s2",
+                19 => "s3",
+                20 => "s4",
+                21 => "s5",
+                22 => "s6",
+                23 => "s7",
+                24 => "s8",
+                25 => "s9",
+                26 => "s10",
+                27 => "s11",
+                28 => "t3",
+                29 => "t4",
+                30 => "t5",
+                31 => "t6",
+                _ => "?",
+            }
+        }
+
+        match inst {
+            riscv32_encoder::Inst::Add { rd, rs1, rs2 } => {
+                format!("add {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+            }
+            riscv32_encoder::Inst::Sub { rd, rs1, rs2 } => {
+                format!("sub {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+            }
+            riscv32_encoder::Inst::Mul { rd, rs1, rs2 } => {
+                format!("mul {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+            }
+            riscv32_encoder::Inst::Addi { rd, rs1, imm } => {
+                format!("addi {}, {}, {}", gpr_name(rd), gpr_name(rs1), imm)
+            }
+            riscv32_encoder::Inst::Lw { rd, rs1, imm } => {
+                format!("lw {}, {}({})", gpr_name(rd), imm, gpr_name(rs1))
+            }
+            riscv32_encoder::Inst::Sw { rs1, rs2, imm } => {
+                format!("sw {}, {}({})", gpr_name(rs2), imm, gpr_name(rs1))
+            }
+            riscv32_encoder::Inst::Jal { rd, imm } => {
+                format!("jal {}, {}", gpr_name(rd), imm)
+            }
+            riscv32_encoder::Inst::Jalr { rd, rs1, imm } => {
+                format!("jalr {}, {}({})", gpr_name(rd), imm, gpr_name(rs1))
+            }
+            riscv32_encoder::Inst::Beq { rs1, rs2, imm } => {
+                format!("beq {}, {}, {}", gpr_name(rs1), gpr_name(rs2), imm)
+            }
+            riscv32_encoder::Inst::Bne { rs1, rs2, imm } => {
+                format!("bne {}, {}, {}", gpr_name(rs1), gpr_name(rs2), imm)
+            }
+            riscv32_encoder::Inst::Blt { rs1, rs2, imm } => {
+                format!("blt {}, {}, {}", gpr_name(rs1), gpr_name(rs2), imm)
+            }
+            riscv32_encoder::Inst::Bge { rs1, rs2, imm } => {
+                format!("bge {}, {}, {}", gpr_name(rs1), gpr_name(rs2), imm)
+            }
+            riscv32_encoder::Inst::Lui { rd, imm } => {
+                format!("lui {}, 0x{:05x}", gpr_name(rd), imm)
+            }
+            riscv32_encoder::Inst::Auipc { rd, imm } => {
+                format!("auipc {}, 0x{:05x}", gpr_name(rd), imm)
+            }
+            riscv32_encoder::Inst::Ecall => alloc::string::String::from("ecall"),
+            riscv32_encoder::Inst::Ebreak => alloc::string::String::from("ebreak"),
+        }
+    }
+
+    /// Get instructions for a specific function by name.
+    ///
+    /// Returns the instruction range for the function, including bootstrap code
+    /// if it's the entry function.
+    pub fn function_instructions(&self, function_name: &str) -> Option<&[riscv32_encoder::Inst]> {
+        use alloc::vec::Vec;
+
+        let start_idx = self.function_addresses.get(function_name)?;
+
+        // Find the next function's start index to determine the end
+        let mut sorted_functions: Vec<_> = self.function_addresses.iter().collect();
+        sorted_functions.sort_by_key(|(_, idx)| *idx);
+
+        let end_idx = sorted_functions
+            .iter()
+            .find(|(name, idx)| *name != function_name && **idx > *start_idx)
+            .map(|(_, idx)| **idx)
+            .unwrap_or(self.instructions.len());
+
+        // Include bootstrap code if this is the entry function
+        let actual_start = if *start_idx == self.bootstrap_size {
+            // Entry function - include bootstrap
+            0
+        } else {
+            *start_idx
+        };
+
+        Some(&self.instructions[actual_start..end_idx])
+    }
+}
+
+impl core::fmt::Display for CompiledModule {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        use alloc::vec::Vec;
+
+        // Sort functions by their address
+        let mut sorted_functions: Vec<_> = self.function_addresses.iter().collect();
+        sorted_functions.sort_by_key(|(_, idx)| *idx);
+
+        for (func_name, start_idx) in &sorted_functions {
+            // Determine the end index
+            let end_idx = sorted_functions
+                .iter()
+                .find(|(name, idx)| *name != *func_name && **idx > **start_idx)
+                .map(|(_, idx)| **idx)
+                .unwrap_or(self.instructions.len());
+
+            // Determine the actual start (include bootstrap for entry function)
+            let actual_start = if **start_idx == self.bootstrap_size {
+                0
+            } else {
+                **start_idx
+            };
+
+            // Write function header
+            writeln!(f, "{}:", func_name)?;
+            if actual_start < **start_idx {
+                writeln!(f, "  # Bootstrap code:")?;
+                for (idx, inst) in self.instructions[actual_start..**start_idx]
+                    .iter()
+                    .enumerate()
+                {
+                    writeln!(
+                        f,
+                        "  {:04x}: {}",
+                        (actual_start + idx) * 4,
+                        Self::format_inst(inst)
+                    )?;
+                }
+                writeln!(f, "  # Function code:")?;
+            }
+
+            // Write function instructions
+            for (idx, inst) in self.instructions[**start_idx..end_idx].iter().enumerate() {
+                writeln!(
+                    f,
+                    "  {:04x}: {}",
+                    (**start_idx + idx) * 4,
+                    Self::format_inst(inst)
+                )?;
+            }
+            writeln!(f)?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Fix up relocations in compiled code.
 ///
 /// This updates jal instructions with correct PC-relative offsets to their target functions.
+///
+/// Note: This is kept for testing purposes. Relocations are now applied in-place
+/// during `compile_module_to_insts`.
+///
+/// TODO: probably want to remove this
+#[cfg(test)]
 fn fixup_relocations(
     code: &mut [u8],
     relocations: &[lower::Relocation],
@@ -141,17 +363,20 @@ fn fixup_relocations(
     Ok(())
 }
 
-/// Compile an IR module to RISC-V 32-bit code.
+/// Compile an IR module to structured instructions.
 ///
-/// This compiles all functions in the module and handles function call relocations.
-/// Returns the compiled code with all functions concatenated.
+/// This compiles all functions in the module and returns structured instructions
+/// along with relocation information. Use `CompiledModule::to_bytes()` to convert
+/// to bytes.
 ///
 /// # Two-Pass Compilation
 ///
 /// The compilation uses a two-pass approach:
 /// 1. First pass: Compile all functions and record their addresses and relocations
-/// 2. Second pass: Concatenate code and fix up relocations with correct offsets
-pub fn compile_module(module: &r5_ir::Module) -> Result<alloc::vec::Vec<u8>, alloc::string::String> {
+/// 2. Second pass: Concatenate instructions and record relocation information
+pub fn compile_module_to_insts(
+    module: &r5_ir::Module,
+) -> Result<CompiledModule, alloc::string::String> {
     use alloc::{collections::BTreeMap, vec::Vec};
 
     let mut lowerer = Lowerer::new();
@@ -159,10 +384,11 @@ pub fn compile_module(module: &r5_ir::Module) -> Result<alloc::vec::Vec<u8>, all
 
     // First pass: compile all functions and record their addresses
     // Compile entry function first, then others
-    let mut function_code = BTreeMap::new();
+    let mut function_code_buffers = BTreeMap::new();
     let mut function_addresses = BTreeMap::new();
     let mut function_relocations = BTreeMap::new();
-    let mut current_address = 0u32;
+    let mut current_inst_idx = 0usize;
+    let mut bootstrap_size = 0usize;
 
     // Compile entry function first (if set)
     if let Some(entry_name) = &module.entry_function {
@@ -197,13 +423,8 @@ pub fn compile_module(module: &r5_ir::Module) -> Result<alloc::vec::Vec<u8>, all
             let code = lowerer
                 .lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
                 .map_err(|e| alloc::format!("Failed to lower function '{}': {}", entry_name, e))?;
-            let mut code_bytes = code.as_bytes().to_vec();
 
             // Prepend SP initialization to entry function
-            // SP = RAM_OFFSET + ram_size - STACK_SIZE (aligned to 16 bytes)
-            // For now, use a reasonable default: assume 4MB RAM, 64KB stack
-            // SP = 0x80000000 + 0x400000 - 0x10000 = 0x80030000
-            // We'll use lui + addi to set SP
             use riscv32_encoder::{Gpr, Inst};
             const RAM_OFFSET: u32 = 0x80000000;
             const STACK_SIZE: u32 = 64 * 1024; // 64KB
@@ -211,10 +432,6 @@ pub fn compile_module(module: &r5_ir::Module) -> Result<alloc::vec::Vec<u8>, all
             let sp_value = RAM_OFFSET + DEFAULT_RAM_SIZE - STACK_SIZE;
             let sp_value = sp_value & !0xF; // Align to 16 bytes
 
-            // Generate: lui sp, (sp_value >> 12)
-            //          addi sp, sp, (sp_value & 0xFFF)
-            // Note: lui sets rd = imm << 12, so we pass the full target value
-            // and lui will extract bits [31:12] for encoding internally
             let sp_hi_value = sp_value & !0xFFF; // Clear lower 12 bits for lui
             let sp_lo = (sp_value & 0xFFF) as i32;
             let sp_lo_signed = if sp_lo & 0x800 != 0 {
@@ -223,49 +440,45 @@ pub fn compile_module(module: &r5_ir::Module) -> Result<alloc::vec::Vec<u8>, all
                 sp_lo
             };
 
-            let mut bootstrap_code = Vec::new();
+            let mut bootstrap_insts = Vec::new();
             // lui sp, sp_hi_value
-            // Inst::Lui expects the full 32-bit immediate (it extracts upper 20 bits internally)
-            bootstrap_code.extend_from_slice(
-                &Inst::Lui {
-                    rd: Gpr::SP,
-                    imm: sp_hi_value,
-                }
-                .encode()
-                .to_le_bytes(),
-            );
+            // The lui instruction expects the full 32-bit value; it extracts bits [31:12]
+            // sp_hi_value already has lower 12 bits cleared, so we pass it as-is
+            bootstrap_insts.push(Inst::Lui {
+                rd: Gpr::SP,
+                imm: sp_hi_value,
+            });
             // addi sp, sp, sp_lo_signed
             if sp_lo_signed != 0 {
-                bootstrap_code.extend_from_slice(
-                    &Inst::Addi {
-                        rd: Gpr::SP,
-                        rs1: Gpr::SP,
-                        imm: sp_lo_signed,
-                    }
-                    .encode()
-                    .to_le_bytes(),
-                );
+                bootstrap_insts.push(Inst::Addi {
+                    rd: Gpr::SP,
+                    rs1: Gpr::SP,
+                    imm: sp_lo_signed,
+                });
             }
 
-            // Prepend bootstrap code to entry function
-            let sp_init_size = bootstrap_code.len();
-            bootstrap_code.extend_from_slice(&code_bytes);
-            code_bytes = bootstrap_code;
+            bootstrap_size = bootstrap_insts.len();
 
-            let code_size = code_bytes.len();
+            // Function address is after bootstrap code
+            let function_inst_idx = current_inst_idx + bootstrap_size;
+
+            // Store code buffer and relocations
             let mut relocations = lowerer.relocations().to_vec();
-
-            // Adjust relocation offsets for prepended SP initialization
+            // Adjust relocation offsets for prepended bootstrap
+            // reloc.offset is already an instruction index within the function's code
             for reloc in &mut relocations {
-                reloc.offset += sp_init_size;
+                // Add the bootstrap size and current offset to get final instruction index
+                reloc.offset = current_inst_idx + bootstrap_size + reloc.offset;
             }
 
-            function_code.insert(entry_name.clone(), code_bytes);
-            function_addresses.insert(entry_name.clone(), current_address);
+            let code_inst_count = code.instruction_count();
+            function_code_buffers.insert(entry_name.clone(), (bootstrap_insts, code));
+            function_addresses.insert(entry_name.clone(), function_inst_idx);
             function_relocations.insert(entry_name.clone(), relocations);
-            lowerer.set_function_address(entry_name.clone(), current_address);
+            lowerer.set_function_address(entry_name.clone(), function_inst_idx as u32 * 4);
 
-            current_address = align_to_4_bytes(current_address as usize + code_size) as u32;
+            // Update current_inst_idx (bootstrap + function code)
+            current_inst_idx += bootstrap_size + code_inst_count;
         }
     }
 
@@ -310,49 +523,120 @@ pub fn compile_module(module: &r5_ir::Module) -> Result<alloc::vec::Vec<u8>, all
         let code = lowerer
             .lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
             .map_err(|e| alloc::format!("Failed to lower function '{}': {}", name, e))?;
-        let code_bytes = code.as_bytes().to_vec();
-        let code_size = code_bytes.len();
-        let relocations = lowerer.relocations().to_vec();
 
-        function_code.insert(name.clone(), code_bytes);
-        function_addresses.insert(name.clone(), current_address);
-        function_relocations.insert(name.clone(), relocations);
-        lowerer.set_function_address(name.clone(), current_address);
-
-        current_address = align_to_4_bytes(current_address as usize + code_size) as u32;
-    }
-
-    // Second pass: concatenate code and fix up relocations
-    let mut result = Vec::new();
-    let mut current_offset = 0u32;
-
-    for (name, code_bytes) in &function_code {
-        // Get relocations for this function
-        if let Some(relocations) = function_relocations.get(name) {
-            // Copy code and fix up relocations
-            let mut code_with_fixups = code_bytes.clone();
-
-            fixup_relocations(
-                &mut code_with_fixups,
-                relocations,
-                &function_addresses,
-                current_offset,
-            )
-            .map_err(|e| alloc::format!("Failed to fix up relocations for function '{}': {}", name, e))?;
-
-            result.extend_from_slice(&code_with_fixups);
-        } else {
-            result.extend_from_slice(code_bytes);
+        // Adjust relocation offsets (already instruction indices)
+        let code_inst_count = code.instruction_count();
+        let mut relocations = lowerer.relocations().to_vec();
+        for reloc in &mut relocations {
+            // reloc.offset is already an instruction index within the function's code
+            // Add current offset to get final instruction index
+            reloc.offset = current_inst_idx + reloc.offset;
         }
 
-        // Align to 4-byte boundary
-        let aligned_len = align_to_4_bytes(result.len());
-        result.resize(aligned_len, 0);
+        function_code_buffers.insert(name.clone(), (Vec::new(), code));
+        function_addresses.insert(name.clone(), current_inst_idx);
+        function_relocations.insert(name.clone(), relocations);
+        lowerer.set_function_address(name.clone(), current_inst_idx as u32 * 4);
 
-        current_offset = result.len() as u32;
+        current_inst_idx += code_inst_count;
     }
 
-    Ok(result)
+    // Second pass: concatenate all instructions in the order they were processed
+    // (entry function first, then others in module order)
+    // Relocations are already adjusted to instruction indices in this order
+    let mut all_instructions = Vec::new();
+    let mut all_relocations = Vec::new();
+
+    // First, add entry function if it exists
+    if let Some(entry_name) = &module.entry_function {
+        if let Some((bootstrap_insts, code_buffer)) = function_code_buffers.get(entry_name) {
+            all_instructions.extend_from_slice(bootstrap_insts);
+            all_instructions.extend_from_slice(code_buffer.instructions());
+            if let Some(relocs) = function_relocations.get(entry_name) {
+                all_relocations.extend_from_slice(relocs);
+            }
+        }
+    }
+
+    // Then add remaining functions in module order
+    for (name, _) in &module.functions {
+        // Skip entry function (already added)
+        if module
+            .entry_function
+            .as_ref()
+            .map(|e| e == name)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+
+        if let Some((bootstrap_insts, code_buffer)) = function_code_buffers.get(name) {
+            all_instructions.extend_from_slice(bootstrap_insts);
+            all_instructions.extend_from_slice(code_buffer.instructions());
+            if let Some(relocs) = function_relocations.get(name) {
+                all_relocations.extend_from_slice(relocs);
+            }
+        }
+    }
+
+    // Third pass: fix up relocations in-place
+    // This allows tests to see the final opcodes directly
+    // Relocations already have correct instruction indices, we just need to fix the jal offsets
+    for reloc in &all_relocations {
+        let inst_idx = reloc.offset;
+        if inst_idx >= all_instructions.len() {
+            return Err(alloc::format!(
+                "Relocation offset {} is out of bounds (instruction count: {})",
+                inst_idx,
+                all_instructions.len()
+            ));
+        }
+
+        // Calculate target address (instruction index)
+        let target_inst_idx = function_addresses
+            .get(&reloc.callee)
+            .ok_or_else(|| alloc::format!("Function '{}' not found", reloc.callee))?;
+
+        // Calculate PC-relative offset in bytes
+        // jal is PC-relative: target = PC + offset
+        // When jal executes, PC points to the jal instruction
+        // offset = target - PC = (target_inst_idx * 4) - (inst_idx * 4)
+        let target_byte_offset = (*target_inst_idx * 4) as i32;
+        let jal_pc = (inst_idx * 4) as i32;
+        let offset = target_byte_offset - jal_pc;
+
+        // Update the jal instruction in-place
+        if let Some(riscv32_encoder::Inst::Jal { rd, .. }) = all_instructions.get(inst_idx) {
+            let rd = *rd;
+            all_instructions[inst_idx] = riscv32_encoder::Inst::Jal { rd, imm: offset };
+        } else {
+            return Err(alloc::format!(
+                "Relocation at instruction {} is not a Jal instruction: {:?}",
+                inst_idx,
+                all_instructions.get(inst_idx)
+            ));
+        }
+    }
+
+    Ok(CompiledModule {
+        instructions: all_instructions,
+        relocations: all_relocations, // Keep for debugging/inspection
+        function_addresses,
+        bootstrap_size,
+    })
+}
+
+/// Compile an IR module to RISC-V 32-bit code.
+///
+/// This compiles all functions in the module and handles function call relocations.
+/// Returns the compiled code with all functions concatenated.
+///
+/// This is a convenience function that calls `compile_module_to_insts()` and then
+/// converts to bytes. For testing and inspection, use `compile_module_to_insts()` directly.
+pub fn compile_module(
+    module: &r5_ir::Module,
+) -> Result<alloc::vec::Vec<u8>, alloc::string::String> {
+    compile_module_to_insts(module)?.to_bytes()
 }
 
 #[cfg(test)]

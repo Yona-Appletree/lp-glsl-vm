@@ -12,5 +12,6 @@ r5-ir = { path = "../r5-ir" }
 r5-builder = { path = "../r5-builder" }
 r5-target-riscv32 = { path = "../r5-target-riscv32" }
 riscv32-encoder = { path = "../riscv32-encoder" }
+riscv32-emulator = { path = "../riscv32-emulator" }
 embive = { path = "/Users/yona/dev/opensource/embive", default-features = false, features = ["transpiler", "interpreter"] }
 
