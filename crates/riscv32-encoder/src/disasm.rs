@@ -67,8 +67,12 @@ pub fn disassemble_instruction(inst: u32) -> String {
             // R-type (arithmetic)
             match (funct3, funct7) {
                 (0x0, 0x0) => format!("add {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2)),
-                (0x0, 0x20) => format!("sub {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2)),
-                (0x0, 0x01) => format!("mul {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2)),
+                (0x0, 0x20) => {
+                    format!("sub {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+                }
+                (0x0, 0x01) => {
+                    format!("mul {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+                }
                 _ => format!("unknown_r_type 0x{:08x}", inst),
             }
         }
@@ -208,7 +212,7 @@ fn gpr_name(num: u8) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encode::*;
+    use crate::{encode::*, Gpr};
 
     #[test]
     fn test_disassemble_add() {
@@ -266,4 +270,3 @@ mod tests {
         assert!(disasm.contains("ecall"));
     }
 }
-

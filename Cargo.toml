@@ -10,13 +10,22 @@ members = [
     "crates/riscv-shared",
     "crates/r5-test-util",
 ]
-# Exclude RISC-V-only crates and apps from default builds
+# Exclude RISC-V-only crates from default builds and tests
+# RISC-V-only crates: r5-target-riscv32, riscv-shared
 default-members = [
     "crates/lp-glsl-vm",
+    "crates/riscv32-encoder",
+    "crates/r5-ir",
+    "crates/r5-builder",
+    "crates/r5-target-riscv32",
+    "crates/riscv-shared",
+    "crates/r5-test-util",
 ]
 # Exclude ESP32-C3 app (has different dependencies)
 exclude = [
     "apps/esp32c3-jit-test",
+    "crates/embive-runtime",
+    "crates/embive-program",
 ]
 resolver = "2"
 

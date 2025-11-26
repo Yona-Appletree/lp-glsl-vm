@@ -2,9 +2,9 @@
 
 use r5_builder::FunctionBuilder;
 use r5_ir::{parse_module, Module, Signature, Type};
-use r5_target_riscv32::{compile_module, generate_elf, Lowerer};
+use r5_target_riscv32::{compile_module, generate_elf, CodeBuffer, Lowerer};
 use r5_test_util::VmRunner;
-use riscv32_encoder::{disassemble_code, disassemble_instruction};
+use riscv32_encoder::{disassemble_code, Gpr, Inst};
 
 /// Helper to test a module with multiple functions
 fn test_module(module: &Module, entry_func_name: &str, args: &[i32], expected: i32) {
@@ -219,52 +219,39 @@ module {
 }
 
 /// Helper to count SP adjustments in prologue (addi sp, sp, -N instructions)
-fn count_sp_adjustments_in_prologue(code: &[u8], function_start: usize) -> usize {
-    let disasm = disassemble_code(&code[function_start..]);
-    let mut count = 0;
-    for line in disasm.lines() {
-        if line.contains("addi sp, sp,") && line.contains('-') {
-            count += 1;
-        }
-    }
-    count
+fn count_sp_adjustments_in_prologue(code_buffer: &CodeBuffer, function_start: usize) -> usize {
+    // Use structured instructions for type-safe pattern matching
+    code_buffer.instructions()
+        .iter()
+        .skip(function_start / 4) // Convert byte offset to instruction index
+        .filter(|inst| {
+            matches!(inst, Inst::Addi { rd, rs1, imm } 
+                if rd == &Gpr::SP && rs1 == &Gpr::SP && imm < &0)
+        })
+        .count()
 }
 
 /// Helper to get function prologue instructions
 fn get_prologue_instructions(
-    code: &[u8],
+    code_buffer: &CodeBuffer,
     function_start: usize,
     max_instructions: usize,
 ) -> Vec<String> {
-    let mut instructions = Vec::new();
-    let mut offset = function_start;
-    let mut count = 0;
-
-    while offset + 4 <= code.len() && count < max_instructions {
-        let inst_bytes = [
-            code[offset],
-            code[offset + 1],
-            code[offset + 2],
-            code[offset + 3],
-        ];
-        let inst = u32::from_le_bytes(inst_bytes);
-
-        // Disassemble instruction
-        let disasm = disassemble_instruction(inst);
-        instructions.push(disasm);
-
-        offset += 4;
-        count += 1;
-    }
-
-    instructions
+    // Use structured instructions and format them
+    let start_idx = function_start / 4; // Convert byte offset to instruction index
+    code_buffer.instructions()
+        .iter()
+        .skip(start_idx)
+        .take(max_instructions)
+        .map(|inst| format!("{:?}", inst))
+        .collect()
 }
 
 /// Helper to verify epilogue order
-fn verify_epilogue_order(code: &[u8], function_end: usize, max_instructions: usize) -> Vec<String> {
+fn verify_epilogue_order(code_buffer: &CodeBuffer, function_end: usize, max_instructions: usize) -> Vec<String> {
     // Get last max_instructions instructions before function end
     let start_offset = function_end.saturating_sub(max_instructions * 4);
-    get_prologue_instructions(code, start_offset, max_instructions)
+    get_prologue_instructions(code_buffer, start_offset, max_instructions)
 }
 
 #[test]
@@ -312,13 +299,14 @@ module {
     let func_code = lowerer.lower_function(func);
 
     // Get prologue instructions for inspection
-    let prologue_insts = get_prologue_instructions(func_code.as_bytes(), 0, 20);
+    let prologue_insts = get_prologue_instructions(&func_code, 0, 20);
 
     // Count SP adjustments in prologue (addi sp, sp, -N instructions)
-    let sp_adjustments = count_sp_adjustments_in_prologue(func_code.as_bytes(), 0);
+    let sp_adjustments = count_sp_adjustments_in_prologue(&func_code, 0);
 
+    let bytes = func_code.as_bytes();
     eprintln!("\n=== Function Code ===");
-    eprintln!("{}", disassemble_code(func_code.as_bytes()));
+    eprintln!("{}", disassemble_code(&bytes));
     eprintln!("\n=== Prologue Instructions (first 20) ===");
     for (i, inst) in prologue_insts.iter().enumerate() {
         eprintln!("  {}: {}", i, inst);
@@ -341,7 +329,7 @@ module {
          instructions:\n{}\nFull function disassembly:\n{}",
         sp_adjustments,
         prologue_insts.join("\n"),
-        disassemble_code(func_code.as_bytes())
+        disassemble_code(&bytes)
     );
 }
 
@@ -393,23 +381,31 @@ module {
     // Get epilogue instructions (last few instructions before return)
     let bytes = func_code.as_bytes();
     let epilogue_start = bytes.len().saturating_sub(20 * 4); // Last 20 instructions
-    let epilogue_instructions = get_prologue_instructions(bytes, epilogue_start, 20);
+    let epilogue_instructions = get_prologue_instructions(&func_code, epilogue_start, 20);
 
     eprintln!("\n=== Function Code ===");
-    eprintln!("{}", disassemble_code(bytes));
+    eprintln!("{}", disassemble_code(&bytes));
     eprintln!("\n=== Epilogue Instructions (last 10) ===");
     for (i, inst) in epilogue_instructions.iter().rev().take(10).enumerate() {
         eprintln!("  {}: {}", i, inst);
     }
 
     // Verify epilogue order: restore callee-saved (if any) → restore RA → adjust SP
-    // For this function, we should see: lw ra, ... → addi sp, sp, ...
-    let ra_restore_pos = epilogue_instructions
+    let start_idx = epilogue_start / 4;
+    let instructions = &func_code.instructions()[start_idx..];
+    
+    let ra_restore_pos = instructions
         .iter()
-        .position(|s| s.contains("lw ra,"));
-    let sp_adjust_pos = epilogue_instructions
+        .position(|inst| {
+            matches!(inst, Inst::Lw { rd, rs1, .. } 
+                if rd == &Gpr::RA && rs1 == &Gpr::SP)
+        });
+    let sp_adjust_pos = instructions
         .iter()
-        .position(|s| s.contains("addi sp, sp,") && !s.contains('-'));
+        .position(|inst| {
+            matches!(inst, Inst::Addi { rd, rs1, imm } 
+                if rd == &Gpr::SP && rs1 == &Gpr::SP && imm > &0)
+        });
 
     // RA should be restored before SP is adjusted
     if let (Some(ra_pos), Some(sp_pos)) = (ra_restore_pos, sp_adjust_pos) {

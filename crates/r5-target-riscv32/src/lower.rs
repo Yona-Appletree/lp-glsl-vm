@@ -3,7 +3,7 @@
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
 use r5_ir::{Function, Inst, Module, Value};
-use riscv32_encoder::{self, Gpr};
+use riscv32_encoder::{Gpr, Inst as RiscvInst};
 
 use crate::{emit::CodeBuffer, frame::FrameLayout, regalloc::SimpleRegAllocator};
 
@@ -155,9 +155,14 @@ impl Lowerer {
                     }
                     _ => {}
                 }
-                // Emit placeholder bytes
-                for _ in 0..size {
-                    temp_code.emit(0);
+                // Emit placeholder instructions for size estimation
+                // Use NOP (addi zero, zero, 0) as placeholder
+                for _ in 0..size / 4 {
+                    temp_code.emit(RiscvInst::Addi {
+                        rd: Gpr::ZERO,
+                        rs1: Gpr::ZERO,
+                        imm: 0,
+                    });
                 }
             }
         }
@@ -250,11 +255,11 @@ impl Lowerer {
         // For large sizes, we might need multiple instructions
         // For now, assume we can use a single addi (up to 12-bit immediate)
         if total_size <= 2047 {
-            code.emit(riscv32_encoder::addi(
-                Gpr::SP,
-                Gpr::SP,
-                -(total_size as i32),
-            ));
+            code.emit(RiscvInst::Addi {
+                rd: Gpr::SP,
+                rs1: Gpr::SP,
+                imm: -(total_size as i32),
+            });
         } else {
             // For large frames, use multiple addi instructions or lui+addi
             // This is a simplification - real implementation would handle this better
@@ -265,7 +270,11 @@ impl Lowerer {
         if frame_layout.setup_area_size > 0 {
             // Save RA: sw ra, 4(sp)
             // RA is saved at offset 4 from SP (after frame adjustment)
-            code.emit(riscv32_encoder::sw(Gpr::SP, Gpr::RA, 4));
+            code.emit(RiscvInst::Sw {
+                rs1: Gpr::SP,
+                rs2: Gpr::RA,
+                imm: 4,
+            });
             // Save FP (if used - for now we don't use FP, so skip)
             // sw fp, 0(sp) would go here if FP is used
         }
@@ -274,7 +283,11 @@ impl Lowerer {
         // They are saved starting at offset setup_area_size from SP
         let mut offset = frame_layout.setup_area_size as i32;
         for reg in &frame_layout.clobbered_callee_saves {
-            code.emit(riscv32_encoder::sw(Gpr::SP, *reg, offset));
+            code.emit(RiscvInst::Sw {
+                rs1: Gpr::SP,
+                rs2: *reg,
+                imm: offset,
+            });
             offset += 4;
         }
     }
@@ -295,21 +308,33 @@ impl Lowerer {
             + (frame_layout.clobbered_callee_saves.len().saturating_sub(1) as u32) * 4)
             as i32;
         for reg in frame_layout.clobbered_callee_saves.iter().rev() {
-            code.emit(riscv32_encoder::lw(*reg, Gpr::SP, offset));
+            code.emit(RiscvInst::Lw {
+                rd: *reg,
+                rs1: Gpr::SP,
+                imm: offset,
+            });
             offset -= 4;
         }
 
         // Restore RA if setup area is needed
         if frame_layout.setup_area_size > 0 {
             // Restore RA: lw ra, 4(sp)
-            code.emit(riscv32_encoder::lw(Gpr::RA, Gpr::SP, 4));
+            code.emit(RiscvInst::Lw {
+                rd: Gpr::RA,
+                rs1: Gpr::SP,
+                imm: 4,
+            });
             // Restore FP (if used)
             // lw fp, 0(sp) would go here if FP is used
         }
 
         // Restore SP for entire frame (single adjustment)
         if total_size <= 2047 {
-            code.emit(riscv32_encoder::addi(Gpr::SP, Gpr::SP, total_size as i32));
+            code.emit(RiscvInst::Addi {
+                rd: Gpr::SP,
+                rs1: Gpr::SP,
+                imm: total_size as i32,
+            });
         } else {
             panic!("Frame size {} too large for single addi", total_size);
         }
@@ -454,7 +479,11 @@ impl Lowerer {
         let reg_result = self.allocate_or_panic(result);
 
         // Use add for register-register
-        code.emit(riscv32_encoder::add(reg_result, reg1, reg2));
+        code.emit(RiscvInst::Add {
+            rd: reg_result,
+            rs1: reg1,
+            rs2: reg2,
+        });
     }
 
     /// Lower `isub` instruction: result = arg1 - arg2
@@ -464,7 +493,11 @@ impl Lowerer {
         let reg_result = self.allocate_or_panic(result);
 
         // Use sub for register-register
-        code.emit(riscv32_encoder::sub(reg_result, reg1, reg2));
+        code.emit(RiscvInst::Sub {
+            rd: reg_result,
+            rs1: reg1,
+            rs2: reg2,
+        });
     }
 
     /// Lower `imul` instruction: result = arg1 * arg2
@@ -474,7 +507,11 @@ impl Lowerer {
         let reg_result = self.allocate_or_panic(result);
 
         // Use mul for register-register (M extension)
-        code.emit(riscv32_encoder::mul(reg_result, reg1, reg2));
+        code.emit(RiscvInst::Mul {
+            rd: reg_result,
+            rs1: reg1,
+            rs2: reg2,
+        });
     }
 
     /// Lower `iconst` instruction: result = value
@@ -484,7 +521,11 @@ impl Lowerer {
 
         // For small constants, use addi with x0
         if imm_i32 >= -2048 && imm_i32 < 2048 {
-            code.emit(riscv32_encoder::addi(reg_result, Gpr::ZERO, imm_i32));
+            code.emit(RiscvInst::Addi {
+                rd: reg_result,
+                rs1: Gpr::ZERO,
+                imm: imm_i32,
+            });
             return;
         }
 
@@ -500,9 +541,16 @@ impl Lowerer {
             imm_lo
         };
 
-        code.emit(riscv32_encoder::lui(reg_result, imm_hi << 12));
+        code.emit(RiscvInst::Lui {
+            rd: reg_result,
+            imm: imm_hi << 12,
+        });
         if imm_lo_signed != 0 {
-            code.emit(riscv32_encoder::addi(reg_result, reg_result, imm_lo_signed));
+            code.emit(RiscvInst::Addi {
+                rd: reg_result,
+                rs1: reg_result,
+                imm: imm_lo_signed,
+            });
         }
     }
 
@@ -572,7 +620,11 @@ impl Lowerer {
             if let Some(reg) = self.regalloc.get(*value) {
                 let slot = self.regalloc.spill(*value);
                 let offset = frame_layout.spill_slot_offset(slot);
-                code.emit(riscv32_encoder::sw(Gpr::SP, reg, offset));
+                code.emit(RiscvInst::Sw {
+                    rs1: Gpr::SP,
+                    rs2: reg,
+                    imm: offset,
+                });
                 spilled_slots.push((*value, slot));
             }
         }
@@ -607,14 +659,21 @@ impl Lowerer {
 
             // Move argument to the appropriate argument register
             if arg_value_reg.num() != arg_reg.num() {
-                code.emit(riscv32_encoder::add(arg_reg, arg_value_reg, Gpr::ZERO));
+                code.emit(RiscvInst::Add {
+                    rd: arg_reg,
+                    rs1: arg_value_reg,
+                    rs2: Gpr::ZERO,
+                });
             }
         }
 
         // Call the function
         // Emit jal ra, 0 as placeholder - will be fixed up during linking
         let jal_offset = code.len();
-        code.emit(riscv32_encoder::jal(Gpr::RA, 0));
+        code.emit(RiscvInst::Jal {
+            rd: Gpr::RA,
+            imm: 0,
+        });
 
         // Record relocation for later fixup
         self.relocations.push(Relocation {
@@ -644,7 +703,11 @@ impl Lowerer {
         for (value, slot) in spilled_slots.iter().rev() {
             if let Some(reg) = self.regalloc.get(*value) {
                 let offset = frame_layout.spill_slot_offset(*slot);
-                code.emit(riscv32_encoder::lw(reg, Gpr::SP, offset));
+                code.emit(RiscvInst::Lw {
+                    rd: reg,
+                    rs1: Gpr::SP,
+                    imm: offset,
+                });
             }
         }
     }
@@ -673,13 +736,21 @@ impl Lowerer {
 
             // Move argument to the appropriate register
             if arg_value_reg.num() != arg_reg.num() {
-                code.emit(riscv32_encoder::add(arg_reg, arg_value_reg, Gpr::ZERO));
+                code.emit(RiscvInst::Add {
+                    rd: arg_reg,
+                    rs1: arg_value_reg,
+                    rs2: Gpr::ZERO,
+                });
             }
         }
 
         // Set syscall number in a7
         if number >= -2048 && number < 2048 {
-            code.emit(riscv32_encoder::addi(Gpr::A7, Gpr::ZERO, number));
+            code.emit(RiscvInst::Addi {
+                rd: Gpr::A7,
+                rs1: Gpr::ZERO,
+                imm: number,
+            });
         } else {
             // For larger numbers, use lui + addi
             let num_u32 = number as u32;
@@ -690,14 +761,21 @@ impl Lowerer {
             } else {
                 imm_lo
             };
-            code.emit(riscv32_encoder::lui(Gpr::A7, imm_hi << 12));
+            code.emit(RiscvInst::Lui {
+                rd: Gpr::A7,
+                imm: imm_hi << 12,
+            });
             if imm_lo_signed != 0 {
-                code.emit(riscv32_encoder::addi(Gpr::A7, Gpr::A7, imm_lo_signed));
+                code.emit(RiscvInst::Addi {
+                    rd: Gpr::A7,
+                    rs1: Gpr::A7,
+                    imm: imm_lo_signed,
+                });
             }
         }
 
         // Emit ecall
-        code.emit(riscv32_encoder::ecall());
+        code.emit(RiscvInst::Ecall);
     }
 
     /// Lower `jump` instruction
@@ -712,7 +790,10 @@ impl Lowerer {
         // This is intentional: `jal zero, 0` jumps to itself, creating a halt loop.
         // This is used for functions that should never return (e.g., main loops).
         if target_block == current_block {
-            code.emit(riscv32_encoder::jal(Gpr::ZERO, 0));
+            code.emit(RiscvInst::Jal {
+                rd: Gpr::ZERO,
+                imm: 0,
+            });
             return;
         }
 
@@ -731,12 +812,15 @@ impl Lowerer {
         let offset = target_addr as i32 - current_pc as i32;
 
         // Emit jal zero, offset (unconditional jump)
-        code.emit(riscv32_encoder::jal(Gpr::ZERO, offset));
+        code.emit(RiscvInst::Jal {
+            rd: Gpr::ZERO,
+            imm: offset,
+        });
     }
 
     /// Lower `halt` instruction
     fn lower_halt(&mut self, code: &mut CodeBuffer) {
-        code.emit(riscv32_encoder::ebreak());
+        code.emit(RiscvInst::Ebreak);
     }
 
     /// Lower `return` instruction
@@ -763,12 +847,20 @@ impl Lowerer {
 
             // Move to return register if not already there
             if value_reg.num() != ret_reg.num() {
-                code.emit(riscv32_encoder::add(ret_reg, value_reg, Gpr::ZERO));
+                code.emit(RiscvInst::Add {
+                    rd: ret_reg,
+                    rs1: value_reg,
+                    rs2: Gpr::ZERO,
+                });
             }
         }
 
         // Return: jalr x0, x1, 0
-        code.emit(riscv32_encoder::jalr(Gpr::ZERO, Gpr::RA, 0));
+        code.emit(RiscvInst::Jalr {
+            rd: Gpr::ZERO,
+            rs1: Gpr::RA,
+            imm: 0,
+        });
     }
 }
 
@@ -1037,32 +1129,20 @@ mod tests {
         let mut code = CodeBuffer::new();
         lowerer.gen_prologue(&mut code, &frame_layout);
 
-        // Count SP adjustments (addi sp, sp, -N)
-        let bytes = code.as_bytes();
-        let mut sp_adjustments = 0;
-        let mut offset = 0;
-        while offset + 4 <= bytes.len() {
-            let inst_bytes = [
-                bytes[offset],
-                bytes[offset + 1],
-                bytes[offset + 2],
-                bytes[offset + 3],
-            ];
-            let inst = u32::from_le_bytes(inst_bytes);
-            let disasm = riscv32_encoder::disassemble_instruction(inst);
-            if disasm.contains("addi sp, sp,") && disasm.contains('-') {
-                sp_adjustments += 1;
-            }
-            offset += 4;
-        }
+        // Count SP adjustments using structured instructions
+        let sp_adjustments = code
+            .instructions()
+            .iter()
+            .filter(|inst| {
+                matches!(inst, RiscvInst::Addi { rd, rs1, imm } 
+                    if rd == &Gpr::SP && rs1 == &Gpr::SP && imm < &0)
+            })
+            .count();
 
-        // Should adjust SP exactly once
         assert_eq!(
-            sp_adjustments,
-            1,
-            "Prologue should adjust SP exactly once, but found {} adjustments. Code: {}",
-            sp_adjustments,
-            riscv32_encoder::disassemble_code(bytes)
+            sp_adjustments, 1,
+            "Prologue should adjust SP exactly once, but found {} adjustments",
+            sp_adjustments
         );
     }
 
@@ -1081,20 +1161,18 @@ mod tests {
         let mut code = CodeBuffer::new();
         lowerer.gen_prologue(&mut code, &frame_layout);
 
-        // Verify callee-saved registers are saved
-        let bytes = code.as_bytes();
-        let disasm = riscv32_encoder::disassemble_code(bytes);
+        // Verify callee-saved registers are saved using structured instructions
+        let instructions = code.instructions();
+        let has_s0 = instructions.iter().any(|inst| {
+            matches!(inst, RiscvInst::Sw { rs1, rs2, .. } 
+                if rs1 == &Gpr::SP && rs2 == &Gpr::S0)
+        });
+        let has_s1 = instructions.iter().any(|inst| {
+            matches!(inst, RiscvInst::Sw { rs1, rs2, .. } 
+                if rs1 == &Gpr::SP && rs2 == &Gpr::S1)
+        });
 
-        // Should save s0 and s1
-        assert!(
-            disasm.contains("sw s0,"),
-            "Prologue should save s0. Code: {}",
-            disasm
-        );
-        assert!(
-            disasm.contains("sw s1,"),
-            "Prologue should save s1. Code: {}",
-            disasm
-        );
+        assert!(has_s0, "Prologue should save s0");
+        assert!(has_s1, "Prologue should save s1");
     }
 }

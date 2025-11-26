@@ -81,7 +81,7 @@ impl FunctionBuilder {
 mod tests {
     use alloc::vec;
 
-    use r5_ir::Inst;
+    use r5_ir::Type;
 
     use super::*;
 
@@ -109,8 +109,8 @@ mod tests {
         let mut builder = FunctionBuilder::new(sig);
         let block_idx = builder.create_block();
 
-        let v1 = builder.new_value();
-        let v2 = builder.new_value();
+        let _v1 = builder.new_value();
+        let _v2 = builder.new_value();
         let v3 = builder.new_value();
 
         {

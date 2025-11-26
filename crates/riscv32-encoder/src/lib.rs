@@ -9,8 +9,10 @@ extern crate alloc;
 
 mod disasm;
 mod encode;
+mod inst;
 mod regs;
 
 pub use disasm::{disassemble_code, disassemble_instruction};
 pub use encode::*;
+pub use inst::Inst;
 pub use regs::Gpr;

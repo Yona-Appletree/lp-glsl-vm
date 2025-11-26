@@ -10,8 +10,8 @@ extern crate alloc;
 use alloc::vec;
 
 use r5_builder::FunctionBuilder;
-use r5_ir::{Signature, Type};
-use r5_target_riscv32::{compile_function, generate_elf};
+use r5_ir::{Module, Signature, Type};
+use r5_target_riscv32::{compile_module, generate_elf};
 
 /// Result of JIT compilation
 pub struct JitResult {
@@ -42,7 +42,9 @@ pub fn build_and_compile_mul() -> JitResult {
     let func = builder.finish();
 
     // Compile IR to RISC-V code
-    let riscv_code = compile_function(&func);
+    let mut module = Module::new();
+    module.add_function(alloc::string::String::from("mul"), func);
+    let riscv_code = compile_module(&module);
 
     // Generate ELF file
     let elf_data = generate_elf(&riscv_code);

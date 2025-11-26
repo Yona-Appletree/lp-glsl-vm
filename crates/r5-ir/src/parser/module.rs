@@ -3,12 +3,8 @@
 use alloc::string::String;
 
 use nom::{
-    bytes::complete::tag,
-    character::complete::char,
-    combinator::opt,
-    multi::many0,
-    sequence::{preceded, terminated},
-    IResult,
+    bytes::complete::tag, character::complete::char, combinator::opt, multi::many0,
+    sequence::terminated, IResult,
 };
 
 use super::{
