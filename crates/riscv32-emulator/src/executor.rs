@@ -346,6 +346,99 @@ pub fn execute_instruction(
                 rd_new: value,
             }
         }
+        Inst::Slt { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1);
+            let val2 = read_reg(regs, rs2);
+            let rd_old = read_reg(regs, rd);
+            let result = if val1 < val2 { 1 } else { 0 };
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Slti { rd, rs1, imm } => {
+            let val1 = read_reg(regs, rs1);
+            let rd_old = read_reg(regs, rd);
+            let result = if val1 < imm { 1 } else { 0 };
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: None,
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Sltu { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1) as u32;
+            let val2 = read_reg(regs, rs2) as u32;
+            let rd_old = read_reg(regs, rd);
+            let result = if val1 < val2 { 1 } else { 0 };
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1 as i32,
+                rs2_val: Some(val2 as i32),
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Sltiu { rd, rs1, imm } => {
+            let val1 = read_reg(regs, rs1) as u32;
+            let imm_u = imm as u32;
+            let rd_old = read_reg(regs, rd);
+            let result = if val1 < imm_u { 1 } else { 0 };
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1 as i32,
+                rs2_val: None,
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Xori { rd, rs1, imm } => {
+            let val1 = read_reg(regs, rs1);
+            let rd_old = read_reg(regs, rd);
+            let result = val1 ^ imm;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: None,
+                rd_old,
+                rd_new: result,
+            }
+        }
         Inst::Ecall => {
             syscall = true;
             InstLog::System {

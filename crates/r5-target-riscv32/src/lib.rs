@@ -224,6 +224,21 @@ impl CompiledModule {
             riscv32_encoder::Inst::Auipc { rd, imm } => {
                 format!("auipc {}, 0x{:05x}", gpr_name(rd), imm)
             }
+            riscv32_encoder::Inst::Slt { rd, rs1, rs2 } => {
+                format!("slt {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+            }
+            riscv32_encoder::Inst::Slti { rd, rs1, imm } => {
+                format!("slti {}, {}, {}", gpr_name(rd), gpr_name(rs1), imm)
+            }
+            riscv32_encoder::Inst::Sltu { rd, rs1, rs2 } => {
+                format!("sltu {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+            }
+            riscv32_encoder::Inst::Sltiu { rd, rs1, imm } => {
+                format!("sltiu {}, {}, {}", gpr_name(rd), gpr_name(rs1), imm)
+            }
+            riscv32_encoder::Inst::Xori { rd, rs1, imm } => {
+                format!("xori {}, {}, {}", gpr_name(rd), gpr_name(rs1), imm)
+            }
             riscv32_encoder::Inst::Ecall => alloc::string::String::from("ecall"),
             riscv32_encoder::Inst::Ebreak => alloc::string::String::from("ebreak"),
         }
@@ -333,6 +348,16 @@ fn fixup_relocations(
     current_offset: u32,
 ) -> Result<(), alloc::string::String> {
     for reloc in relocations {
+        // Skip function-internal relocations (Block, Epilogue) - these are fixed up per-function
+        match &reloc.target {
+            lower::RelocationTarget::Function(_) => {
+                // Process function call relocations
+            }
+            lower::RelocationTarget::Block(_) | lower::RelocationTarget::Epilogue => {
+                continue;
+            }
+        }
+
         // Validate offset is within bounds
         if reloc.offset + 4 > code.len() {
             return Err(alloc::format!(
@@ -343,9 +368,14 @@ fn fixup_relocations(
         }
 
         // Calculate target address
+        let callee_name = match &reloc.target {
+            lower::RelocationTarget::Function(name) => name,
+            _ => unreachable!(), // Already filtered above
+        };
+
         let target_addr = function_addresses
-            .get(&reloc.callee)
-            .ok_or_else(|| alloc::format!("Function '{}' not found in module", reloc.callee))?;
+            .get(callee_name)
+            .ok_or_else(|| alloc::format!("Function '{}' not found in module", callee_name))?;
 
         // Calculate PC-relative offset
         // jal is PC-relative: target = PC + offset
@@ -360,11 +390,23 @@ fn fixup_relocations(
                 alloc::string::String::from("Relocation offset calculation underflow")
             })?;
 
-        // Update the jal instruction
-        let jal_inst = riscv32_encoder::jal(riscv32_encoder::Gpr::RA, offset);
-        let jal_bytes = jal_inst.to_le_bytes();
-        let inst_offset = reloc.offset;
-        code[inst_offset..inst_offset + 4].copy_from_slice(&jal_bytes);
+        // Update the jal instruction based on inst_type
+        match &reloc.inst_type {
+            lower::RelocationInstType::Jal { rd } => {
+                let jal_inst = riscv32_encoder::jal(*rd, offset);
+                let jal_bytes = jal_inst.to_le_bytes();
+                let inst_offset = reloc.offset;
+                code[inst_offset..inst_offset + 4].copy_from_slice(&jal_bytes);
+            }
+            lower::RelocationInstType::Beq { .. } => {
+                // beq relocations are function-internal and should be fixed up per-function
+                // This should not happen at module level
+                return Err(alloc::format!(
+                    "Unexpected Beq relocation at module level (offset: {})",
+                    reloc.offset
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -587,7 +629,18 @@ pub fn compile_module_to_insts(
     // Third pass: fix up relocations in-place
     // This allows tests to see the final opcodes directly
     // Relocations already have correct instruction indices, we just need to fix the jal offsets
+    // Note: Function-internal relocations (Block, Epilogue) are already fixed up per-function
     for reloc in &all_relocations {
+        // Skip function-internal relocations - these are already fixed up
+        match &reloc.target {
+            lower::RelocationTarget::Function(_) => {
+                // Process function call relocations
+            }
+            lower::RelocationTarget::Block(_) | lower::RelocationTarget::Epilogue => {
+                continue;
+            }
+        }
+
         let inst_idx = reloc.offset;
         if inst_idx >= all_instructions.len() {
             return Err(alloc::format!(
@@ -598,9 +651,14 @@ pub fn compile_module_to_insts(
         }
 
         // Calculate target address (instruction index)
+        let callee_name = match &reloc.target {
+            lower::RelocationTarget::Function(name) => name,
+            _ => unreachable!(), // Already filtered above
+        };
+
         let target_inst_idx = function_addresses
-            .get(&reloc.callee)
-            .ok_or_else(|| alloc::format!("Function '{}' not found", reloc.callee))?;
+            .get(callee_name)
+            .ok_or_else(|| alloc::format!("Function '{}' not found", callee_name))?;
 
         // Calculate PC-relative offset in bytes
         // jal is PC-relative: target = PC + offset
@@ -610,16 +668,22 @@ pub fn compile_module_to_insts(
         let jal_pc = (inst_idx * 4) as i32;
         let offset = target_byte_offset - jal_pc;
 
-        // Update the jal instruction in-place
-        if let Some(riscv32_encoder::Inst::Jal { rd, .. }) = all_instructions.get(inst_idx) {
-            let rd = *rd;
-            all_instructions[inst_idx] = riscv32_encoder::Inst::Jal { rd, imm: offset };
-        } else {
-            return Err(alloc::format!(
-                "Relocation at instruction {} is not a Jal instruction: {:?}",
-                inst_idx,
-                all_instructions.get(inst_idx)
-            ));
+        // Update the jal instruction in-place based on inst_type
+        match &reloc.inst_type {
+            lower::RelocationInstType::Jal { rd } => {
+                all_instructions[inst_idx] = riscv32_encoder::Inst::Jal {
+                    rd: *rd,
+                    imm: offset,
+                };
+            }
+            lower::RelocationInstType::Beq { .. } => {
+                // beq relocations are function-internal and should be fixed up per-function
+                // This should not happen at module level
+                return Err(alloc::format!(
+                    "Unexpected Beq relocation at module level (offset: {})",
+                    inst_idx
+                ));
+            }
         }
     }
 
@@ -677,7 +741,10 @@ mod tests {
         // Create relocations
         let relocations = vec![Relocation {
             offset: jal_offset,
-            callee: String::from("target_func"),
+            target: lower::RelocationTarget::Function(String::from("target_func")),
+            inst_type: lower::RelocationInstType::Jal {
+                rd: riscv32_encoder::Gpr::RA,
+            },
         }];
 
         // Create function addresses
@@ -709,7 +776,10 @@ mod tests {
         let mut code = vec![0u8; 20];
         let relocations = vec![Relocation {
             offset: 8, // This is valid (8 + 4 = 12 <= 20)
-            callee: String::from("target_func"),
+            target: lower::RelocationTarget::Function(String::from("target_func")),
+            inst_type: lower::RelocationInstType::Jal {
+                rd: riscv32_encoder::Gpr::RA,
+            },
         }];
 
         let mut function_addresses = BTreeMap::new();
@@ -722,7 +792,10 @@ mod tests {
         let mut code2 = vec![0u8; 10];
         let relocations2 = vec![Relocation {
             offset: 8, // This is out of bounds (8 + 4 = 12 > 10)
-            callee: String::from("target_func"),
+            target: lower::RelocationTarget::Function(String::from("target_func")),
+            inst_type: lower::RelocationInstType::Jal {
+                rd: riscv32_encoder::Gpr::RA,
+            },
         }];
 
         let result = fixup_relocations(&mut code2, &relocations2, &function_addresses, 0);
@@ -736,7 +809,10 @@ mod tests {
         let mut code = vec![0u8; 20];
         let relocations = vec![Relocation {
             offset: 8,
-            callee: String::from("nonexistent_func"),
+            target: lower::RelocationTarget::Function(String::from("nonexistent_func")),
+            inst_type: lower::RelocationInstType::Jal {
+                rd: riscv32_encoder::Gpr::RA,
+            },
         }];
 
         let function_addresses = BTreeMap::new();

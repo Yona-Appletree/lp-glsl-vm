@@ -17,13 +17,35 @@ use crate::{
     spill_reload::{SpillReloadOp, SpillReloadPlan},
 };
 
+/// Target for a relocation.
+#[derive(Debug, Clone)]
+pub enum RelocationTarget {
+    /// Function call target (by name)
+    Function(String),
+    /// Block target (by block index)
+    Block(usize),
+    /// Epilogue target (end of function)
+    Epilogue,
+}
+
+/// Instruction type that needs relocation.
+#[derive(Debug, Clone)]
+pub enum RelocationInstType {
+    /// beq instruction
+    Beq { rs1: Gpr, rs2: Gpr },
+    /// jal instruction
+    Jal { rd: Gpr },
+}
+
 /// A relocation that needs to be fixed up.
 #[derive(Debug, Clone)]
 pub struct Relocation {
-    /// Offset in the code buffer where the instruction is
+    /// Offset in the code buffer where the instruction is (instruction index)
     pub offset: usize,
-    /// Name of the function being called
-    pub callee: String,
+    /// Target of the relocation
+    pub target: RelocationTarget,
+    /// Instruction type (needed to reconstruct the instruction)
+    pub inst_type: RelocationInstType,
 }
 
 /// Lowering error.
@@ -61,8 +83,10 @@ pub struct Lowerer {
     module: Option<r5_ir::Module>,
     /// Function addresses (for call relocations).
     function_addresses: BTreeMap<String, u32>,
-    /// Relocations that need to be fixed up (call sites).
+    /// Relocations that need to be fixed up (call sites, for module-level fixup).
     relocations: Vec<Relocation>,
+    /// Function-internal relocations (block branches, returns) - fixed up per function.
+    function_relocations: Vec<Relocation>,
 }
 
 impl Lowerer {
@@ -72,6 +96,7 @@ impl Lowerer {
             module: None,
             function_addresses: BTreeMap::new(),
             relocations: Vec::new(),
+            function_relocations: Vec::new(),
         }
     }
 
@@ -93,6 +118,17 @@ impl Lowerer {
     /// Clear relocations (for next function).
     pub fn clear_relocations(&mut self) {
         self.relocations.clear();
+        self.function_relocations.clear();
+    }
+
+    /// Get function-internal relocations (for fixup after epilogue).
+    pub fn function_relocations(&self) -> &[Relocation] {
+        &self.function_relocations
+    }
+
+    /// Clear function-internal relocations (called after fixup).
+    pub fn clear_function_relocations(&mut self) {
+        self.function_relocations.clear();
     }
 
     /// Lower a function to RISC-V 32-bit code.
@@ -108,17 +144,22 @@ impl Lowerer {
     ) -> Result<CodeBuffer, LoweringError> {
         let mut code = CodeBuffer::new();
 
+        // Clear function-internal relocations for this function
+        self.function_relocations.clear();
+
         // 1. Generate prologue
         self.gen_prologue(&mut code, func, allocation, frame_layout, abi_info);
 
-        // 2. Track block addresses for jumps/branches
+        // 2. Track block addresses (instruction indices) for fixup phase
         let mut block_addresses = BTreeMap::new();
-        let _prologue_size = code.instruction_count();
 
-        // 3. Lower each block
+        // 3. Phase 1: Lower all blocks, emitting placeholder branches/returns
+        // Block addresses are recorded as we go, but branches to future blocks
+        // will use relocations that get fixed up in Phase 2
         for (block_idx, block) in func.blocks.iter().enumerate() {
-            // Record block address
-            block_addresses.insert(block_idx, code.instruction_count() as u32);
+            // Record block address (instruction index)
+            let block_start_addr = code.instruction_count() as u32;
+            block_addresses.insert(block_idx, block_start_addr);
 
             // Lower block parameters (if any) - these are already in registers from entry
             // Block parameters are handled by the register allocator
@@ -134,15 +175,8 @@ impl Lowerer {
                     }
                 }
 
-                // Lower the instruction
-                self.lower_inst(
-                    &mut code,
-                    inst,
-                    allocation,
-                    frame_layout,
-                    abi_info,
-                    &block_addresses,
-                )?;
+                // Lower the instruction (emits placeholders for branches/returns)
+                self.lower_inst(&mut code, inst, allocation, frame_layout, abi_info)?;
 
                 // Emit spill/reload operations after instruction
                 let after_point = InstPoint::new(block_idx, inst_idx + 2);
@@ -155,7 +189,63 @@ impl Lowerer {
         }
 
         // 4. Generate epilogue
+        let epilogue_inst_idx = code.instruction_count() as u32;
         self.gen_epilogue(&mut code, frame_layout, abi_info);
+
+        // 5. Phase 2: Fix up function-internal relocations
+        for reloc in &self.function_relocations {
+            // Calculate target address (instruction index)
+            let target_inst_idx = match &reloc.target {
+                RelocationTarget::Block(block_idx) => {
+                    // Block indices in IR are 0-based and match Vec indices
+                    // block0 -> index 0, block1 -> index 1, etc.
+                    *block_addresses.get(block_idx).ok_or_else(|| {
+                        LoweringError::UnimplementedInstruction {
+                            inst: r5_ir::Inst::Br {
+                                condition: Value::new(0),
+                                target_true: *block_idx as u32,
+                                target_false: 0,
+                            },
+                        }
+                    })?
+                }
+                RelocationTarget::Epilogue => epilogue_inst_idx,
+                RelocationTarget::Function(_) => {
+                    // Function relocations are handled at module level, skip
+                    continue;
+                }
+            };
+
+            // Calculate PC-relative offset in bytes
+            // When the instruction executes, PC points to the instruction
+            // offset = target - PC = (target_inst_idx * 4) - (reloc.offset * 4)
+            let target_byte_addr = (target_inst_idx * 4) as i32;
+            let inst_byte_addr = (reloc.offset * 4) as i32;
+            let offset = target_byte_addr - inst_byte_addr;
+
+            // Update instruction in-place
+            match &reloc.inst_type {
+                RelocationInstType::Beq { rs1, rs2 } => {
+                    code.set_instruction(
+                        reloc.offset,
+                        RiscvInst::Beq {
+                            rs1: *rs1,
+                            rs2: *rs2,
+                            imm: offset,
+                        },
+                    );
+                }
+                RelocationInstType::Jal { rd } => {
+                    code.set_instruction(
+                        reloc.offset,
+                        RiscvInst::Jal {
+                            rd: *rd,
+                            imm: offset,
+                        },
+                    );
+                }
+            }
+        }
 
         Ok(code)
     }
@@ -410,7 +500,6 @@ impl Lowerer {
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
-        block_addresses: &BTreeMap<usize, u32>,
     ) -> Result<(), LoweringError> {
         match inst {
             Inst::Iconst { result, value } => {
@@ -424,6 +513,24 @@ impl Lowerer {
             }
             Inst::Imul { result, arg1, arg2 } => {
                 self.lower_imul(code, *result, *arg1, *arg2, allocation, frame_layout)?;
+            }
+            Inst::IcmpEq { result, arg1, arg2 } => {
+                self.lower_icmp_eq(code, *result, *arg1, *arg2, allocation, frame_layout)?;
+            }
+            Inst::IcmpNe { result, arg1, arg2 } => {
+                self.lower_icmp_ne(code, *result, *arg1, *arg2, allocation, frame_layout)?;
+            }
+            Inst::IcmpLt { result, arg1, arg2 } => {
+                self.lower_icmp_lt(code, *result, *arg1, *arg2, allocation, frame_layout)?;
+            }
+            Inst::IcmpLe { result, arg1, arg2 } => {
+                self.lower_icmp_le(code, *result, *arg1, *arg2, allocation, frame_layout)?;
+            }
+            Inst::IcmpGt { result, arg1, arg2 } => {
+                self.lower_icmp_gt(code, *result, *arg1, *arg2, allocation, frame_layout)?;
+            }
+            Inst::IcmpGe { result, arg1, arg2 } => {
+                self.lower_icmp_ge(code, *result, *arg1, *arg2, allocation, frame_layout)?;
             }
             Inst::Return { values } => {
                 self.lower_return(code, values, allocation, frame_layout, abi_info)?;
@@ -443,8 +550,12 @@ impl Lowerer {
                     abi_info,
                 )?;
             }
-            Inst::Jump { target } => {
-                self.lower_jump(code, *target, block_addresses)?;
+            Inst::Jump { .. } => {
+                // Jump is handled differently - it can use block_addresses since
+                // it's unconditional and we can calculate the offset directly
+                // For now, we'll need to pass block_addresses for jumps
+                // TODO: Consider making jump use relocations too for consistency
+                return Err(LoweringError::UnimplementedInstruction { inst: inst.clone() });
             }
             Inst::Br {
                 condition,
@@ -458,7 +569,6 @@ impl Lowerer {
                     *target_false,
                     allocation,
                     frame_layout,
-                    block_addresses,
                 )?;
             }
             Inst::Halt => {
@@ -696,7 +806,207 @@ impl Lowerer {
         Ok(())
     }
 
+    /// Lower icmp_eq instruction: result = (arg1 == arg2) ? 1 : 0
+    fn lower_icmp_eq(
+        &mut self,
+        code: &mut CodeBuffer,
+        result: Value,
+        arg1: Value,
+        arg2: Value,
+        allocation: &RegisterAllocation,
+        frame_layout: &FrameLayout,
+    ) -> Result<(), LoweringError> {
+        let result_reg = self.get_result_reg(result, allocation)?;
+        let arg1_reg = self.get_arg_reg(code, arg1, allocation, frame_layout, Gpr::T0)?;
+        let arg2_reg = self.get_arg_reg(code, arg2, allocation, frame_layout, Gpr::T1)?;
+
+        // Use: sub temp, arg1, arg2; sltiu result, temp, 1
+        // If arg1 == arg2, then temp == 0, so (temp < 1) = 1
+        let temp = Gpr::T2;
+        code.emit(RiscvInst::Sub {
+            rd: temp,
+            rs1: arg1_reg,
+            rs2: arg2_reg,
+        });
+        code.emit(RiscvInst::Sltiu {
+            rd: result_reg,
+            rs1: temp,
+            imm: 1,
+        });
+        Ok(())
+    }
+
+    /// Lower icmp_ne instruction: result = (arg1 != arg2) ? 1 : 0
+    fn lower_icmp_ne(
+        &mut self,
+        code: &mut CodeBuffer,
+        result: Value,
+        arg1: Value,
+        arg2: Value,
+        allocation: &RegisterAllocation,
+        frame_layout: &FrameLayout,
+    ) -> Result<(), LoweringError> {
+        let result_reg = self.get_result_reg(result, allocation)?;
+        let arg1_reg = self.get_arg_reg(code, arg1, allocation, frame_layout, Gpr::T0)?;
+        let arg2_reg = self.get_arg_reg(code, arg2, allocation, frame_layout, Gpr::T1)?;
+
+        // Use: sub temp, arg1, arg2; sltu result, x0, temp
+        // If arg1 != arg2, then temp != 0, so (0 < temp) = 1
+        let temp = Gpr::T2;
+        code.emit(RiscvInst::Sub {
+            rd: temp,
+            rs1: arg1_reg,
+            rs2: arg2_reg,
+        });
+        code.emit(RiscvInst::Sltu {
+            rd: result_reg,
+            rs1: Gpr::ZERO,
+            rs2: temp,
+        });
+        Ok(())
+    }
+
+    /// Lower icmp_lt instruction: result = (arg1 < arg2) ? 1 : 0 (signed)
+    fn lower_icmp_lt(
+        &mut self,
+        code: &mut CodeBuffer,
+        result: Value,
+        arg1: Value,
+        arg2: Value,
+        allocation: &RegisterAllocation,
+        frame_layout: &FrameLayout,
+    ) -> Result<(), LoweringError> {
+        let result_reg = self.get_result_reg(result, allocation)?;
+        let arg1_reg = self.get_arg_reg(code, arg1, allocation, frame_layout, Gpr::T0)?;
+        let arg2_reg = self.get_arg_reg(code, arg2, allocation, frame_layout, Gpr::T1)?;
+
+        code.emit(RiscvInst::Slt {
+            rd: result_reg,
+            rs1: arg1_reg,
+            rs2: arg2_reg,
+        });
+        Ok(())
+    }
+
+    /// Lower icmp_le instruction: result = (arg1 <= arg2) ? 1 : 0 (signed)
+    fn lower_icmp_le(
+        &mut self,
+        code: &mut CodeBuffer,
+        result: Value,
+        arg1: Value,
+        arg2: Value,
+        allocation: &RegisterAllocation,
+        frame_layout: &FrameLayout,
+    ) -> Result<(), LoweringError> {
+        let result_reg = self.get_result_reg(result, allocation)?;
+        let arg1_reg = self.get_arg_reg(code, arg1, allocation, frame_layout, Gpr::T0)?;
+        let arg2_reg = self.get_arg_reg(code, arg2, allocation, frame_layout, Gpr::T1)?;
+
+        // arg1 <= arg2 is equivalent to !(arg2 < arg1)
+        // Use: slt temp, arg2, arg1; xori result, temp, 1
+        let temp = Gpr::T2;
+        code.emit(RiscvInst::Slt {
+            rd: temp,
+            rs1: arg2_reg,
+            rs2: arg1_reg,
+        });
+        code.emit(RiscvInst::Xori {
+            rd: result_reg,
+            rs1: temp,
+            imm: 1,
+        });
+        Ok(())
+    }
+
+    /// Lower icmp_gt instruction: result = (arg1 > arg2) ? 1 : 0 (signed)
+    fn lower_icmp_gt(
+        &mut self,
+        code: &mut CodeBuffer,
+        result: Value,
+        arg1: Value,
+        arg2: Value,
+        allocation: &RegisterAllocation,
+        frame_layout: &FrameLayout,
+    ) -> Result<(), LoweringError> {
+        let result_reg = self.get_result_reg(result, allocation)?;
+        let arg1_reg = self.get_arg_reg(code, arg1, allocation, frame_layout, Gpr::T0)?;
+        let arg2_reg = self.get_arg_reg(code, arg2, allocation, frame_layout, Gpr::T1)?;
+
+        // arg1 > arg2 is equivalent to arg2 < arg1
+        code.emit(RiscvInst::Slt {
+            rd: result_reg,
+            rs1: arg2_reg,
+            rs2: arg1_reg,
+        });
+        Ok(())
+    }
+
+    /// Lower icmp_ge instruction: result = (arg1 >= arg2) ? 1 : 0 (signed)
+    fn lower_icmp_ge(
+        &mut self,
+        code: &mut CodeBuffer,
+        result: Value,
+        arg1: Value,
+        arg2: Value,
+        allocation: &RegisterAllocation,
+        frame_layout: &FrameLayout,
+    ) -> Result<(), LoweringError> {
+        let result_reg = self.get_result_reg(result, allocation)?;
+        let arg1_reg = self.get_arg_reg(code, arg1, allocation, frame_layout, Gpr::T0)?;
+        let arg2_reg = self.get_arg_reg(code, arg2, allocation, frame_layout, Gpr::T1)?;
+
+        // arg1 >= arg2 is equivalent to !(arg1 < arg2)
+        // Use: slt temp, arg1, arg2; xori result, temp, 1
+        let temp = Gpr::T2;
+        code.emit(RiscvInst::Slt {
+            rd: temp,
+            rs1: arg1_reg,
+            rs2: arg2_reg,
+        });
+        code.emit(RiscvInst::Xori {
+            rd: result_reg,
+            rs1: temp,
+            imm: 1,
+        });
+        Ok(())
+    }
+
+    /// Helper: Get result register, ensuring it's allocated.
+    fn get_result_reg(
+        &self,
+        result: Value,
+        allocation: &RegisterAllocation,
+    ) -> Result<Gpr, LoweringError> {
+        if let Some(reg) = self.get_register(result, allocation) {
+            Ok(reg)
+        } else if allocation.value_to_slot.contains_key(&result) {
+            Err(LoweringError::ResultNotInRegister { value: result })
+        } else {
+            Err(LoweringError::ValueNotAllocated { value: result })
+        }
+    }
+
+    /// Helper: Get argument register, loading from spill slot if needed.
+    fn get_arg_reg(
+        &mut self,
+        code: &mut CodeBuffer,
+        arg: Value,
+        allocation: &RegisterAllocation,
+        frame_layout: &FrameLayout,
+        temp: Gpr,
+    ) -> Result<Gpr, LoweringError> {
+        if let Some(reg) = self.get_register(arg, allocation) {
+            Ok(reg)
+        } else {
+            self.load_value_into_reg(code, arg, temp, allocation, frame_layout)?;
+            Ok(temp)
+        }
+    }
+
     /// Lower return instruction.
+    ///
+    /// Moves return values to return registers and jumps to the epilogue.
+    /// Emits a placeholder jal and records a relocation for fixup.
     fn lower_return(
         &mut self,
         code: &mut CodeBuffer,
@@ -730,6 +1040,21 @@ impl Lowerer {
                 }
             }
         }
+
+        // Emit placeholder jal instruction (offset 0, will be fixed up)
+        let jal_inst_idx = code.instruction_count();
+        code.emit(RiscvInst::Jal {
+            rd: Gpr::ZERO,
+            imm: 0, // Placeholder
+        });
+
+        // Record relocation for jal (epilogue target)
+        self.function_relocations.push(Relocation {
+            offset: jal_inst_idx,
+            target: RelocationTarget::Epilogue,
+            inst_type: RelocationInstType::Jal { rd: Gpr::ZERO },
+        });
+
         Ok(())
     }
 
@@ -752,11 +1077,11 @@ impl Lowerer {
             if idx < 8 {
                 if let Some(arg_reg) = Abi::arg_reg(idx) {
                     // Check if this value is used after the call
-                    // A value is used after if it's in results OR if it's allocated
-                    // (allocated values are tracked and likely used later)
-                    // Simple heuristic: if it's allocated and not just used as argument, preserve it
-                    let used_after_call =
-                        results.contains(arg) || allocation.value_to_reg.contains_key(arg);
+                    // Only preserve if the argument appears in the results (meaning it's
+                    // passed through and used as a return value). For other cases where
+                    // the argument is used later, the register allocator should have
+                    // allocated it to a callee-saved register or spilled it.
+                    let used_after_call = results.contains(arg);
 
                     // Check if value is already in the argument register
                     if let Some(current_reg) = self.get_register(*arg, allocation) {
@@ -805,15 +1130,18 @@ impl Lowerer {
         // The direct call optimization doesn't work correctly because we don't know
         // the absolute address of the current function during lowering.
         // Relocations will be fixed up in the final pass with correct absolute addresses.
-        let offset = code.instruction_count();
-        self.relocations.push(Relocation {
-            offset,
-            callee: String::from(callee),
-        });
         // Emit placeholder jal (will be fixed up later)
+        let jal_inst_idx = code.instruction_count();
         code.emit(RiscvInst::Jal {
             rd: Gpr::RA,
             imm: 0, // Placeholder
+        });
+
+        // Record relocation for jal (function call target)
+        self.relocations.push(Relocation {
+            offset: jal_inst_idx,
+            target: RelocationTarget::Function(String::from(callee)),
+            inst_type: RelocationInstType::Jal { rd: Gpr::RA },
         });
 
         // Step 3: Move results from return registers (first 8)
@@ -901,33 +1229,9 @@ impl Lowerer {
         Ok(())
     }
 
-    /// Lower jump instruction.
-    fn lower_jump(
-        &mut self,
-        code: &mut CodeBuffer,
-        target: u32,
-        block_addresses: &BTreeMap<usize, u32>,
-    ) -> Result<(), LoweringError> {
-        let target_idx = target as usize;
-        if let Some(target_addr) = block_addresses.get(&target_idx) {
-            let current_pc = code.instruction_count() as u32 * 4;
-            let offset = (*target_addr as i32) - (current_pc as i32);
-            code.emit(RiscvInst::Jal {
-                rd: Gpr::ZERO, // Discard return address
-                imm: offset,
-            });
-        } else {
-            // Target block not yet processed - use placeholder
-            // This will be fixed up in a second pass
-            code.emit(RiscvInst::Jal {
-                rd: Gpr::ZERO,
-                imm: 0, // Placeholder
-            });
-        }
-        Ok(())
-    }
-
     /// Lower branch instruction.
+    ///
+    /// Emits placeholder instructions and records relocations for fixup.
     fn lower_br(
         &mut self,
         code: &mut CodeBuffer,
@@ -936,7 +1240,6 @@ impl Lowerer {
         target_false: u32,
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
-        block_addresses: &BTreeMap<usize, u32>,
     ) -> Result<(), LoweringError> {
         // Load condition into a register
         let cond_reg = if let Some(reg) = self.get_register(condition, allocation) {
@@ -947,29 +1250,38 @@ impl Lowerer {
             temp
         };
 
-        // Get target addresses
-        let true_addr = block_addresses.get(&(target_true as usize));
-        let false_addr = block_addresses.get(&(target_false as usize));
-        let current_pc = code.instruction_count() as u32 * 4;
+        // Emit placeholder beq instruction (offset 0, will be fixed up)
+        let beq_inst_idx = code.instruction_count();
+        code.emit(RiscvInst::Beq {
+            rs1: cond_reg,
+            rs2: Gpr::ZERO,
+            imm: 0, // Placeholder
+        });
 
-        // Emit branch: beq cond_reg, x0, false_target; jump true_target
-        if let Some(false_addr) = false_addr {
-            let offset = (*false_addr as i32) - (current_pc as i32);
-            code.emit(RiscvInst::Beq {
+        // Record relocation for beq (false target)
+        self.function_relocations.push(Relocation {
+            offset: beq_inst_idx,
+            target: RelocationTarget::Block(target_false as usize),
+            inst_type: RelocationInstType::Beq {
                 rs1: cond_reg,
                 rs2: Gpr::ZERO,
-                imm: offset,
-            });
-        }
+            },
+        });
 
-        // Jump to true target
-        if let Some(true_addr) = true_addr {
-            let offset = (*true_addr as i32) - (current_pc as i32);
-            code.emit(RiscvInst::Jal {
-                rd: Gpr::ZERO,
-                imm: offset,
-            });
-        }
+        // Emit placeholder jal instruction (offset 0, will be fixed up)
+        let jal_inst_idx = code.instruction_count();
+        code.emit(RiscvInst::Jal {
+            rd: Gpr::ZERO,
+            imm: 0, // Placeholder
+        });
+
+        // Record relocation for jal (true target)
+        self.function_relocations.push(Relocation {
+            offset: jal_inst_idx,
+            target: RelocationTarget::Block(target_true as usize),
+            inst_type: RelocationInstType::Jal { rd: Gpr::ZERO },
+        });
+
         Ok(())
     }
 
@@ -1030,12 +1342,14 @@ impl Default for Lowerer {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use r5_ir::parse_function;
 
     use super::*;
     use crate::{
-        abi::Abi, frame::FrameLayout, liveness::compute_liveness, regalloc::allocate_registers,
-        spill_reload::create_spill_reload_plan,
+        abi::Abi, expect_ir_a0, frame::FrameLayout, liveness::compute_liveness,
+        regalloc::allocate_registers, spill_reload::create_spill_reload_plan,
     };
 
     #[test]
@@ -1460,5 +1774,113 @@ block0:
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_block_address_recording_and_relocation_fixup() {
+        // Test that block addresses are recorded correctly and relocations are fixed up properly
+        // This is a simplified version of test_simple_branch_always_true
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 42
+    v2 = iconst 0
+    v3 = iconst 1
+    brif v3, block1, block2
+
+block1:
+    return v1
+
+block2:
+    return v2
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR function");
+        let liveness = compute_liveness(&func);
+        let allocation = allocate_registers(&func, &liveness);
+        let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
+
+        let has_calls = false;
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
+        let frame_layout = FrameLayout::compute(
+            &allocation.used_callee_saved,
+            total_spill_slots,
+            has_calls,
+            func.signature.params.len(),
+            0,
+        );
+
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
+
+        let mut lowerer = Lowerer::new();
+
+        // Lower the function
+        let code = lowerer
+            .lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info)
+            .expect("Failed to lower function");
+
+        // Check that we have relocations for the branch
+        // We expect: 1 beq relocation (false target) + 1 jal relocation (true target) + 2 return relocations (epilogue)
+        let expected_relocations = 4; // beq + jal + 2 returns
+        assert_eq!(
+            lowerer.function_relocations.len(),
+            expected_relocations,
+            "Expected {} relocations, got {}",
+            expected_relocations,
+            lowerer.function_relocations.len()
+        );
+
+        // Verify that relocations reference valid block indices
+        for reloc in &lowerer.function_relocations {
+            match &reloc.target {
+                RelocationTarget::Block(block_idx) => {
+                    assert!(
+                        *block_idx < func.blocks.len(),
+                        "Relocation references invalid block index {} (function has {} blocks)",
+                        block_idx,
+                        func.blocks.len()
+                    );
+                }
+                RelocationTarget::Epilogue => {}
+                RelocationTarget::Function(_) => {
+                    // Function relocations are handled at module level
+                }
+            }
+        }
+
+        // Check that instructions were emitted
+        assert!(code.instruction_count() > 0, "No instructions were emitted");
+    }
+
+    #[test]
+    fn test_simple_branch_always_true() {
+        // Simplest possible branch: always take true branch
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 1
+    call %test(v0) -> v1
+    halt
+}
+
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 42
+    v2 = iconst 0
+    v3 = iconst 1
+    brif v3, block1, block2
+
+block1:
+    return v1
+
+block2:
+    return v2
+}
+}"#;
+
+        expect_ir_a0(ir, 42);
     }
 }

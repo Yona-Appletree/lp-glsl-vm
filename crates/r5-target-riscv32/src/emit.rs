@@ -40,6 +40,21 @@ impl CodeBuffer {
         self.instructions.len()
     }
 
+    /// Set an instruction at a specific index (for fixup).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= instructions.len()`.
+    pub fn set_instruction(&mut self, index: usize, inst: Inst) {
+        assert!(
+            index < self.instructions.len(),
+            "Instruction index {} is out of bounds (instruction count: {})",
+            index,
+            self.instructions.len()
+        );
+        self.instructions[index] = inst;
+    }
+
     /// Get the code as a byte slice.
     ///
     /// This encodes instructions lazily on-demand.

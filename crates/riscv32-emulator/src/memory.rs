@@ -180,6 +180,11 @@ impl Memory {
     pub fn ram_mut(&mut self) -> &mut [u8] {
         &mut self.ram
     }
+
+    /// Get a reference to the code region (for debugging).
+    pub fn code(&self) -> &[u8] {
+        &self.code
+    }
 }
 
 

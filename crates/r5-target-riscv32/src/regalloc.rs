@@ -410,10 +410,10 @@ block0:
         // v0, v1, v2 should all be allocated (they interfere)
         let v0 = r5_ir::Value::new(0);
         let v1 = r5_ir::Value::new(1);
-        let v2 = r5_ir::Value::new(2);
+        let _v2 = r5_ir::Value::new(2);
 
         // Check that interfering values get different registers
-        if let (Some(reg0), Some(reg1)) = (
+        if let (Some(_reg0), Some(_reg1)) = (
             allocation.value_to_reg.get(&v0),
             allocation.value_to_reg.get(&v1),
         ) {

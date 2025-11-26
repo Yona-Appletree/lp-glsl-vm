@@ -170,6 +170,33 @@ pub fn bge(rs1: Gpr, rs2: Gpr, imm: i32) -> u32 {
     encode_b(0x63, rs1, rs2, imm, 0x5)
 }
 
+// Comparison instructions
+
+/// SLT: rd = (rs1 < rs2) ? 1 : 0 (signed)
+pub fn slt(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x2, 0x0)
+}
+
+/// SLTI: rd = (rs1 < imm) ? 1 : 0 (signed)
+pub fn slti(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
+    encode_i(0x13, rd, rs1, imm, 0x2)
+}
+
+/// SLTU: rd = (rs1 < rs2) ? 1 : 0 (unsigned)
+pub fn sltu(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x3, 0x0)
+}
+
+/// SLTIU: rd = (rs1 < imm) ? 1 : 0 (unsigned)
+pub fn sltiu(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
+    encode_i(0x13, rd, rs1, imm, 0x3)
+}
+
+/// XORI: rd = rs1 ^ imm
+pub fn xori(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
+    encode_i(0x13, rd, rs1, imm, 0x4)
+}
+
 // Immediate generation
 
 /// LUI: rd = imm << 12

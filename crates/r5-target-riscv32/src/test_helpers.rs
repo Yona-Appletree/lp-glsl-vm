@@ -2,10 +2,10 @@
 
 extern crate alloc;
 
-use alloc::{format, string::String, vec, vec::Vec};
+use alloc::{format, string::String, vec};
 
 use riscv32_emulator::{EmulatorError, LogLevel, Riscv32Emulator};
-use riscv32_encoder::{disassemble_instruction, Gpr};
+use riscv32_encoder::Gpr;
 
 use crate::compile_module_to_insts;
 
@@ -44,10 +44,8 @@ pub fn debug_ir_with_ram(ir: &str, ram_size: usize) -> Result<Riscv32Emulator, E
 }
 
 /// Format error with IR source, disassembly, and logs.
-fn format_ir_error(emu: &Riscv32Emulator, error: &EmulatorError, code: &[u8], ir: &str) -> String {
+fn format_ir_error(emu: &Riscv32Emulator, error: &EmulatorError, _code: &[u8], ir: &str) -> String {
     let mut result = String::new();
-
-    // Get error PC
     let error_pc = error.pc();
 
     result.push_str("=== IR Execution Error ===\n\n");
@@ -56,62 +54,31 @@ fn format_ir_error(emu: &Riscv32Emulator, error: &EmulatorError, code: &[u8], ir
     result.push_str("\n\n");
     result.push_str(&format!("Error: {}\n", error));
     result.push_str(&format!("PC: 0x{:08x}\n\n", error_pc));
+    result.push_str(&emu.format_debug_info(Some(error_pc), 10));
 
-    // Disassemble all instructions
-    let mut instructions = Vec::new();
-    for i in (0..code.len()).step_by(4) {
-        if i + 4 <= code.len() {
-            let inst_word = u32::from_le_bytes([code[i], code[i + 1], code[i + 2], code[i + 3]]);
-            let pc = i as u32;
-            let disasm = disassemble_instruction(inst_word);
-            instructions.push((pc, inst_word, disasm));
-        }
-    }
+    result
+}
 
-    // Show disassembly
-    result.push_str("Disassembly:\n");
-    if instructions.len() > 50 {
-        // Find the index of the failing instruction
-        let fail_idx = instructions
-            .iter()
-            .position(|(pc, _, _)| *pc == error_pc)
-            .unwrap_or(0);
-        let start = fail_idx.saturating_sub(10);
-        let end = (fail_idx + 11).min(instructions.len());
+/// Format register mismatch with IR source, disassembly, and logs.
+fn format_ir_register_mismatch(
+    emu: &Riscv32Emulator,
+    _code: &[u8],
+    ir: &str,
+    reg: Gpr,
+    expected: i32,
+    actual: i32,
+) -> String {
+    let mut result = String::new();
 
-        if start > 0 {
-            result.push_str("  ...\n");
-        }
-
-        for (idx, (pc, _inst_word, disasm)) in instructions[start..end].iter().enumerate() {
-            let actual_idx = start + idx;
-            let marker = if *pc == error_pc { ">>> " } else { "    " };
-            result.push_str(&format!(
-                "{}{:3}: 0x{:08x}: {}\n",
-                marker, actual_idx, pc, disasm
-            ));
-        }
-
-        if end < instructions.len() {
-            result.push_str("  ...\n");
-        }
-    } else {
-        // Show all instructions
-        for (idx, (pc, _inst_word, disasm)) in instructions.iter().enumerate() {
-            let marker = if *pc == error_pc { ">>> " } else { "    " };
-            result.push_str(&format!("{}{:3}: 0x{:08x}: {}\n", marker, idx, pc, disasm));
-        }
-    }
-
-    // Show last 10 logs
-    let logs = emu.get_logs();
-    if !logs.is_empty() {
-        result.push_str("\nLast execution logs:\n");
-        let start = logs.len().saturating_sub(10);
-        for log in &logs[start..] {
-            result.push_str(&format!("{}\n", log));
-        }
-    }
+    result.push_str("=== Register Mismatch ===\n\n");
+    result.push_str("IR Source:\n");
+    result.push_str(ir);
+    result.push_str("\n\n");
+    result.push_str(&format!(
+        "Register {:?} mismatch: expected {}, got {}\n\n",
+        reg, expected, actual
+    ));
+    result.push_str(&emu.format_debug_info(None, 20));
 
     result
 }
@@ -135,10 +102,18 @@ pub fn expect_ir_ok(ir: &str) -> Riscv32Emulator {
 
 /// Expect IR code to run successfully and return a specific value in a register.
 pub fn expect_ir_register(ir: &str, reg: Gpr, expected: i32) {
+    #[cfg(test)]
+    extern crate std;
+
+    #[cfg(test)]
+    use std::println;
+
     let mut emu = debug_ir(ir).expect("Failed to compile IR code");
     let code = {
         let module = r5_ir::parse_module(ir).expect("Failed to parse IR");
         let compiled = compile_module_to_insts(&module).expect("Failed to compile");
+        #[cfg(test)]
+        println!("Compiled module: {}", compiled);
         compiled.to_bytes().expect("Failed to convert to bytes")
     };
 
@@ -147,8 +122,8 @@ pub fn expect_ir_register(ir: &str, reg: Gpr, expected: i32) {
             let actual = emu.get_register(reg);
             if actual != expected {
                 panic!(
-                    "Register {:?} mismatch: expected {}, got {}\n\nIR:\n{}",
-                    reg, expected, actual, ir
+                    "{}",
+                    format_ir_register_mismatch(&emu, &code, ir, reg, expected, actual)
                 );
             }
         }

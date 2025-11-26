@@ -318,5 +318,95 @@ impl Riscv32Emulator {
     pub fn memory_mut(&mut self) -> &mut Memory {
         &mut self.memory
     }
+
+    /// Format debug information including disassembly and execution logs.
+    ///
+    /// # Arguments
+    ///
+    /// * `highlight_pc` - Optional PC to highlight in disassembly (for errors)
+    /// * `log_count` - Number of recent logs to show (default 20)
+    pub fn format_debug_info(&self, highlight_pc: Option<u32>, log_count: usize) -> String {
+        use alloc::format;
+        use riscv32_encoder::disassemble_instruction;
+
+        let mut result = String::new();
+        let code = self.memory.code();
+
+        // Disassemble all instructions
+        let mut instructions = Vec::new();
+        for i in (0..code.len()).step_by(4) {
+            if i + 4 <= code.len() {
+                let inst_word = u32::from_le_bytes([code[i], code[i + 1], code[i + 2], code[i + 3]]);
+                let pc = i as u32;
+                let disasm = disassemble_instruction(inst_word);
+                instructions.push((pc, inst_word, disasm));
+            }
+        }
+
+        // Show disassembly
+        result.push_str("Disassembly:\n");
+        if let Some(error_pc) = highlight_pc {
+            if instructions.len() > 50 {
+                // Find the index of the highlighted instruction
+                let fail_idx = instructions
+                    .iter()
+                    .position(|(pc, _, _)| *pc == error_pc)
+                    .unwrap_or(0);
+                let start = fail_idx.saturating_sub(10);
+                let end = (fail_idx + 11).min(instructions.len());
+
+                if start > 0 {
+                    result.push_str("  ...\n");
+                }
+
+                for (idx, (pc, _inst_word, disasm)) in instructions[start..end].iter().enumerate() {
+                    let actual_idx = start + idx;
+                    let marker = if *pc == error_pc { ">>> " } else { "    " };
+                    result.push_str(&format!(
+                        "{}{:3}: 0x{:08x}: {}\n",
+                        marker, actual_idx, pc, disasm
+                    ));
+                }
+
+                if end < instructions.len() {
+                    result.push_str("  ...\n");
+                }
+            } else {
+                // Show all instructions
+                for (idx, (pc, _inst_word, disasm)) in instructions.iter().enumerate() {
+                    let marker = if *pc == error_pc { ">>> " } else { "    " };
+                    result.push_str(&format!("{}{:3}: 0x{:08x}: {}\n", marker, idx, pc, disasm));
+                }
+            }
+        } else {
+            // No highlight - show recent instructions or all if small
+            if instructions.len() > 50 {
+                let start = instructions.len().saturating_sub(20);
+                if start > 0 {
+                    result.push_str("  ...\n");
+                }
+                for (idx, (pc, _inst_word, disasm)) in instructions[start..].iter().enumerate() {
+                    let actual_idx = start + idx;
+                    result.push_str(&format!("   {:3}: 0x{:08x}: {}\n", actual_idx, pc, disasm));
+                }
+            } else {
+                // Show all instructions
+                for (idx, (pc, _inst_word, disasm)) in instructions.iter().enumerate() {
+                    result.push_str(&format!("   {:3}: 0x{:08x}: {}\n", idx, pc, disasm));
+                }
+            }
+        }
+
+        // Show logs
+        if !self.log_buffer.is_empty() {
+            result.push_str("\nLast execution logs:\n");
+            let start = self.log_buffer.len().saturating_sub(log_count);
+            for log in &self.log_buffer[start..] {
+                result.push_str(&format!("{}\n", log));
+            }
+        }
+
+        result
+    }
 }
 

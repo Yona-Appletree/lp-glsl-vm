@@ -2,16 +2,16 @@ use alloc::vec::Vec;
 
 use embive::transpiler::transpile_elf;
 use embive_runtime::syscall;
-use riscv_shared::build_and_compile_mul;
+use riscv_shared::build_and_compile_fib;
 
-/// JIT experiment: generate RISC-V mul function using the new compiler architecture,
+/// JIT experiment: generate RISC-V fibonacci function using the new compiler architecture,
 /// transpile it, and execute it via embive VM
 pub fn jit_add_experiment() {
     println!("[guest] ===== JIT EXPERIMENT START =====");
     println!("[guest] Step 1: Building IR and compiling...");
 
     // Build and compile using shared code
-    let jit_result = build_and_compile_mul();
+    let jit_result = build_and_compile_fib();
 
     println!(
         "[guest] Step 2: Generated {} bytes of RISC-V code",
@@ -66,32 +66,27 @@ pub fn jit_add_experiment() {
     let code_ptr = output_buffer.as_ptr();
     println!("[guest] Step 7: Got code pointer: {:p}", code_ptr);
 
-    // Cast to function pointer
-    type MulFunc = extern "C" fn(i32, i32) -> i32;
+    // Cast to function pointer (bootstrap function that calls fib(10))
+    type BootstrapFunc = extern "C" fn() -> i32;
     println!("[guest] Step 8: Casting to function pointer...");
-    let mul_func: MulFunc = unsafe { core::mem::transmute(code_ptr) };
+    let bootstrap_func: BootstrapFunc = unsafe { core::mem::transmute(code_ptr) };
     println!(
         "[guest] Step 8: Function pointer created: {:p}",
-        mul_func as *const ()
+        bootstrap_func as *const ()
     );
 
-    // Call the function with test values
-    let a = 5;
-    let b = 10;
-    println!(
-        "[guest] Step 9: About to call JIT function: mul({}, {})",
-        a, b
-    );
-    println!("[guest] Step 9: Expected result: {}", a * b);
+    // Call the bootstrap function which will call fib(10) and return the result
+    println!("[guest] Step 9: About to call bootstrap function (which calls fib(10))");
+    println!("[guest] Step 9: Expected result: 55 (fib(10))");
 
     println!("[guest] Step 9: Calling function now...");
-    let result = mul_func(a, b);
+    let result = bootstrap_func();
     println!("[guest] Step 9: Function call completed!");
 
-    println!("[guest] Step 10: JIT function returned: {}", result);
-    println!("[guest] Step 10: Expected: {}, Got: {}", a * b, result);
+    println!("[guest] Step 10: Bootstrap function returned: {}", result);
+    println!("[guest] Step 10: Expected: 55, Got: {}", result);
 
-    if result == a * b {
+    if result == 55 {
         println!("[guest] ===== JIT EXPERIMENT SUCCESS! =====");
         // Signal completion with the JIT result
         let _ = syscall(0, &[result, 0, 0, 0, 0, 0, 0]);

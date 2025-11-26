@@ -38,6 +38,18 @@ pub enum Inst {
     /// BGE: if rs1 >= rs2 (signed), pc = pc + imm
     Bge { rs1: Gpr, rs2: Gpr, imm: i32 },
 
+    // Comparison instructions
+    /// SLT: rd = (rs1 < rs2) ? 1 : 0 (signed)
+    Slt { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// SLTI: rd = (rs1 < imm) ? 1 : 0 (signed)
+    Slti { rd: Gpr, rs1: Gpr, imm: i32 },
+    /// SLTU: rd = (rs1 < rs2) ? 1 : 0 (unsigned)
+    Sltu { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// SLTIU: rd = (rs1 < imm) ? 1 : 0 (unsigned)
+    Sltiu { rd: Gpr, rs1: Gpr, imm: i32 },
+    /// XORI: rd = rs1 ^ imm
+    Xori { rd: Gpr, rs1: Gpr, imm: i32 },
+
     // Immediate generation
     /// LUI: rd = imm << 12
     Lui { rd: Gpr, imm: u32 },
@@ -68,6 +80,11 @@ impl Inst {
             Inst::Bne { rs1, rs2, imm } => bne(*rs1, *rs2, *imm),
             Inst::Blt { rs1, rs2, imm } => blt(*rs1, *rs2, *imm),
             Inst::Bge { rs1, rs2, imm } => bge(*rs1, *rs2, *imm),
+            Inst::Slt { rd, rs1, rs2 } => slt(*rd, *rs1, *rs2),
+            Inst::Slti { rd, rs1, imm } => slti(*rd, *rs1, *imm),
+            Inst::Sltu { rd, rs1, rs2 } => sltu(*rd, *rs1, *rs2),
+            Inst::Sltiu { rd, rs1, imm } => sltiu(*rd, *rs1, *imm),
+            Inst::Xori { rd, rs1, imm } => xori(*rd, *rs1, *imm),
             Inst::Lui { rd, imm } => lui(*rd, *imm),
             Inst::Auipc { rd, imm } => auipc(*rd, *imm),
             Inst::Ecall => ecall(),

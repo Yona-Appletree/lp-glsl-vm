@@ -117,6 +117,8 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                 (0x0, 0x0) => Ok(Inst::Add { rd, rs1, rs2 }),
                 (0x0, 0x20) => Ok(Inst::Sub { rd, rs1, rs2 }),
                 (0x0, 0x01) => Ok(Inst::Mul { rd, rs1, rs2 }),
+                (0x2, 0x0) => Ok(Inst::Slt { rd, rs1, rs2 }),
+                (0x3, 0x0) => Ok(Inst::Sltu { rd, rs1, rs2 }),
                 _ => Err(format!(
                     "Unknown R-type instruction: funct3=0x{:x}, funct7=0x{:x}",
                     fields.funct3, fields.funct7
@@ -127,6 +129,21 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
             // I-type (immediate arithmetic)
             match fields.funct3 {
                 0x0 => Ok(Inst::Addi {
+                    rd,
+                    rs1,
+                    imm: fields.imm_i,
+                }),
+                0x2 => Ok(Inst::Slti {
+                    rd,
+                    rs1,
+                    imm: fields.imm_i,
+                }),
+                0x3 => Ok(Inst::Sltiu {
+                    rd,
+                    rs1,
+                    imm: fields.imm_i,
+                }),
+                0x4 => Ok(Inst::Xori {
                     rd,
                     rs1,
                     imm: fields.imm_i,

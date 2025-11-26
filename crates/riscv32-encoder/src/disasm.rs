@@ -49,6 +49,12 @@ fn disassemble_instruction_with_labels(
                 (0x0, 0x01) => {
                     format!("mul {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
                 }
+                (0x2, 0x0) => {
+                    format!("slt {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+                }
+                (0x3, 0x0) => {
+                    format!("sltu {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+                }
                 _ => format!("unknown_r_type 0x{:08x}", inst),
             }
         }
@@ -56,6 +62,9 @@ fn disassemble_instruction_with_labels(
             // I-type (immediate arithmetic)
             match funct3 {
                 0x0 => format!("addi {}, {}, {}", gpr_name(rd), gpr_name(rs1), imm_i),
+                0x2 => format!("slti {}, {}, {}", gpr_name(rd), gpr_name(rs1), imm_i),
+                0x3 => format!("sltiu {}, {}, {}", gpr_name(rd), gpr_name(rs1), imm_i),
+                0x4 => format!("xori {}, {}, {}", gpr_name(rd), gpr_name(rs1), imm_i),
                 _ => format!("unknown_i_type 0x{:08x}", inst),
             }
         }
@@ -129,6 +138,8 @@ fn disassemble_instruction_with_labels(
             // System instructions
             if inst == 0x00000073 {
                 String::from("ecall")
+            } else if inst == 0x00100073 {
+                String::from("ebreak")
             } else {
                 format!("unknown_system 0x{:08x}", inst)
             }
@@ -423,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_round_trip_with_labels() {
-        use alloc::{collections::BTreeMap, string::ToString, vec::Vec};
+        use alloc::{collections::BTreeMap, string::ToString};
 
         use crate::asm::assemble_code;
 

@@ -2,7 +2,7 @@
 members = [
     "crates/lp-glsl-vm",
     "crates/embive-runtime",
-    "crates/embive-program",
+    "apps/embive-program",
     "crates/riscv32-encoder",
     "crates/riscv32-emulator",
     "crates/r5-ir",
@@ -27,7 +27,7 @@ default-members = [
 exclude = [
     "apps/esp32c3-jit-test",
     "crates/embive-runtime",
-    "crates/embive-program",
+    "apps/embive-program",
 ]
 resolver = "2"
 

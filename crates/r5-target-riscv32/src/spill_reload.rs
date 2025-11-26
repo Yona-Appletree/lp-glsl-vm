@@ -96,12 +96,18 @@ pub fn create_spill_reload_plan(
 
     for (block_idx, block) in func.blocks.iter().enumerate() {
         for (inst_idx, inst) in block.insts.iter().enumerate() {
-            if let Inst::Call { args, results, callee: _ } = inst {
+            if let Inst::Call {
+                args,
+                results,
+                callee: _,
+            } = inst
+            {
                 let call_point = InstPoint::new(block_idx, inst_idx + 1);
 
                 // Collect argument and return values for this call
                 let call_args: alloc::collections::BTreeSet<_> = args.iter().copied().collect();
-                let call_results: alloc::collections::BTreeSet<_> = results.iter().copied().collect();
+                let call_results: alloc::collections::BTreeSet<_> =
+                    results.iter().copied().collect();
 
                 // Find all live values in caller-saved registers
                 // BUT: Don't spill argument/return registers (a0-a7) that are actually
@@ -610,10 +616,8 @@ block0:
         // The first call might need spills for v1 and v2
         // The second call might need spills for v2
         // So max_temp_spill_slots should be at least 2
-        assert!(
-            spill_reload.max_temp_spill_slots >= 0,
-            "Should account for temporary spill slots needed"
-        );
+        // Note: max_temp_spill_slots is usize, so it's always >= 0
+        // The assertion just verifies the value is set correctly
 
         // Verify frame layout includes temporary slots
         let has_calls = true;
