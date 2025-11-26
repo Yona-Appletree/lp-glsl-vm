@@ -112,9 +112,68 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
         if let Some(func) = module.functions.get(entry_name) {
             lowerer.clear_relocations();
             let code = lowerer.lower_function(func);
-            let code_bytes = code.as_bytes().to_vec();
+            let mut code_bytes = code.as_bytes().to_vec();
+
+            // Prepend SP initialization to entry function
+            // SP = RAM_OFFSET + ram_size - STACK_SIZE (aligned to 16 bytes)
+            // For now, use a reasonable default: assume 4MB RAM, 64KB stack
+            // SP = 0x80000000 + 0x400000 - 0x10000 = 0x80030000
+            // We'll use lui + addi to set SP
+            use riscv32_encoder::{Gpr, Inst};
+            const RAM_OFFSET: u32 = 0x80000000;
+            const STACK_SIZE: u32 = 64 * 1024; // 64KB
+            const DEFAULT_RAM_SIZE: u32 = 4 * 1024 * 1024; // 4MB
+            let sp_value = RAM_OFFSET + DEFAULT_RAM_SIZE - STACK_SIZE;
+            let sp_value = sp_value & !0xF; // Align to 16 bytes
+
+            // Generate: lui sp, (sp_value >> 12)
+            //          addi sp, sp, (sp_value & 0xFFF)
+            // Note: lui sets rd = imm << 12, so we pass the full target value
+            // and lui will extract bits [31:12] for encoding internally
+            let sp_hi_value = sp_value & !0xFFF; // Clear lower 12 bits for lui
+            let sp_lo = (sp_value & 0xFFF) as i32;
+            let sp_lo_signed = if sp_lo & 0x800 != 0 {
+                sp_lo | (-4096i32) // Sign-extend if bit 11 is set
+            } else {
+                sp_lo
+            };
+
+            let mut bootstrap_code = Vec::new();
+            // lui sp, sp_hi_value
+            // Inst::Lui expects the full 32-bit immediate (it extracts upper 20 bits internally)
+            bootstrap_code.extend_from_slice(
+                &Inst::Lui {
+                    rd: Gpr::SP,
+                    imm: sp_hi_value,
+                }
+                .encode()
+                .to_le_bytes(),
+            );
+            // addi sp, sp, sp_lo_signed
+            if sp_lo_signed != 0 {
+                bootstrap_code.extend_from_slice(
+                    &Inst::Addi {
+                        rd: Gpr::SP,
+                        rs1: Gpr::SP,
+                        imm: sp_lo_signed,
+                    }
+                    .encode()
+                    .to_le_bytes(),
+                );
+            }
+
+            // Prepend bootstrap code to entry function
+            let sp_init_size = bootstrap_code.len();
+            bootstrap_code.extend_from_slice(&code_bytes);
+            code_bytes = bootstrap_code;
+
             let code_size = code_bytes.len();
-            let relocations = lowerer.relocations().to_vec();
+            let mut relocations = lowerer.relocations().to_vec();
+
+            // Adjust relocation offsets for prepended SP initialization
+            for reloc in &mut relocations {
+                reloc.offset += sp_init_size;
+            }
 
             function_code.insert(entry_name.clone(), code_bytes);
             function_addresses.insert(entry_name.clone(), current_address);

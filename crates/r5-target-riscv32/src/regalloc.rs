@@ -170,6 +170,12 @@ impl SimpleRegAllocator {
         self.value_to_reg.insert(value, reg);
     }
 
+    /// Remove a value from spill slots (for reloading).
+    /// This allows the value to be allocated to a register.
+    pub fn unspill(&mut self, value: Value) {
+        self.spill_slots.remove(&value);
+    }
+
     /// Get list of callee-saved registers currently in use.
     pub fn get_used_callee_saved(&self) -> Vec<Gpr> {
         self.value_to_reg

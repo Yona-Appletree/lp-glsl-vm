@@ -237,6 +237,9 @@ impl VmRunner {
         let ram_len = ram.len();
 
         // Create memory and interpreter
+        // Note: SP initialization is handled by the transpiled code/bootstrap
+        // The embive interpreter will execute the transpiled RISC-V code which includes
+        // SP initialization if present in the bootstrap code
         let mut memory = SliceMemory::new(&code_vec, &mut ram);
         let mut interpreter = Interpreter::new(&mut memory, 0);
         interpreter.program_counter = 0;

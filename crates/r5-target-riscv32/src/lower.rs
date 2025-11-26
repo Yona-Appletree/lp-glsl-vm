@@ -195,42 +195,43 @@ impl Lowerer {
             }
 
             // Allocate registers for all instructions
+            // If allocation fails, spill the value to get a spill slot
             for inst in &block.insts {
                 match inst {
                     Inst::Iadd { result, arg1, arg2 } => {
-                        let _ = self.regalloc.allocate(*arg1);
-                        let _ = self.regalloc.allocate(*arg2);
-                        let _ = self.regalloc.allocate(*result);
+                        self.allocate_or_spill(*arg1);
+                        self.allocate_or_spill(*arg2);
+                        self.allocate_or_spill(*result);
                     }
                     Inst::Isub { result, arg1, arg2 } => {
-                        let _ = self.regalloc.allocate(*arg1);
-                        let _ = self.regalloc.allocate(*arg2);
-                        let _ = self.regalloc.allocate(*result);
+                        self.allocate_or_spill(*arg1);
+                        self.allocate_or_spill(*arg2);
+                        self.allocate_or_spill(*result);
                     }
                     Inst::Imul { result, arg1, arg2 } => {
-                        let _ = self.regalloc.allocate(*arg1);
-                        let _ = self.regalloc.allocate(*arg2);
-                        let _ = self.regalloc.allocate(*result);
+                        self.allocate_or_spill(*arg1);
+                        self.allocate_or_spill(*arg2);
+                        self.allocate_or_spill(*result);
                     }
                     Inst::Iconst { result, .. } => {
-                        let _ = self.regalloc.allocate(*result);
+                        self.allocate_or_spill(*result);
                     }
                     Inst::Call { args, results, .. } => {
                         for arg in args {
-                            let _ = self.regalloc.allocate(*arg);
+                            self.allocate_or_spill(*arg);
                         }
                         for res in results {
-                            let _ = self.regalloc.allocate(*res);
+                            self.allocate_or_spill(*res);
                         }
                     }
                     Inst::Syscall { args, .. } => {
                         for arg in args {
-                            let _ = self.regalloc.allocate(*arg);
+                            self.allocate_or_spill(*arg);
                         }
                     }
                     Inst::Return { values } => {
                         for val in values {
-                            let _ = self.regalloc.allocate(*val);
+                            self.allocate_or_spill(*val);
                         }
                     }
                     _ => {}
@@ -460,23 +461,141 @@ impl Lowerer {
         }
     }
 
-    /// Helper to allocate a register, panicking if allocation fails.
-    /// Note: Proper spilling should happen at call sites, not here.
-    fn allocate_or_panic(&mut self, value: Value) -> Gpr {
-        self.regalloc.allocate(value).unwrap_or_else(|| {
-            panic!(
-                "Out of registers for value {:?}. This should not happen if frame layout is \
-                 computed correctly.",
-                value
-            );
-        })
+    /// Helper to allocate a register or spill if allocation fails.
+    /// Used during analysis phase to determine spill slot requirements.
+    fn allocate_or_spill(&mut self, value: Value) {
+        if self.regalloc.is_mapped(value) {
+            return; // Already allocated
+        }
+        if self.regalloc.allocate(value).is_none() {
+            // Out of registers, spill this value
+            self.regalloc.spill(value);
+        }
+    }
+
+    /// Helper to allocate a register, reloading from spill slot if needed.
+    /// If the value is spilled, reload it from the stack into a register.
+    fn allocate_or_panic(
+        &mut self,
+        code: &mut CodeBuffer,
+        value: Value,
+        frame_layout: &FrameLayout,
+    ) -> Gpr {
+        // Check if already in a register
+        if let Some(reg) = self.regalloc.get(value) {
+            return reg;
+        }
+
+        // Check if spilled - reload from stack
+        if let Some(slot) = self.regalloc.get_spill_slot(value) {
+            let offset = frame_layout.spill_slot_offset(slot);
+
+            // Remove from spill slots so allocate() can work
+            self.regalloc.unspill(value);
+
+            // Try to allocate a register for the reloaded value
+            let reg = if let Some(reg) = self.regalloc.allocate(value) {
+                reg
+            } else {
+                // All registers are in use - spill a caller-saved register temporarily
+                // Find a caller-saved register that's in use
+                let clobbers = Self::get_clobbered_registers();
+                let mappings: Vec<(Value, Gpr)> = self
+                    .regalloc
+                    .get_all_mappings()
+                    .iter()
+                    .map(|(v, r)| (*v, *r))
+                    .collect();
+
+                // Find first caller-saved register in use
+                let (temp_value, temp_reg) = mappings
+                    .iter()
+                    .find(|(_, reg)| clobbers.contains(reg))
+                    .copied()
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "No caller-saved registers available to spill when reloading {:?}",
+                            value
+                        );
+                    });
+
+                // Spill the temporary register
+                let temp_slot = self.regalloc.spill(temp_value);
+                let temp_offset = frame_layout.spill_slot_offset(temp_slot);
+                code.emit(RiscvInst::Sw {
+                    rs1: Gpr::SP,
+                    rs2: temp_reg,
+                    imm: temp_offset,
+                });
+
+                // Now we can allocate the register for our value
+                self.regalloc.map_value_to_register(value, temp_reg);
+                temp_reg
+            };
+
+            // Reload from stack
+            code.emit(RiscvInst::Lw {
+                rd: reg,
+                rs1: Gpr::SP,
+                imm: offset,
+            });
+
+            return reg;
+        }
+
+        // Not spilled, allocate normally
+        if let Some(reg) = self.regalloc.allocate(value) {
+            reg
+        } else {
+            // All registers are in use - spill a caller-saved register temporarily
+            let frame_layout = self
+                .current_frame_layout
+                .as_ref()
+                .expect("Frame layout must be set");
+            let clobbers = Self::get_clobbered_registers();
+            let mappings: Vec<(Value, Gpr)> = self
+                .regalloc
+                .get_all_mappings()
+                .iter()
+                .map(|(v, r)| (*v, *r))
+                .collect();
+
+            // Find first caller-saved register in use
+            let (temp_value, temp_reg) = mappings
+                .iter()
+                .find(|(_, reg)| clobbers.contains(reg))
+                .copied()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "No caller-saved registers available to spill when allocating {:?}",
+                        value
+                    );
+                });
+
+            // Spill the temporary register
+            let temp_slot = self.regalloc.spill(temp_value);
+            let temp_offset = frame_layout.spill_slot_offset(temp_slot);
+            code.emit(RiscvInst::Sw {
+                rs1: Gpr::SP,
+                rs2: temp_reg,
+                imm: temp_offset,
+            });
+
+            // Now we can allocate the register for our value
+            self.regalloc.map_value_to_register(value, temp_reg);
+            temp_reg
+        }
     }
 
     /// Lower `iadd` instruction: result = arg1 + arg2
     fn lower_iadd(&mut self, code: &mut CodeBuffer, result: Value, arg1: Value, arg2: Value) {
-        let reg1 = self.allocate_or_panic(arg1);
-        let reg2 = self.allocate_or_panic(arg2);
-        let reg_result = self.allocate_or_panic(result);
+        let frame_layout = self
+            .current_frame_layout
+            .as_ref()
+            .expect("Frame layout must be set");
+        let reg1 = self.allocate_or_panic(code, arg1, frame_layout);
+        let reg2 = self.allocate_or_panic(code, arg2, frame_layout);
+        let reg_result = self.allocate_or_panic(code, result, frame_layout);
 
         // Use add for register-register
         code.emit(RiscvInst::Add {
@@ -488,9 +607,13 @@ impl Lowerer {
 
     /// Lower `isub` instruction: result = arg1 - arg2
     fn lower_isub(&mut self, code: &mut CodeBuffer, result: Value, arg1: Value, arg2: Value) {
-        let reg1 = self.allocate_or_panic(arg1);
-        let reg2 = self.allocate_or_panic(arg2);
-        let reg_result = self.allocate_or_panic(result);
+        let frame_layout = self
+            .current_frame_layout
+            .as_ref()
+            .expect("Frame layout must be set");
+        let reg1 = self.allocate_or_panic(code, arg1, frame_layout);
+        let reg2 = self.allocate_or_panic(code, arg2, frame_layout);
+        let reg_result = self.allocate_or_panic(code, result, frame_layout);
 
         // Use sub for register-register
         code.emit(RiscvInst::Sub {
@@ -502,9 +625,13 @@ impl Lowerer {
 
     /// Lower `imul` instruction: result = arg1 * arg2
     fn lower_imul(&mut self, code: &mut CodeBuffer, result: Value, arg1: Value, arg2: Value) {
-        let reg1 = self.allocate_or_panic(arg1);
-        let reg2 = self.allocate_or_panic(arg2);
-        let reg_result = self.allocate_or_panic(result);
+        let frame_layout = self
+            .current_frame_layout
+            .as_ref()
+            .expect("Frame layout must be set");
+        let reg1 = self.allocate_or_panic(code, arg1, frame_layout);
+        let reg2 = self.allocate_or_panic(code, arg2, frame_layout);
+        let reg_result = self.allocate_or_panic(code, result, frame_layout);
 
         // Use mul for register-register (M extension)
         code.emit(RiscvInst::Mul {
@@ -516,7 +643,11 @@ impl Lowerer {
 
     /// Lower `iconst` instruction: result = value
     fn lower_iconst(&mut self, code: &mut CodeBuffer, result: Value, value: i64) {
-        let reg_result = self.allocate_or_panic(result);
+        let frame_layout = self
+            .current_frame_layout
+            .as_ref()
+            .expect("Frame layout must be set");
+        let reg_result = self.allocate_or_panic(code, result, frame_layout);
         let imm_i32 = value as i32;
 
         // For small constants, use addi with x0
@@ -604,11 +735,12 @@ impl Lowerer {
         let mut values_to_spill = Vec::new();
         for (value, reg) in &mappings {
             if clobbers.contains(reg) {
-                // Check if this value is an argument being passed
-                let is_arg = args.contains(value);
                 // Check if this value is a result (will be overwritten)
                 let is_result = results.contains(value);
-                if !is_arg && !is_result {
+                if !is_result {
+                    // Spill all values in caller-saved registers, even if they're arguments
+                    // Arguments will be moved to argument registers, which will be clobbered
+                    // If the value is also used after the call, we need to preserve it
                     values_to_spill.push(*value);
                 }
             }
@@ -652,10 +784,8 @@ impl Lowerer {
             };
 
             // Get the register for the argument value
-            let arg_value_reg = self
-                .regalloc
-                .get(*arg)
-                .expect("Argument should be allocated");
+            // If it was spilled, reload it (allocate_or_panic will handle reloading)
+            let arg_value_reg = self.allocate_or_panic(code, *arg, frame_layout);
 
             // Move argument to the appropriate argument register
             if arg_value_reg.num() != arg_reg.num() {
@@ -664,6 +794,8 @@ impl Lowerer {
                     rs1: arg_value_reg,
                     rs2: Gpr::ZERO,
                 });
+                // Update register allocation to reflect the move
+                self.regalloc.map_value_to_register(*arg, arg_reg);
             }
         }
 
@@ -732,7 +864,7 @@ impl Lowerer {
             let arg_value_reg = self
                 .regalloc
                 .get(*arg)
-                .unwrap_or_else(|| self.allocate_or_panic(*arg));
+                .unwrap_or_else(|| self.allocate_or_panic(code, *arg));
 
             // Move argument to the appropriate register
             if arg_value_reg.num() != arg_reg.num() {
@@ -842,7 +974,7 @@ impl Lowerer {
             // Get the register for the return value
             let value_reg = self.regalloc.get(*value).unwrap_or_else(|| {
                 // If not allocated, allocate it now
-                self.allocate_or_panic(*value)
+                self.allocate_or_panic(code, *value)
             });
 
             // Move to return register if not already there
