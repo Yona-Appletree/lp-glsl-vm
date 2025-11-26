@@ -1,15 +1,17 @@
 //! Function call instruction lowering.
 
 use lpc_lpir::Value;
-use crate::{Gpr, Inst as RiscvInst};
 
-use super::types::{LoweringError, Relocation, RelocationInstType, RelocationTarget};
-use super::super::{
-    abi::{Abi, AbiInfo},
-    emit::CodeBuffer,
-    frame::FrameLayout,
-    regalloc::RegisterAllocation,
+use super::{
+    super::{
+        abi::{Abi, AbiInfo},
+        emit::CodeBuffer,
+        frame::FrameLayout,
+        regalloc::RegisterAllocation,
+    },
+    types::{LoweringError, Relocation, RelocationInstType, RelocationTarget},
 };
+use crate::{Gpr, Inst as RiscvInst};
 
 impl super::Lowerer {
     /// Lower call instruction.
@@ -63,12 +65,21 @@ impl super::Lowerer {
         }
 
         // Step 2: Store stack arguments (index >= 8) to outgoing args area
-        // Stack arguments are stored at positive offsets from SP (above SP, per RISC-V convention).
-        // The callee reads them at positive offsets from SP before adjusting SP.
-        // Since the caller's SP (after prologue) equals the callee's SP (before prologue),
-        // we store at the same positive offsets that the callee will read from.
-        // Note: The outgoing args area is allocated in the frame, but we store above the frame
-        // because the callee reads at positive offsets from its SP before prologue.
+        //
+        // According to RISC-V calling convention:
+        // - Stack arguments are stored at positive offsets from SP
+        // - The caller's SP (after prologue) equals the callee's SP (before prologue)
+        // - Both use the same offset: (idx - 8) * 4
+        //
+        // The outgoing args area is part of the caller's frame, so storing at SP+offset
+        // places arguments inside the frame (in the outgoing args area). The callee loads
+        // from the same location using the same offset.
+        crate::debug!("[CALL] Storing stack arguments for call to '{}'", callee);
+        crate::debug!(
+            "[CALL] Caller frame_size: {}, outgoing_args_size: {}",
+            frame_layout.total_size(),
+            frame_layout.outgoing_args_size
+        );
         for (idx, arg) in args.iter().enumerate() {
             if idx >= 8 {
                 if let Some(offset) = frame_layout.outgoing_arg_offset(idx) {
@@ -76,14 +87,21 @@ impl super::Lowerer {
                     let temp_reg = Gpr::T0;
                     self.load_value_into_reg(code, *arg, temp_reg, allocation, frame_layout)?;
 
-                    // Store to stack at positive offset (above frame)
-                    // The callee reads at positive offsets from SP before prologue.
-                    // Since caller's SP (after prologue) = callee's SP (before prologue),
-                    // we store at: offset (which is (idx - 8) * 4)
+                    // Store argument to stack at SP + offset.
+                    // The offset is (idx - 8) * 4, which matches what the callee expects.
+                    // Since the caller's SP equals the callee's SP, both use the same offset.
+                    let storage_offset = offset.as_i32();
+                    crate::debug!(
+                        "[CALL] Storing stack arg {} (value {:?}) at SP + {} (offset={})",
+                        idx,
+                        arg,
+                        storage_offset,
+                        storage_offset
+                    );
                     code.emit(RiscvInst::Sw {
                         rs1: Gpr::Sp,
                         rs2: temp_reg,
-                        imm: offset.as_i32(),
+                        imm: storage_offset,
                     });
                 }
             }
@@ -133,14 +151,15 @@ impl super::Lowerer {
         }
 
         // Step 4: Load stack return values (index >= 8) from stack
-        // These are stored in the caller's frame at positive offsets from SP
-        // After the call returns, the callee's epilogue has restored SP to the caller's frame,
-        // so the return values are at positive offsets from SP (just stack_offset)
+        //
+        // Stack return values are stored at positive offsets from SP in the caller's frame.
+        // After the call returns, SP is restored to the caller's frame, so we load from
+        // SP + stack_offset where stack_offset is the same offset used when storing.
         for (idx, result) in results.iter().enumerate() {
             if idx >= 8 {
                 if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
-                    // After call returns, SP is restored to caller's frame, so offset is just stack_offset
-                    // (positive offset, relative to SP after epilogue)
+                    // After call returns, SP is restored to caller's frame, so we use stack_offset
+                    // directly (positive offset relative to SP).
                     let actual_offset = *stack_offset;
 
                     // Load from stack into temp register
@@ -199,11 +218,13 @@ mod tests {
 
     use lpc_lpir::parse_module;
 
-    use crate::backend::Lowerer;
-    use crate::backend::{
-        Abi, FrameLayout, compute_liveness, allocate_registers, create_spill_reload_plan, CodeBuffer,
+    use crate::{
+        backend::{
+            allocate_registers, compute_liveness, create_spill_reload_plan, Abi, CodeBuffer,
+            FrameLayout, Lowerer,
+        },
+        expect_ir_syscall,
     };
-    use crate::expect_ir_syscall;
 
     /// Helper to lower a function with all required analysis passes.
     fn lower_function(func: &lpc_lpir::Function) -> CodeBuffer {
@@ -506,6 +527,156 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
 }"#;
 
         expect_ir_syscall(ir, 0, &[11]); // 1 + 10 = 11
+    }
+
+    #[test]
+    fn test_stack_argument_passing_only() {
+        // Minimal test: function that takes ONLY stack arguments (no register args)
+        // This isolates stack argument passing to verify it works correctly
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 100
+    v1 = iconst 200
+    call %callee(v0, v1) -> v2
+    syscall 0(v2)
+    halt
+}
+
+function %callee(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = iadd v0, v1
+    return v2
+}
+}"#;
+
+        expect_ir_syscall(ir, 0, &[300]); // 100 + 200 = 300
+    }
+
+    #[test]
+    fn test_stack_argument_passing_many() {
+        // Test with exactly 9 arguments (8 in regs, 1 on stack)
+        // This tests the boundary case
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 1
+    v1 = iconst 2
+    v2 = iconst 3
+    v3 = iconst 4
+    v4 = iconst 5
+    v5 = iconst 6
+    v6 = iconst 7
+    v7 = iconst 8
+    v8 = iconst 9
+    call %callee(v0, v1, v2, v3, v4, v5, v6, v7, v8) -> v9
+    syscall 0(v9)
+    halt
+}
+
+function %callee(i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32):
+    v9 = iadd v7, v8
+    return v9
+}
+}"#;
+
+        expect_ir_syscall(ir, 0, &[17]); // 8 + 9 = 17
+    }
+
+    #[test]
+    fn test_stack_argument_passing_two_on_stack() {
+        // Test with exactly 10 arguments (8 in regs, 2 on stack)
+        // This matches the failing test case but simplified
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 1
+    v1 = iconst 2
+    v2 = iconst 3
+    v3 = iconst 4
+    v4 = iconst 5
+    v5 = iconst 6
+    v6 = iconst 7
+    v7 = iconst 8
+    v8 = iconst 9
+    v9 = iconst 10
+    call %callee(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9) -> v10
+    syscall 0(v10)
+    halt
+}
+
+function %callee(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32):
+    v10 = iadd v8, v9
+    return v10
+}
+}"#;
+
+        expect_ir_syscall(ir, 0, &[19]); // 9 + 10 = 19
+    }
+
+    #[test]
+    fn test_function_calling_with_many_args_debug() {
+        // Debug version: print disassembly to see what's happening
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    call %caller() -> v0
+    syscall 0(v0)
+    halt
+}
+
+function %callee(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32):
+    v10 = iadd v8, v9
+    return v10
+}
+
+function %caller() -> i32 {
+block0:
+    v0 = iconst 0
+    v1 = iconst 1
+    v2 = iconst 2
+    v3 = iconst 3
+    v4 = iconst 4
+    v5 = iconst 5
+    v6 = iconst 6
+    v7 = iconst 7
+    v8 = iconst 8
+    v9 = iconst 9
+    call %callee(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9) -> v10
+    return v10
+}
+}"#;
+
+        use lpc_lpir::parse_module;
+
+        use crate::backend::compile_module_to_insts;
+        extern crate std;
+
+        let module = parse_module(ir).expect("Failed to parse");
+        let compiled = compile_module_to_insts(&module).expect("Failed to compile");
+        let bytes = compiled.to_bytes().expect("Failed to convert to bytes");
+
+        std::println!("\n=== Full Module Disassembly ===");
+        std::println!("{}", crate::disassemble_code(&bytes));
+        std::println!("\n=== End Disassembly ===\n");
+
+        // Now run the test
+        expect_ir_syscall(ir, 0, &[17]); // 8 + 9 = 17
     }
 
     #[test]

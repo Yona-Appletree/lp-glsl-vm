@@ -133,6 +133,7 @@ impl Abi {
                     // Stack offset is (index - 8) * 4, relative to SP before prologue
                     let stack_index = i - 8;
                     let stack_offset = (stack_index * 4) as i32;
+                    crate::debug!("[ABI] Parameter {} (param {:?}) is on stack: stack_index={}, stack_offset={}", i, param, stack_index, stack_offset);
                     param_stack_offsets.insert(i, stack_offset);
                 }
             }

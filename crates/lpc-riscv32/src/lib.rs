@@ -8,6 +8,7 @@
 extern crate alloc;
 
 pub mod asm_parser;
+pub mod debug;
 pub mod decode;
 pub mod disasm;
 pub mod encode;

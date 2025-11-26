@@ -157,10 +157,14 @@ impl FrameLayout {
 
     /// Get the total frame size in bytes.
     pub fn total_size(&self) -> u32 {
-        self.setup_area_size
+        let size = self.setup_area_size
             + self.clobber_size
             + self.fixed_frame_storage_size
-            + self.outgoing_args_size
+            + self.outgoing_args_size;
+        crate::debug!("[FRAME] total_size(): setup={}, clobber={}, spills={}, outgoing_args={}, total={}", 
+            self.setup_area_size, self.clobber_size, self.fixed_frame_storage_size, 
+            self.outgoing_args_size, size);
+        size
     }
 
     /// Get the stack offset for a callee-saved register.
@@ -215,7 +219,9 @@ impl FrameLayout {
         }
         let stack_index = arg_index - 8;
         // Stack arguments start at SP + 0, each is 4 bytes
-        Some(ByteOffset((stack_index * 4) as i32))
+        let offset = ByteOffset((stack_index * 4) as i32);
+        crate::debug!("[FRAME] outgoing_arg_offset(arg_index={}): stack_index={}, offset={}", arg_index, stack_index, offset.as_i32());
+        Some(offset)
     }
 
     /// Get stack offset for return value (index >= 8)
