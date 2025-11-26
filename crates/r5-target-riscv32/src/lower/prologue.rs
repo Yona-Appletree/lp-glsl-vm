@@ -308,4 +308,252 @@ block0:
             }
         }
     }
+
+    #[test]
+    fn test_prologue_adjusts_sp_once() {
+        // Create a function with calls and callee-saved registers
+        // This will force the allocator to use callee-saved registers
+        // The function has enough register pressure to require spills and callee-saved regs
+        use r5_ir::parse_module;
+        use riscv32_encoder::{Gpr, Inst};
+
+        let ir_module = r#"
+module {
+    function %helper(i32) -> i32 {
+    block0(v0: i32):
+        v1 = iconst 1
+        v2 = iadd v0, v1
+        return v2
+    }
+
+    function %main(i32) -> i32 {
+    block0(v0: i32):
+        v1 = iconst 1
+        v2 = iadd v0, v1
+        v3 = iconst 2
+        v4 = iadd v2, v3
+        v5 = iconst 3
+        v6 = iadd v4, v5
+        v7 = iconst 4
+        v8 = iadd v6, v7
+        v9 = iconst 5
+        v10 = iadd v8, v9
+        call %helper(v10) -> v11
+        v12 = iconst 100
+        v13 = iadd v11, v12
+        return v13
+    }
+}"#;
+
+        let module = parse_module(ir_module.trim()).expect("Failed to parse IR module");
+
+        // Compile the function directly and check its prologue
+        let func = module
+            .functions
+            .get("main")
+            .expect("main function not found");
+
+        let liveness = crate::liveness::compute_liveness(func);
+        let allocation = crate::regalloc::allocate_registers(func, &liveness);
+        let spill_reload = crate::spill_reload::create_spill_reload_plan(func, &allocation, &liveness);
+
+        let has_calls = true;
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
+        let frame_layout = FrameLayout::compute(
+            &allocation.used_callee_saved,
+            total_spill_slots,
+            has_calls,
+            func.signature.params.len(),
+            8,
+        );
+
+        let abi_info = Abi::compute_abi_info(func, &allocation, 8);
+
+        let mut lowerer = Lowerer::new();
+        let func_code = lowerer
+            .lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
+            .expect("Failed to lower function");
+
+        // Count SP adjustments in prologue (addi sp, sp, -N instructions)
+        let sp_adjustments = func_code
+            .instructions()
+            .iter()
+            .filter(|inst| {
+                matches!(inst, Inst::Addi { rd, rs1, imm }
+                    if rd == &Gpr::SP && rs1 == &Gpr::SP && imm < &0)
+            })
+            .count();
+
+        let bytes = func_code.as_bytes();
+
+        // Expected: SP should be adjusted exactly once in prologue
+        assert_eq!(
+            sp_adjustments,
+            1,
+            "Prologue should adjust SP exactly once, but found {} adjustments.\nFull function disassembly:\n{}",
+            sp_adjustments,
+            riscv32_encoder::disassemble_code(&bytes)
+        );
+    }
+
+    #[test]
+    fn test_sp_initialized_before_execution() {
+        // Simple function that uses stack (has frame)
+        // Run in VM and verify SP is valid (not 0) before function executes
+        use crate::expect_ir_syscall;
+
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    call %main() -> v0
+    syscall 0(v0)
+    halt
+}
+
+function %main() -> i32 {
+block0:
+    v0 = iconst 42
+    return v0
+}
+}"#;
+
+        // This ensures SP is initialized and function is called correctly
+        expect_ir_syscall(ir, 0, &[42]);
+    }
+
+    #[test]
+    fn test_sp_points_to_valid_memory() {
+        // Function that writes to stack (uses spill slots)
+        // Verify writes succeed without memory errors
+        use crate::expect_ir_syscall;
+
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 5
+    call %main(v0) -> v1
+    syscall 0(v1)
+    halt
+}
+
+function %helper(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 1
+    v2 = iadd v0, v1
+    return v2
+}
+
+function %main(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 1
+    v2 = iadd v0, v1
+    v3 = iconst 2
+    v4 = iadd v2, v3
+    v5 = iconst 3
+    v6 = iadd v4, v5
+    v7 = iconst 4
+    v8 = iadd v6, v7
+    v9 = iconst 5
+    v10 = iadd v8, v9
+    call %helper(v10) -> v11
+    v12 = iconst 100
+    v13 = iadd v11, v12
+    return v13
+}
+}"#;
+
+        // This function will use spill slots (many live values across call)
+        // If SP is invalid, stack writes will fail
+        // Calculation: main(5) = helper(5+1+2+3+4+5) + 100 = helper(20) + 100 = (20+1) + 100 = 121
+        expect_ir_syscall(ir, 0, &[121]);
+    }
+
+    #[test]
+    fn test_prologue_sp_adjustment() {
+        // Test that prologue correctly adjusts SP for frame
+        // Function with frame (has calls and/or spills)
+        use crate::expect_ir_syscall;
+
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    call %main() -> v0
+    syscall 0(v0)
+    halt
+}
+
+function %helper(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 1
+    v2 = iadd v0, v1
+    return v2
+}
+
+function %main() -> i32 {
+block0:
+    ; Create many values to force frame allocation
+    v0 = iconst 1
+    v1 = iconst 2
+    v2 = iadd v0, v1
+    v3 = iconst 3
+    v4 = iadd v2, v3
+    v5 = iconst 4
+    v6 = iadd v4, v5
+    call %helper(v6) -> v7
+    v8 = iconst 100
+    v9 = iadd v7, v8
+    return v9
+}
+}"#;
+
+        // Function should execute correctly, verifying prologue works
+        // v0=1, v1=2, v2=3, v3=3, v4=6, v5=4, v6=10, helper(10)=11, v8=100, v9=111
+        expect_ir_syscall(ir, 0, &[111]);
+    }
+
+    #[test]
+    fn test_sp_initialization() {
+        // Test that SP is properly initialized before function execution
+        // Simple function that should work if SP is valid
+        use crate::expect_ir_ok;
+        use riscv32_encoder::Gpr;
+
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    call %main() -> v0
+    syscall 0(v0)
+    halt
+}
+
+function %main() -> i32 {
+block0:
+    v0 = iconst 42
+    return v0
+}
+}"#;
+
+        let emu = expect_ir_ok(ir);
+        // Verify SP is initialized (not zero)
+        let sp = emu.get_register(Gpr::SP);
+        assert_ne!(sp, 0, "SP should be initialized to non-zero value");
+        // SP should be in valid memory region (cast to u32 for comparison)
+        let sp_u32 = sp as u32;
+        assert!(
+            sp_u32 >= 0x80001000,
+            "SP should be initialized to valid memory region"
+        );
+    }
 }
