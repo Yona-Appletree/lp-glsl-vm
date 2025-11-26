@@ -111,4 +111,42 @@ mod tests {
         let result = parse_function("function %test() {\nblock0:\n    return\n} extra");
         assert!(result.is_err(), "Should fail on unexpected remaining input");
     }
+
+    #[test]
+    fn test_parse_function_with_comments() {
+        // Test function with comments
+        let input = r#"function %test() -> i32 {
+            ; This is a comment
+            block0:
+                ; Comment before instruction
+                v0 = iconst 42 ; inline comment
+                return v0 ; return comment
+        }"#;
+        let result = parse_function(input.trim());
+        assert!(result.is_ok(), "parse_function with comments failed: {:?}", result);
+        let func = result.unwrap();
+        assert_eq!(func.blocks.len(), 1);
+        assert_eq!(func.blocks[0].insts.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_module_with_comments() {
+        // Test module with comments
+        let input = r#"module {
+            ; Module-level comment
+            entry: %main ; entry point comment
+
+            function %main() {
+                ; Function comment
+                block0:
+                    v0 = iconst 42 ; constant comment
+                    return v0
+            }
+        }"#;
+        let result = parse_module(input.trim());
+        assert!(result.is_ok(), "parse_module with comments failed: {:?}", result);
+        let module = result.unwrap();
+        assert_eq!(module.function_count(), 1);
+        assert!(module.entry_function().is_some());
+    }
 }

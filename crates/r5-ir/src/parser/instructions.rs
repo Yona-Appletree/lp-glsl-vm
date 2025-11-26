@@ -130,13 +130,14 @@ pub(crate) fn parse_call(input: &str) -> IResult<&str, Inst> {
     let (input, args) = delimited(
         terminated(char('('), blank),
         separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
-        preceded(blank, char(')')),
+        terminated(char(')'), blank),
     )(input)?;
 
+    // Parse results list: comma-separated values (same format as args)
     let (input, results) = opt(map(
         tuple((
-            preceded(blank, terminated(tag("->"), blank)),
-            many0(preceded(blank, parse_value)),
+            terminated(tag("->"), blank),
+            separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
         )),
         |(_, values)| values,
     ))(input)?;
@@ -158,7 +159,7 @@ pub(crate) fn parse_syscall(input: &str) -> IResult<&str, Inst> {
     let (input, args) = delimited(
         terminated(char('('), blank),
         separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
-        preceded(blank, char(')')),
+        terminated(char(')'), blank),
     )(input)?;
     Ok((
         input,
@@ -203,7 +204,7 @@ pub(crate) fn parse_return(input: &str) -> IResult<&str, Inst> {
     let (input, _) = terminated(tag("return"), blank)(input)?;
     // Parse space-separated values (Cranelift format)
     // Values are separated by spaces, not commas
-    let (input, values) = many0(preceded(blank, parse_value))(input)?;
+    let (input, values) = many0(terminated(parse_value, blank))(input)?;
     Ok((input, Inst::Return { values }))
 }
 
@@ -471,6 +472,48 @@ mod tests {
         // Test that missing parentheses fail
         let result = parse_instruction("call %func");
         assert!(result.is_err(), "Should fail on missing parentheses");
+    }
+
+    #[test]
+    fn test_parse_call_with_whitespace_after() {
+        // Test that call instruction consumes trailing whitespace correctly
+        let input = "call %helper(v10) -> v11\n        v12 = iconst 100";
+        let result = parse_call(input);
+        assert!(result.is_ok(), "parse_call failed: {:?}", result);
+        let (remaining, inst) = result.unwrap();
+        // Should consume the call and whitespace, leaving the next instruction
+        assert!(
+            remaining.trim_start().starts_with("v12"),
+            "Should leave next instruction, got: {:?}",
+            remaining
+        );
+        if let Inst::Call {
+            callee,
+            args,
+            results,
+        } = inst
+        {
+            assert_eq!(callee, "helper");
+            assert_eq!(args.len(), 1);
+            assert_eq!(results.len(), 1);
+        } else {
+            panic!("Expected Call instruction");
+        }
+    }
+
+    #[test]
+    fn test_parse_call_followed_by_instruction() {
+        // Test parsing call followed by another instruction
+        let input = "call %helper(v10) -> v11\n        v12 = iconst 100";
+        let result = parse_instruction(input);
+        assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
+        let (remaining, inst) = result.unwrap();
+        assert!(
+            remaining.trim_start().starts_with("v12"),
+            "Should leave next instruction, got: {:?}",
+            remaining
+        );
+        assert!(matches!(inst, Inst::Call { .. }));
     }
 
     #[test]

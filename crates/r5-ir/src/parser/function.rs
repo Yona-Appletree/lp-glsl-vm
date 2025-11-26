@@ -44,7 +44,7 @@ pub(crate) fn parse_signature(input: &str) -> IResult<&str, Signature> {
 }
 
 /// Parse a function (internal, used by module parser)
-/// Handles its own leading whitespace (for use in many0)
+/// The module parser handles leading whitespace before calling this
 pub(crate) fn parse_function_internal(input: &str) -> IResult<&str, Function> {
     let (input, _) = terminated(tag("function"), blank)(input)?;
     let (input, name) = opt(terminated(parse_function_name, blank))(input)?;

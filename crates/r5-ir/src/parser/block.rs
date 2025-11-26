@@ -244,4 +244,92 @@ mod tests {
         let (_, block) = result.unwrap();
         assert_eq!(block.insts.len(), 0);
     }
+
+    #[test]
+    fn test_parse_block_with_comments() {
+        // Test block with comments
+        let input = r#"block0:
+            ; Comment before instruction
+            v0 = iconst 42 ; inline comment
+            ; Comment between instructions
+            v1 = iadd v0, v0 ; another inline comment
+            return v1"#;
+        let result = parse_block(input.trim());
+        assert!(
+            result.is_ok(),
+            "parse_block with comments failed: {:?}",
+            result
+        );
+        let (_, block) = result.unwrap();
+        assert_eq!(block.insts.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_block_with_call() {
+        // Test block with call instruction followed by other instructions
+        let input = r#"block0(v0: i32):
+        v1 = iconst 1
+        v2 = iadd v0, v1
+        call %helper(v2) -> v3
+        v4 = iconst 100
+        v5 = iadd v3, v4
+        return v5"#;
+        let result = parse_block(input.trim());
+        assert!(result.is_ok(), "parse_block with call failed: {:?}", result);
+        let (remaining, block) = result.unwrap();
+        assert_eq!(
+            remaining.trim(),
+            "",
+            "Should consume all input, got: {:?}",
+            remaining
+        );
+        assert_eq!(block.insts.len(), 6, "Expected 6 instructions");
+        // Verify the call instruction is parsed correctly
+        assert!(matches!(block.insts[2], crate::inst::Inst::Call { .. }));
+    }
+
+    #[test]
+    fn test_parse_block_with_call_and_multiple_instructions_after() {
+        // Test block with call followed by multiple instructions
+        // This reproduces the issue from test_prologue_adjusts_sp_once
+        let input = r#"block0(v0: i32):
+        v1 = iconst 1
+        v2 = iadd v0, v1
+        v3 = iconst 2
+        v4 = iadd v2, v3
+        v5 = iconst 3
+        v6 = iadd v4, v5
+        v7 = iconst 4
+        v8 = iadd v6, v7
+        v9 = iconst 5
+        v10 = iadd v8, v9
+        call %helper(v10) -> v11
+        v12 = iconst 100
+        v13 = iadd v11, v12
+        return v13"#;
+        let result = parse_block(input.trim());
+        assert!(
+            result.is_ok(),
+            "parse_block with call and multiple instructions failed: {:?}",
+            result
+        );
+        let (remaining, block) = result.unwrap();
+        assert_eq!(
+            remaining.trim(),
+            "",
+            "Should consume all input, got remaining: {:?}",
+            remaining
+        );
+        assert_eq!(block.insts.len(), 14, "Expected 14 instructions");
+        // Verify call is at the right position
+        assert!(
+            matches!(block.insts[10], crate::inst::Inst::Call { .. }),
+            "Expected call instruction at position 9"
+        );
+        // Verify instructions after call are parsed
+        assert!(
+            matches!(block.insts[11], crate::inst::Inst::Iconst { .. }),
+            "Expected iconst after call"
+        );
+    }
 }

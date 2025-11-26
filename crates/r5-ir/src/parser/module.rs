@@ -3,8 +3,12 @@
 use alloc::string::String;
 
 use nom::{
-    bytes::complete::tag, character::complete::char, combinator::opt, multi::many0,
-    sequence::terminated, IResult,
+    bytes::complete::tag,
+    character::complete::char,
+    combinator::opt,
+    multi::many0,
+    sequence::{preceded, terminated},
+    IResult,
 };
 
 use super::{
@@ -28,6 +32,7 @@ pub(crate) fn parse_module_internal(input: &str) -> IResult<&str, Module> {
 
     let (input, entry) = opt(parse_entry)(input)?;
 
+    // Consume whitespace before each function (many0 doesn't do this automatically)
     let (input, functions) = many0(parse_function_internal)(input)?;
 
     let (input, _) = terminated(char('}'), blank)(input)?;
@@ -136,5 +141,68 @@ mod tests {
             .collect();
         assert_eq!(names[0], "anon_0");
         assert_eq!(names[1], "anon_1");
+    }
+
+    #[test]
+    fn test_parse_module_two_named_functions() {
+        // Test parsing two named functions with whitespace between them
+        // This reproduces the issue from test_prologue_adjusts_sp_once
+        // The key issue: after parsing the first function's closing brace,
+        // there's whitespace/newlines before the second function starts
+        let input = r#"module {
+    function %helper(i32) -> i32 {
+    block0(v0: i32):
+        v1 = iconst 1
+        v2 = iadd v0, v1
+        return v2
+    }
+
+    function %main(i32) -> i32 {
+    block0(v0: i32):
+        v1 = iconst 1
+        v2 = iadd v0, v1
+        v3 = iconst 2
+        v4 = iadd v2, v3
+        v5 = iconst 3
+        v6 = iadd v4, v5
+        v7 = iconst 4
+        v8 = iadd v6, v7
+        v9 = iconst 5
+        v10 = iadd v8, v9
+        call %helper(v10) -> v11
+        v12 = iconst 100
+        v13 = iadd v11, v12
+        return v13
+    }
+}"#;
+        let result = parse_module_internal(input.trim());
+        assert!(
+            result.is_ok(),
+            "parse_module_internal failed: {:?}\nThis test should pass after fixing whitespace \
+             handling in many0(parse_function_internal).\nThe issue is that whitespace between \
+             functions isn't being consumed.",
+            result
+        );
+        let (remaining, module) = result.unwrap();
+        assert_eq!(
+            remaining,
+            "",
+            "Should consume all input, but {} bytes remaining",
+            remaining.len()
+        );
+        assert_eq!(
+            module.function_count(),
+            2,
+            "Should have 2 functions, but found {}",
+            module.function_count()
+        );
+        assert!(
+            module.functions.contains_key("helper"),
+            "Should contain 'helper' function"
+        );
+        assert!(
+            module.functions.contains_key("main"),
+            "Should contain 'main' function"
+        );
     }
 }
