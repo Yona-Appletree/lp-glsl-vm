@@ -3,8 +3,8 @@
 use r5_builder::FunctionBuilder;
 use r5_ir::{parse_module, Module, Signature, Type};
 use r5_target_riscv32::{
-    allocate_registers, compile_module, compute_liveness, create_spill_reload_plan, generate_elf,
-    Abi, CodeBuffer, FrameLayout, Lowerer,
+    allocate_registers, compile_module, compute_liveness, create_spill_reload_plan,
+    expect_ir_syscall, generate_elf, Abi, CodeBuffer, FrameLayout, Lowerer,
 };
 use r5_test_util::VmRunner;
 use riscv32_encoder::{disassemble_code, Gpr, Inst};
@@ -120,23 +120,31 @@ fn test_module(module: &Module, entry_func_name: &str, args: &[i32], expected: i
 #[test]
 fn test_simple_call() {
     // Simple test: just call a function that returns a constant
-    let ir_module = r#"
+    let ir = r#"
 module {
-    function %helper() -> i32 {
-    block0:
-        v0 = iconst 42
-        return v0
-    }
+entry: %bootstrap
 
-    function %main() -> i32 {
-    block0:
-        call %helper() -> v0
-        return v0
-    }
+function %bootstrap() -> i32 {
+block0:
+    call %main() -> v0
+    syscall 0(v0)
+    halt
+}
+
+function %helper() -> i32 {
+block0:
+    v0 = iconst 42
+    return v0
+}
+
+function %main() -> i32 {
+block0:
+    call %helper() -> v0
+    return v0
+}
 }"#;
 
-    let module = parse_module(ir_module).expect("Failed to parse IR module");
-    test_module(&module, "main", &[], 42);
+    expect_ir_syscall(ir, 0, &[42]);
 }
 
 #[test]
@@ -147,30 +155,38 @@ fn test_call_preserves_caller_saved_registers() {
     //   let result = helper(temp);  // Call may clobber caller-saved regs
     //   return temp + result;  // temp must still be valid!
     // }
-    let ir_module = r#"
+    let ir = r#"
 module {
-    function %helper(i32) -> i32 {
-    block0(v0: i32):
-        v1 = iconst 100
-        v2 = iadd v0, v1
-        return v2
-    }
+entry: %bootstrap
 
-    function %main(i32) -> i32 {
-    block0(v0: i32):
-        v1 = iconst 2
-        v2 = imul v0, v1
-        call %helper(v2) -> v3
-        v4 = iadd v2, v3
-        return v4
-    }
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 5
+    call %main(v0) -> v1
+    syscall 0(v1)
+    halt
+}
+
+function %helper(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 100
+    v2 = iadd v0, v1
+    return v2
+}
+
+function %main(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 2
+    v2 = imul v0, v1
+    call %helper(v2) -> v3
+    v4 = iadd v2, v3
+    return v4
+}
 }"#;
-
-    let module = parse_module(ir_module).expect("Failed to parse IR module");
 
     // Test: main(5) should return (5*2) + (5*2 + 100) = 10 + 110 = 120
     // v2 = 5*2 = 10, helper(10) returns 110, v4 = v2 + v3 = 10 + 110 = 120
-    test_module(&module, "main", &[5], 120);
+    expect_ir_syscall(ir, 0, &[120]);
 }
 
 #[test]
@@ -184,39 +200,47 @@ fn test_nested_calls_preserve_registers() {
     //   let temp = x + 10;
     //   return middle(temp) + temp;
     // }
-    let ir_module = r#"
+    let ir = r#"
 module {
-    function %inner(i32) -> i32 {
-    block0(v0: i32):
-        v1 = iconst 1
-        v2 = iadd v0, v1
-        return v2
-    }
+entry: %bootstrap
 
-    function %middle(i32) -> i32 {
-    block0(v0: i32):
-        v1 = iconst 2
-        v2 = imul v0, v1
-        call %inner(v2) -> v3
-        v4 = iadd v3, v2
-        return v4
-    }
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 5
+    call %outer(v0) -> v1
+    syscall 0(v1)
+    halt
+}
 
-    function %outer(i32) -> i32 {
-    block0(v0: i32):
-        v1 = iconst 10
-        v2 = iadd v0, v1
-        call %middle(v2) -> v3
-        v4 = iadd v3, v2
-        return v4
-    }
+function %inner(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 1
+    v2 = iadd v0, v1
+    return v2
+}
+
+function %middle(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 2
+    v2 = imul v0, v1
+    call %inner(v2) -> v3
+    v4 = iadd v3, v2
+    return v4
+}
+
+function %outer(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 10
+    v2 = iadd v0, v1
+    call %middle(v2) -> v3
+    v4 = iadd v3, v2
+    return v4
+}
 }"#;
-
-    let module = parse_module(ir_module).expect("Failed to parse IR module");
 
     // Test: outer(5) = middle(15) + 15 = (inner(30) + 30) + 15 = (31 + 30) + 15 = 76
     // v2 = 5+10 = 15, middle(15) = inner(30) + 30 = 31 + 30 = 61, v4 = 61 + 15 = 76
-    test_module(&module, "outer", &[5], 76);
+    expect_ir_syscall(ir, 0, &[76]);
 }
 
 #[test]
@@ -227,32 +251,41 @@ fn test_multiple_live_values_across_call() {
     //   let z = helper(x);  // Call
     //   return x + y + z;  // x and y must be preserved
     // }
-    let ir_module = r#"
+    let ir = r#"
 module {
-    function %helper(i32) -> i32 {
-    block0(v0: i32):
-        v1 = iconst 100
-        v2 = iadd v0, v1
-        return v2
-    }
+entry: %bootstrap
 
-    function %main(i32, i32) -> i32 {
-    block0(v0: i32, v1: i32):
-        v2 = iconst 2
-        v3 = imul v0, v2
-        v4 = iconst 3
-        v5 = imul v1, v4
-        call %helper(v3) -> v6
-        v7 = iadd v3, v5
-        v8 = iadd v7, v6
-        return v8
-    }
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 5
+    v1 = iconst 7
+    call %main(v0, v1) -> v2
+    syscall 0(v2)
+    halt
+}
+
+function %helper(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 100
+    v2 = iadd v0, v1
+    return v2
+}
+
+function %main(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = iconst 2
+    v3 = imul v0, v2
+    v4 = iconst 3
+    v5 = imul v1, v4
+    call %helper(v3) -> v6
+    v7 = iadd v3, v5
+    v8 = iadd v7, v6
+    return v8
+}
 }"#;
 
-    let module = parse_module(ir_module).expect("Failed to parse IR module");
-
     // Test: main(5, 7) = (5*2) + (7*3) + helper(10) = 10 + 21 + 110 = 141
-    test_module(&module, "main", &[5, 7], 141);
+    expect_ir_syscall(ir, 0, &[141]);
 }
 
 /// Helper to count SP adjustments in prologue (addi sp, sp, -N instructions)
@@ -464,60 +497,74 @@ module {
 fn test_sp_initialized_before_execution() {
     // Simple function that uses stack (has frame)
     // Run in VM and verify SP is valid (not 0) before function executes
-    let ir_module = r#"
+    let ir = r#"
 module {
-    function %main() -> i32 {
-    block0:
-        v0 = iconst 42
-        return v0
-    }
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    call %main() -> v0
+    syscall 0(v0)
+    halt
+}
+
+function %main() -> i32 {
+block0:
+    v0 = iconst 42
+    return v0
+}
 }"#;
 
-    let module = parse_module(ir_module).expect("Failed to parse IR module");
-
-    // Use test_module helper which creates bootstrap wrapper
     // This ensures SP is initialized and function is called correctly
-    test_module(&module, "main", &[], 42);
+    expect_ir_syscall(ir, 0, &[42]);
 }
 
 #[test]
 fn test_sp_points_to_valid_memory() {
     // Function that writes to stack (uses spill slots)
     // Verify writes succeed without memory errors
-    let ir_module = r#"
+    let ir = r#"
 module {
-    function %helper(i32) -> i32 {
-    block0(v0: i32):
-        v1 = iconst 1
-        v2 = iadd v0, v1
-        return v2
-    }
+entry: %bootstrap
 
-    function %main(i32) -> i32 {
-    block0(v0: i32):
-        v1 = iconst 1
-        v2 = iadd v0, v1
-        v3 = iconst 2
-        v4 = iadd v2, v3
-        v5 = iconst 3
-        v6 = iadd v4, v5
-        v7 = iconst 4
-        v8 = iadd v6, v7
-        v9 = iconst 5
-        v10 = iadd v8, v9
-        call %helper(v10) -> v11
-        v12 = iconst 100
-        v13 = iadd v11, v12
-        return v13
-    }
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 5
+    call %main(v0) -> v1
+    syscall 0(v1)
+    halt
+}
+
+function %helper(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 1
+    v2 = iadd v0, v1
+    return v2
+}
+
+function %main(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 1
+    v2 = iadd v0, v1
+    v3 = iconst 2
+    v4 = iadd v2, v3
+    v5 = iconst 3
+    v6 = iadd v4, v5
+    v7 = iconst 4
+    v8 = iadd v6, v7
+    v9 = iconst 5
+    v10 = iadd v8, v9
+    call %helper(v10) -> v11
+    v12 = iconst 100
+    v13 = iadd v11, v12
+    return v13
+}
 }"#;
-
-    let module = parse_module(ir_module).expect("Failed to parse IR module");
 
     // This function will use spill slots (many live values across call)
     // If SP is invalid, stack writes will fail
     // Calculation: main(5) = helper(5+1+2+3+4+5) + 100 = helper(20) + 100 = (20+1) + 100 = 121
-    test_module(&module, "main", &[5], 121);
+    expect_ir_syscall(ir, 0, &[121]);
 }
 
 #[test]
@@ -526,43 +573,52 @@ fn test_call_site_spills_use_frame_slots() {
     // Makes a call (values must be spilled)
     // Verify spilled values use slots from frame layout
     // Verify offsets match frame layout computation
-    let ir_module = r#"
+    let ir = r#"
 module {
-    function %helper(i32) -> i32 {
-    block0(v0: i32):
-        v1 = iconst 1
-        v2 = iadd v0, v1
-        return v2
-    }
+entry: %bootstrap
 
-    function %main(i32) -> i32 {
-    block0(v0: i32):
-        ; Create many values that will be in caller-saved registers
-        v1 = iconst 1
-        v2 = iadd v0, v1
-        v3 = iconst 2
-        v4 = iadd v2, v3
-        v5 = iconst 3
-        v6 = iadd v4, v5
-        v7 = iconst 4
-        v8 = iadd v6, v7
-        v9 = iconst 5
-        v10 = iadd v8, v9
-        ; Call helper - values v2, v4, v6, v8, v10 should be spilled
-        ; because they're in caller-saved registers and will be clobbered
-        call %helper(v10) -> v11
-        ; Use the spilled values after call
-        v12 = iadd v2, v4
-        v13 = iadd v6, v8
-        v14 = iadd v12, v13
-        v15 = iadd v14, v11
-        return v15
-    }
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 10
+    call %main(v0) -> v1
+    syscall 0(v1)
+    halt
+}
+
+function %helper(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 1
+    v2 = iadd v0, v1
+    return v2
+}
+
+function %main(i32) -> i32 {
+block0(v0: i32):
+    ; Create many values that will be in caller-saved registers
+    v1 = iconst 1
+    v2 = iadd v0, v1
+    v3 = iconst 2
+    v4 = iadd v2, v3
+    v5 = iconst 3
+    v6 = iadd v4, v5
+    v7 = iconst 4
+    v8 = iadd v6, v7
+    v9 = iconst 5
+    v10 = iadd v8, v9
+    ; Call helper - values v2, v4, v6, v8, v10 should be spilled
+    ; because they're in caller-saved registers and will be clobbered
+    call %helper(v10) -> v11
+    ; Use the spilled values after call
+    v12 = iadd v2, v4
+    v13 = iadd v6, v8
+    v14 = iadd v12, v13
+    v15 = iadd v14, v11
+    return v15
+}
 }"#;
 
-    let module = parse_module(ir_module).expect("Failed to parse IR module");
-
     // Compile the function and check spill slots
+    let module = parse_module(ir).expect("Failed to parse IR module");
     let func = module
         .functions
         .get("main")
@@ -579,7 +635,7 @@ module {
     // helper(25) = 25+1 = 26
     // v12 = v2+v4 = 11+13 = 24, v13 = v6+v8 = 16+20 = 36
     // v14 = v12+v13 = 24+36 = 60, v15 = v14+v11 = 60+26 = 86
-    test_module(&module, "main", &[10], 86);
+    expect_ir_syscall(ir, 0, &[86]);
 }
 
 #[test]
@@ -588,56 +644,64 @@ fn test_large_frame_size() {
     // Frame size > 2047 bytes (exceeds addi immediate range)
     // Verify prologue handles large frames correctly
     // Create a function that uses many callee-saved registers to create a large frame
-    let ir_module = r#"
+    let ir = r#"
 module {
-    function %main() -> i32 {
-    block0:
-        v0 = iconst 1
-        v1 = iconst 2
-        v2 = iadd v0, v1
-        v3 = iconst 3
-        v4 = iadd v2, v3
-        v5 = iconst 4
-        v6 = iadd v4, v5
-        v7 = iconst 5
-        v8 = iadd v6, v7
-        v9 = iconst 6
-        v10 = iadd v8, v9
-        v11 = iconst 7
-        v12 = iadd v10, v11
-        v13 = iconst 8
-        v14 = iadd v12, v13
-        v15 = iconst 9
-        v16 = iadd v14, v15
-        v17 = iconst 10
-        v18 = iadd v16, v17
-        v19 = iconst 11
-        v20 = iadd v18, v19
-        v21 = iconst 12
-        v22 = iadd v20, v21
-        v23 = iconst 13
-        v24 = iadd v22, v23
-        v25 = iconst 14
-        v26 = iadd v24, v25
-        v27 = iconst 15
-        v28 = iadd v26, v27
-        v29 = iconst 16
-        v30 = iadd v28, v29
-        v31 = iconst 17
-        v32 = iadd v30, v31
-        v33 = iconst 18
-        v34 = iadd v32, v33
-        v35 = iconst 19
-        v36 = iadd v34, v35
-        v37 = iconst 20
-        v38 = iadd v36, v37
-        return v38
-    }
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    call %main() -> v0
+    syscall 0(v0)
+    halt
+}
+
+function %main() -> i32 {
+block0:
+    v0 = iconst 1
+    v1 = iconst 2
+    v2 = iadd v0, v1
+    v3 = iconst 3
+    v4 = iadd v2, v3
+    v5 = iconst 4
+    v6 = iadd v4, v5
+    v7 = iconst 5
+    v8 = iadd v6, v7
+    v9 = iconst 6
+    v10 = iadd v8, v9
+    v11 = iconst 7
+    v12 = iadd v10, v11
+    v13 = iconst 8
+    v14 = iadd v12, v13
+    v15 = iconst 9
+    v16 = iadd v14, v15
+    v17 = iconst 10
+    v18 = iadd v16, v17
+    v19 = iconst 11
+    v20 = iadd v18, v19
+    v21 = iconst 12
+    v22 = iadd v20, v21
+    v23 = iconst 13
+    v24 = iadd v22, v23
+    v25 = iconst 14
+    v26 = iadd v24, v25
+    v27 = iconst 15
+    v28 = iadd v26, v27
+    v29 = iconst 16
+    v30 = iadd v28, v29
+    v31 = iconst 17
+    v32 = iadd v30, v31
+    v33 = iconst 18
+    v34 = iadd v32, v33
+    v35 = iconst 19
+    v36 = iadd v34, v35
+    v37 = iconst 20
+    v38 = iadd v36, v37
+    return v38
+}
 }"#;
 
-    let module = parse_module(ir_module).expect("Failed to parse IR module");
-
     // Compile the function and verify it works (even with large frame)
+    let module = parse_module(ir).expect("Failed to parse IR module");
     let func = module
         .functions
         .get("main")
@@ -651,6 +715,6 @@ module {
     eprintln!("{}", disassemble_code(&bytes));
 
     // Verify function compiles and executes correctly
-    // This will use test_module which ensures SP is initialized
-    test_module(&module, "main", &[], 210); // 1+2+...+20 = 210
+    // This ensures SP is initialized
+    expect_ir_syscall(ir, 0, &[210]); // 1+2+...+20 = 210
 }

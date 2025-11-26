@@ -96,21 +96,27 @@ pub fn create_spill_reload_plan(
 
     for (block_idx, block) in func.blocks.iter().enumerate() {
         for (inst_idx, inst) in block.insts.iter().enumerate() {
-            if matches!(inst, Inst::Call { .. }) {
+            if let Inst::Call { args, results, callee: _ } = inst {
                 let call_point = InstPoint::new(block_idx, inst_idx + 1);
 
+                // Collect argument and return values for this call
+                let call_args: alloc::collections::BTreeSet<_> = args.iter().copied().collect();
+                let call_results: alloc::collections::BTreeSet<_> = results.iter().copied().collect();
+
                 // Find all live values in caller-saved registers
-                // BUT: Don't spill argument/return registers (a0-a7) before calls,
-                // as they're handled by the ABI and will be clobbered/used by the call.
-                // Only spill temporary registers (t0-t6) that are live across calls.
+                // BUT: Don't spill argument/return registers (a0-a7) that are actually
+                // used as arguments or return values for this call, as they're handled by the ABI.
+                // However, if a value in a0-a7 is NOT an argument/return, it should still be spilled.
                 let mut to_spill = Vec::new();
                 for (value, reg) in &allocation.value_to_reg {
                     if crate::abi::Abi::is_caller_saved(*reg) {
-                        // Skip argument/return registers (a0-a7) - they're handled by the ABI
+                        // Skip a0-a7 only if they're actually arguments or return values for this call
                         let reg_num = reg.num();
                         if reg_num >= 10 && reg_num <= 17 {
-                            // a0-a7: Don't spill these - they're used for arguments/returns
-                            continue;
+                            // a0-a7: Only skip if this value is an argument or return value
+                            if call_args.contains(value) || call_results.contains(value) {
+                                continue;
+                            }
                         }
                         // Check if value is live across the call
                         if let Some(live_range) = liveness.live_range(*value) {

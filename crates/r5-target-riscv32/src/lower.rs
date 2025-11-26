@@ -484,9 +484,20 @@ impl Lowerer {
         value: i64,
         allocation: &RegisterAllocation,
     ) -> Result<(), LoweringError> {
-        let result_reg = self
-            .get_register(result, allocation)
-            .ok_or_else(|| LoweringError::ResultNotInRegister { value: result })?;
+        // For result values, they must be in registers
+        // If not in allocation at all, return ValueNotAllocated
+        // If in allocation but not in register (spilled), return ResultNotInRegister
+        let result_reg = if let Some(reg) = self.get_register(result, allocation) {
+            reg
+        } else if !allocation.value_to_reg.contains_key(&result)
+            && !allocation.value_to_slot.contains_key(&result)
+        {
+            // Result is not in allocation at all
+            return Err(LoweringError::ValueNotAllocated { value: result });
+        } else {
+            // Result is in allocation but not in register (spilled) - result values should always be in registers
+            return Err(LoweringError::ResultNotInRegister { value: result });
+        };
 
         // Handle large constants (require lui + addi)
         if value >= -(1 << 11) && value < (1 << 11) {
@@ -531,9 +542,20 @@ impl Lowerer {
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
     ) -> Result<(), LoweringError> {
-        let result_reg = self
-            .get_register(result, allocation)
-            .ok_or_else(|| LoweringError::ResultNotInRegister { value: result })?;
+        // For result values, they must be in registers
+        // If not in allocation at all, return ValueNotAllocated
+        // If in allocation but not in register (spilled), return ResultNotInRegister
+        let result_reg = if let Some(reg) = self.get_register(result, allocation) {
+            reg
+        } else if !allocation.value_to_reg.contains_key(&result)
+            && !allocation.value_to_slot.contains_key(&result)
+        {
+            // Result is not in allocation at all
+            return Err(LoweringError::ValueNotAllocated { value: result });
+        } else {
+            // Result is in allocation but not in register (spilled) - result values should always be in registers
+            return Err(LoweringError::ResultNotInRegister { value: result });
+        };
 
         // Load operands into registers
         let arg1_reg = if let Some(reg) = self.get_register(arg1, allocation) {
@@ -592,9 +614,18 @@ impl Lowerer {
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
     ) -> Result<(), LoweringError> {
-        let result_reg = self
-            .get_register(result, allocation)
-            .ok_or_else(|| LoweringError::ResultNotInRegister { value: result })?;
+        // For result values, check if in allocation first
+        // If not in allocation at all, return ValueNotAllocated
+        // If in allocation but not in register (spilled), return ResultNotInRegister
+        let result_reg = if let Some(reg) = self.get_register(result, allocation) {
+            reg
+        } else if allocation.value_to_slot.contains_key(&result) {
+            // Result is spilled - result values should always be in registers
+            return Err(LoweringError::ResultNotInRegister { value: result });
+        } else {
+            // Result is not in allocation at all
+            return Err(LoweringError::ValueNotAllocated { value: result });
+        };
 
         let arg1_reg = if let Some(reg) = self.get_register(arg1, allocation) {
             reg
@@ -629,9 +660,18 @@ impl Lowerer {
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
     ) -> Result<(), LoweringError> {
-        let result_reg = self
-            .get_register(result, allocation)
-            .ok_or_else(|| LoweringError::ResultNotInRegister { value: result })?;
+        // For result values, check if in allocation first
+        // If not in allocation at all, return ValueNotAllocated
+        // If in allocation but not in register (spilled), return ResultNotInRegister
+        let result_reg = if let Some(reg) = self.get_register(result, allocation) {
+            reg
+        } else if allocation.value_to_slot.contains_key(&result) {
+            // Result is spilled - result values should always be in registers
+            return Err(LoweringError::ResultNotInRegister { value: result });
+        } else {
+            // Result is not in allocation at all
+            return Err(LoweringError::ValueNotAllocated { value: result });
+        };
 
         let arg1_reg = if let Some(reg) = self.get_register(arg1, allocation) {
             reg
@@ -761,28 +801,20 @@ impl Lowerer {
             }
         }
 
-        // Emit call (jalr or jal depending on whether we know the address)
-        if let Some(address) = self.function_addresses.get(callee) {
-            // Direct call - use jal
-            let current_pc = code.instruction_count() as u32 * 4;
-            let offset = (*address as i32) - (current_pc as i32);
-            code.emit(RiscvInst::Jal {
-                rd: Gpr::RA,
-                imm: offset,
-            });
-        } else {
-            // Indirect call - need relocation
-            let offset = code.instruction_count();
-            self.relocations.push(Relocation {
-                offset,
-                callee: String::from(callee),
-            });
-            // Emit placeholder jal (will be fixed up later)
-            code.emit(RiscvInst::Jal {
-                rd: Gpr::RA,
-                imm: 0, // Placeholder
-            });
-        }
+        // Emit call - always use relocation for cross-function calls
+        // The direct call optimization doesn't work correctly because we don't know
+        // the absolute address of the current function during lowering.
+        // Relocations will be fixed up in the final pass with correct absolute addresses.
+        let offset = code.instruction_count();
+        self.relocations.push(Relocation {
+            offset,
+            callee: String::from(callee),
+        });
+        // Emit placeholder jal (will be fixed up later)
+        code.emit(RiscvInst::Jal {
+            rd: Gpr::RA,
+            imm: 0, // Placeholder
+        });
 
         // Step 3: Move results from return registers (first 8)
         for (idx, result) in results.iter().enumerate() {
@@ -1188,7 +1220,10 @@ block0:
         // Remove result value from register allocation (but keep it spilled)
         let v0 = r5_ir::Value::new(0);
         allocation.value_to_reg.remove(&v0);
-        // Don't add it to value_to_slot - this simulates a result that's neither in reg nor spilled
+        // Add it to value_to_slot to simulate a spilled result value
+        if !allocation.value_to_slot.contains_key(&v0) {
+            allocation.value_to_slot.insert(v0, 0);
+        }
 
         let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
 

@@ -10,9 +10,9 @@ description = "RISC-V 32-bit target implementation"
 [dependencies]
 r5-ir = { path = "../r5-ir" }
 riscv32-encoder = { path = "../riscv32-encoder" }
+riscv32-emulator = { path = "../riscv32-emulator" }
 
 [dev-dependencies]
 r5-builder = { path = "../r5-builder" }
 r5-test-util = { path = "../r5-test-util" }
-riscv32-emulator = { path = "../riscv32-emulator" }
 
