@@ -1,1 +1,0 @@
-{"rustc":13024827784998065198,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[5035005548866581691,"build_script_build",false,10726252632631700899]],"local":[{"RerunIfChanged":{"output":"riscv32imc-unknown-none-elf/debug/build/embedded-io-async-7c145d3d6d118b27/output","paths":["build.rs"]}}],"rustflags":[],"config":0,"compile_kind":0}

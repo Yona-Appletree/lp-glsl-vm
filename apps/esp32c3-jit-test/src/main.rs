@@ -7,7 +7,7 @@ use defmt::info;
 use embassy_executor::Spawner;
 use esp_hal::{clock::CpuClock, timer::systimer::SystemTimer};
 use panic_rtt_target as _;
-use riscv_shared::build_and_compile_mul;
+use riscv_shared::build_and_compile_fib_hardware;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -30,7 +30,7 @@ async fn main(_spawner: Spawner) {
 
     // Build and compile JIT code
     info!("Building IR and compiling to RISC-V...");
-    let jit_result = build_and_compile_mul();
+    let jit_result = build_and_compile_fib_hardware();
 
     info!("Generated {} bytes of RISC-V code", jit_result.code.len());
     info!("ELF file size: {} bytes", jit_result.elf.len());
@@ -62,23 +62,25 @@ async fn main(_spawner: Spawner) {
 
         // Cast to function pointer
         // Note: code_buffer must stay alive during the function call
-        type MulFunc = extern "C" fn(i32, i32) -> i32;
-        let mul_func: MulFunc = core::mem::transmute(code_ptr);
+        // Bootstrap function signature: extern "C" fn() -> i32
+        // It calls fib(10) and returns the result (55)
+        type FibBootstrapFunc = extern "C" fn() -> i32;
+        let fib_func: FibBootstrapFunc = core::mem::transmute(code_ptr);
 
         // Test the function
-        let a = 5;
-        let b = 10;
-        info!("Calling JIT function: mul({}, {})", a, b);
-        info!("Expected result: {}", a * b);
+        let n = 10;
+        let expected = 55; // fib(10) = 55
+        info!("Calling JIT function: bootstrap (calls fib({}))", n);
+        info!("Expected result: {}", expected);
 
-        let result = mul_func(a, b);
+        let result = fib_func();
         info!("JIT function returned: {}", result);
-        info!("Expected: {}, Got: {}", a * b, result);
+        info!("Expected: {}, Got: {}", expected, result);
 
-        if result == a * b {
+        if result == expected {
             info!("===== JIT TEST SUCCESS! =====");
         } else {
-            defmt::panic!("JIT test failed: expected {}, got {}", a * b, result);
+            defmt::panic!("JIT test failed: expected {}, got {}", expected, result);
         }
     }
 

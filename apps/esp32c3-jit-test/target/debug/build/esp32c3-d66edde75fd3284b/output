@@ -1,3 +1,0 @@
-cargo:rustc-link-search=/Users/yona/dev/photomancer/lp-glsl-vm/apps/esp32c3-jit-test/target/debug/build/esp32c3-d66edde75fd3284b/out
-cargo:rerun-if-changed=device.x
-cargo:rerun-if-changed=build.rs
