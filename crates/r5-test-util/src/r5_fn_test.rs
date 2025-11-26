@@ -303,7 +303,7 @@ impl R5FnTest {
         module.set_entry_function(wrapper_name);
 
         // Compile module to RISC-V code
-        let compiled_code = compile_module(&module);
+        let compiled_code = compile_module(&module).expect("Failed to compile module");
 
         // Generate ELF file
         let elf_data = generate_elf(&compiled_code);

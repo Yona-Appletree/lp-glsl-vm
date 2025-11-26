@@ -50,9 +50,11 @@ pub fn compile_function(func: &r5_ir::Function) -> alloc::vec::Vec<u8> {
 
     // For deprecated function, use default max outgoing args
     let max_outgoing_args = 8;
+    // Include temporary spill slots needed for caller-saved register preservation
+    let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
     let frame_layout = FrameLayout::compute(
         &allocation.used_callee_saved,
-        allocation.spill_slot_count,
+        total_spill_slots,
         has_calls,
         func.signature.params.len(),
         max_outgoing_args,
@@ -180,9 +182,11 @@ pub fn compile_module(module: &r5_ir::Module) -> Result<alloc::vec::Vec<u8>, all
             });
 
             let max_outgoing_args = compute_max_outgoing_args(func, module);
+            // Include temporary spill slots needed for caller-saved register preservation
+            let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
             let frame_layout = FrameLayout::compute(
                 &allocation.used_callee_saved,
-                allocation.spill_slot_count,
+                total_spill_slots,
                 has_calls,
                 func.signature.params.len(),
                 max_outgoing_args,
@@ -291,9 +295,11 @@ pub fn compile_module(module: &r5_ir::Module) -> Result<alloc::vec::Vec<u8>, all
         });
 
         let max_outgoing_args = compute_max_outgoing_args(func, module);
+        // Include temporary spill slots needed for caller-saved register preservation
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
         let frame_layout = FrameLayout::compute(
             &allocation.used_callee_saved,
-            allocation.spill_slot_count,
+            total_spill_slots,
             has_calls,
             func.signature.params.len(),
             max_outgoing_args,

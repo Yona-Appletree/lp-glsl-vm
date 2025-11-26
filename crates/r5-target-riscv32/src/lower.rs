@@ -441,10 +441,10 @@ impl Lowerer {
                     allocation,
                     frame_layout,
                     abi_info,
-                );
+                )?;
             }
             Inst::Jump { target } => {
-                self.lower_jump(code, *target, block_addresses);
+                self.lower_jump(code, *target, block_addresses)?;
             }
             Inst::Br {
                 condition,
@@ -459,13 +459,13 @@ impl Lowerer {
                     allocation,
                     frame_layout,
                     block_addresses,
-                );
+                )?;
             }
             Inst::Halt => {
                 code.emit(RiscvInst::Ebreak);
             }
             Inst::Syscall { number, args } => {
-                self.lower_syscall(code, *number, args, allocation, frame_layout);
+                self.lower_syscall(code, *number, args, allocation, frame_layout)?;
             }
             // Known limitation: Some instructions are not yet implemented
             // (Idiv, Irem, Load, Store, etc.). These will return an error.
@@ -703,7 +703,7 @@ impl Lowerer {
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
-    ) {
+    ) -> Result<(), LoweringError> {
         // Step 1: Move register arguments (a0-a7)
         // Track which argument values were preserved (because they're used after the call)
         let mut preserved_args: Vec<(Value, Gpr)> = Vec::new();
@@ -738,10 +738,7 @@ impl Lowerer {
                         }
                     }
 
-                    self.load_value_into_reg(code, *arg, arg_reg, allocation, frame_layout)
-                        .unwrap_or_else(|e| {
-                            panic!("Failed to load argument {} into register: {}", idx, e)
-                        });
+                    self.load_value_into_reg(code, *arg, arg_reg, allocation, frame_layout)?;
                 }
             }
         }
@@ -752,8 +749,7 @@ impl Lowerer {
                 if let Some(offset) = frame_layout.outgoing_arg_offset(idx) {
                     // Load argument value into temporary register
                     let temp_reg = Gpr::T0;
-                    self.load_value_into_reg(code, *arg, temp_reg, allocation, frame_layout)
-                        .unwrap_or_else(|e| panic!("Failed to load stack argument {}: {}", idx, e));
+                    self.load_value_into_reg(code, *arg, temp_reg, allocation, frame_layout)?;
 
                     // Store to outgoing args area
                     code.emit(RiscvInst::Sw {
@@ -814,14 +810,15 @@ impl Lowerer {
         }
 
         // Step 4: Load stack return values (index >= 8) from stack
-        // These are at positive offsets from SP (in caller's frame, above our frame)
-        // After the call, they're at SP + frame_size + offset
+        // These are stored in the caller's frame at positive offsets from SP
+        // After the call returns, the callee's epilogue has restored SP to the caller's frame,
+        // so the return values are at positive offsets from SP (just stack_offset)
         for (idx, result) in results.iter().enumerate() {
             if idx >= 8 {
                 if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
-                    // Compute actual offset: frame_size + stack_offset
-                    let frame_size = frame_layout.total_size();
-                    let actual_offset = (frame_size as i32) + *stack_offset;
+                    // After call returns, SP is restored to caller's frame, so offset is just stack_offset
+                    // (positive offset, relative to SP after epilogue)
+                    let actual_offset = *stack_offset;
 
                     // Load from stack into temp register
                     let temp_reg = Gpr::T0;
@@ -868,6 +865,8 @@ impl Lowerer {
                 });
             }
         }
+
+        Ok(())
     }
 
     /// Lower jump instruction.
@@ -876,7 +875,7 @@ impl Lowerer {
         code: &mut CodeBuffer,
         target: u32,
         block_addresses: &BTreeMap<usize, u32>,
-    ) {
+    ) -> Result<(), LoweringError> {
         let target_idx = target as usize;
         if let Some(target_addr) = block_addresses.get(&target_idx) {
             let current_pc = code.instruction_count() as u32 * 4;
@@ -893,6 +892,7 @@ impl Lowerer {
                 imm: 0, // Placeholder
             });
         }
+        Ok(())
     }
 
     /// Lower branch instruction.
@@ -905,14 +905,13 @@ impl Lowerer {
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
         block_addresses: &BTreeMap<usize, u32>,
-    ) {
+    ) -> Result<(), LoweringError> {
         // Load condition into a register
         let cond_reg = if let Some(reg) = self.get_register(condition, allocation) {
             reg
         } else {
             let temp = Gpr::T0;
-            self.load_value_into_reg(code, condition, temp, allocation, frame_layout)
-                .unwrap_or_else(|e| panic!("Failed to load condition value: {}", e));
+            self.load_value_into_reg(code, condition, temp, allocation, frame_layout)?;
             temp
         };
 
@@ -939,6 +938,7 @@ impl Lowerer {
                 imm: offset,
             });
         }
+        Ok(())
     }
 
     /// Lower syscall instruction.
@@ -949,13 +949,12 @@ impl Lowerer {
         args: &[Value],
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
-    ) {
+    ) -> Result<(), LoweringError> {
         // Move arguments to a0-a7 registers
         for (idx, arg) in args.iter().enumerate() {
             if idx < 8 {
                 let arg_reg = Gpr::new(10 + idx as u8); // a0-a7
-                self.load_value_into_reg(code, *arg, arg_reg, allocation, frame_layout)
-                    .unwrap_or_else(|e| panic!("Failed to load syscall argument {}: {}", idx, e));
+                self.load_value_into_reg(code, *arg, arg_reg, allocation, frame_layout)?;
             }
             // Known limitation: Syscalls with > 8 arguments are not yet supported
             // (stack arguments for syscalls would need additional implementation)
@@ -987,6 +986,7 @@ impl Lowerer {
 
         // Emit ecall
         code.emit(RiscvInst::Ecall);
+        Ok(())
     }
 }
 
@@ -1024,9 +1024,10 @@ block0:
         let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
 
         let has_calls = false;
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
         let frame_layout = FrameLayout::compute(
             &allocation.used_callee_saved,
-            allocation.spill_slot_count,
+            total_spill_slots,
             has_calls,
             func.signature.params.len(),
             0,
@@ -1035,8 +1036,9 @@ block0:
         let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
 
         let mut lowerer = Lowerer::new();
-        let code =
-            lowerer.lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info);
+        let code = lowerer
+            .lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info)
+            .expect("Failed to lower function");
 
         // Should have generated some code
         assert!(code.instruction_count() > 0);
@@ -1062,9 +1064,10 @@ block0:
         let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
 
         let has_calls = false;
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
         let frame_layout = FrameLayout::compute(
             &allocation.used_callee_saved,
-            allocation.spill_slot_count,
+            total_spill_slots,
             has_calls,
             func.signature.params.len(),
             0,
@@ -1073,8 +1076,9 @@ block0:
         let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
 
         let mut lowerer = Lowerer::new();
-        let code =
-            lowerer.lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info);
+        let code = lowerer
+            .lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info)
+            .expect("Failed to lower function");
 
         assert!(code.instruction_count() > 0);
     }
@@ -1095,6 +1099,53 @@ block0:
         let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
 
         let has_calls = false;
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
+        let frame_layout = FrameLayout::compute(
+            &allocation.used_callee_saved,
+            total_spill_slots,
+            has_calls,
+            func.signature.params.len(),
+            0,
+        );
+
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
+
+        let mut lowerer = Lowerer::new();
+        let code = lowerer
+            .lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info)
+            .expect("Failed to lower function");
+
+        assert!(code.instruction_count() > 0);
+
+        // Should end with jalr (return)
+        let instructions = code.instructions();
+        assert!(matches!(instructions.last(), Some(RiscvInst::Jalr { .. })));
+    }
+
+    #[test]
+    fn test_lower_error_missing_value() {
+        // Test that missing values in allocation return an error
+        let ir = r#"
+function %test() -> i32 {
+block0:
+    v0 = iconst 1
+    v1 = iconst 2
+    v2 = iadd v0, v1
+    return v2
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR function");
+        let liveness = compute_liveness(&func);
+        let mut allocation = allocate_registers(&func, &liveness);
+
+        // Remove a value from allocation to simulate error
+        let v0 = r5_ir::Value::new(0);
+        allocation.value_to_reg.remove(&v0);
+        allocation.value_to_slot.remove(&v0);
+
+        let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
+
+        let has_calls = false;
         let frame_layout = FrameLayout::compute(
             &allocation.used_callee_saved,
             allocation.spill_slot_count,
@@ -1106,13 +1157,109 @@ block0:
         let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
 
         let mut lowerer = Lowerer::new();
-        let code =
+        let result =
             lowerer.lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info);
 
-        assert!(code.instruction_count() > 0);
+        // Should return an error
+        assert!(result.is_err());
+        match result {
+            Err(LoweringError::ValueNotAllocated { value }) => {
+                assert_eq!(value, v0);
+            }
+            Err(e) => panic!("Expected ValueNotAllocated error, got {:?}", e),
+            Ok(_) => panic!("Expected error but got Ok"),
+        }
+    }
 
-        // Should end with jalr (return)
-        let instructions = code.instructions();
-        assert!(matches!(instructions.last(), Some(RiscvInst::Jalr { .. })));
+    #[test]
+    fn test_lower_error_result_not_in_register() {
+        // Test that result values must be in registers
+        let ir = r#"
+function %test() -> i32 {
+block0:
+    v0 = iconst 1
+    return v0
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR function");
+        let liveness = compute_liveness(&func);
+        let mut allocation = allocate_registers(&func, &liveness);
+
+        // Remove result value from register allocation (but keep it spilled)
+        let v0 = r5_ir::Value::new(0);
+        allocation.value_to_reg.remove(&v0);
+        // Don't add it to value_to_slot - this simulates a result that's neither in reg nor spilled
+
+        let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
+
+        let has_calls = false;
+        // Include temporary spill slots needed for caller-saved register preservation
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
+        let frame_layout = FrameLayout::compute(
+            &allocation.used_callee_saved,
+            total_spill_slots,
+            has_calls,
+            func.signature.params.len(),
+            0,
+        );
+
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
+
+        let mut lowerer = Lowerer::new();
+        let result =
+            lowerer.lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info);
+
+        // Should return an error for result not in register
+        assert!(result.is_err());
+        match result {
+            Err(LoweringError::ResultNotInRegister { value }) => {
+                assert_eq!(value, v0);
+            }
+            Err(e) => panic!("Expected ResultNotInRegister error, got {:?}", e),
+            Ok(_) => panic!("Expected error but got Ok"),
+        }
+    }
+
+    #[test]
+    fn test_lower_error_unimplemented_instruction() {
+        // Test that unimplemented instructions return an error
+        let ir = r#"
+function %test() -> i32 {
+block0:
+    v0 = iconst 1
+    v1 = idiv v0, v0  // idiv is not implemented
+    return v1
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR function");
+        let liveness = compute_liveness(&func);
+        let allocation = allocate_registers(&func, &liveness);
+        let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
+
+        let has_calls = false;
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
+        let frame_layout = FrameLayout::compute(
+            &allocation.used_callee_saved,
+            total_spill_slots,
+            has_calls,
+            func.signature.params.len(),
+            0,
+        );
+
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
+
+        let mut lowerer = Lowerer::new();
+        let result =
+            lowerer.lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info);
+
+        // Should return an error for unimplemented instruction
+        assert!(result.is_err());
+        match result {
+            Err(LoweringError::UnimplementedInstruction { .. }) => {
+                // Expected
+            }
+            Err(e) => panic!("Expected UnimplementedInstruction error, got {:?}", e),
+            Ok(_) => panic!("Expected error but got Ok"),
+        }
     }
 }

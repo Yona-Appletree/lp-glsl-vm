@@ -22,9 +22,11 @@ fn lower_function(func: &r5_ir::Function) -> CodeBuffer {
             .any(|inst| matches!(inst, r5_ir::Inst::Call { .. }))
     });
 
+    // Include temporary spill slots needed for caller-saved register preservation
+    let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
     let frame_layout = FrameLayout::compute(
         &allocation.used_callee_saved,
-        allocation.spill_slot_count,
+        total_spill_slots,
         has_calls,
         func.signature.params.len(),
         8, // Default max outgoing args for test helper
@@ -33,7 +35,9 @@ fn lower_function(func: &r5_ir::Function) -> CodeBuffer {
     let abi_info = Abi::compute_abi_info(func, &allocation, 8);
 
     let mut lowerer = Lowerer::new();
-    lowerer.lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
+    lowerer
+        .lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
+        .expect("Failed to lower function")
 }
 
 /// Helper to test a module with multiple functions
