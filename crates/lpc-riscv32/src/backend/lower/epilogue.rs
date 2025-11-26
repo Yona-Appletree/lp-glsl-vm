@@ -27,11 +27,13 @@ impl super::Lowerer {
             }
 
             // Restore return address if we saved it (before restoring SP)
+            // RA is saved in the setup area, which is above the outgoing args area
+            // Offset = outgoing_args_size + (setup_area_size - 4)
             // For entry functions, we saved garbage RA at the start, so don't restore it.
             // The current RA (set by calls) should be used, or we'll emit ebreak.
             if frame_layout.has_function_calls && !self.is_entry_function {
                 let ra_offset = if frame_layout.setup_area_size > 0 {
-                    frame_layout.setup_area_size as i32 - 4
+                    frame_layout.outgoing_args_size as i32 + frame_layout.setup_area_size as i32 - 4
                 } else {
                     0
                 };

@@ -1,6 +1,7 @@
 //! Type definitions for instruction lowering.
 
 use lpc_lpir::Inst;
+
 use crate::Gpr;
 
 /// Instruction offset (instruction index: 0, 1, 2, ...).
@@ -45,6 +46,27 @@ impl ByteOffset {
     pub fn as_i32(self) -> i32 {
         self.0
     }
+
+    /// Add bytes to this offset.
+    pub fn add_bytes(self, bytes: u32) -> Self {
+        ByteOffset(self.0 + bytes as i32)
+    }
+}
+
+impl core::ops::Add for ByteOffset {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        ByteOffset(self.0 + other.0)
+    }
+}
+
+impl core::ops::Add<i32> for ByteOffset {
+    type Output = Self;
+
+    fn add(self, other: i32) -> Self {
+        ByteOffset(self.0 + other)
+    }
 }
 
 // Conversion: InstOffset -> ByteOffset (multiply by 4)
@@ -53,7 +75,8 @@ impl From<InstOffset> for ByteOffset {
         // Check for overflow: usize * 4 might overflow i32
         // For RISC-V 32-bit, instruction count is limited, so this should be safe
         // but we use checked arithmetic for safety
-        let byte_offset = inst_offset.0
+        let byte_offset = inst_offset
+            .0
             .checked_mul(4)
             .and_then(|v| i32::try_from(v).ok())
             .expect("Instruction offset too large to convert to byte offset");

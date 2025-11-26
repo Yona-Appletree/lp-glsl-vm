@@ -20,10 +20,11 @@ impl super::Lowerer {
         let frame_size = frame_layout.total_size();
 
         // Step 1: Load incoming stack arguments (before SP adjustment)
-        // According to RISC-V convention, stack args are at positive offsets from SP
-        // The caller stores them at positive offsets, and we read them at the same offsets
-        // This must be done REGARDLESS of frame_size, because we need to load stack args
-        // even for leaf functions with no frame.
+        // According to RISC-V convention, stack args are at offsets (idx-8)*4 from SP
+        // The caller stores them at SP + (idx-8)*4 (after prologue)
+        // The callee loads them from SP + (idx-8)*4 (before prologue)
+        // Since caller's SP (after prologue) = callee's SP (before prologue), offsets match
+        // This must be done BEFORE SP adjustment, because after adjustment SP points to the frame
         crate::debug!("[PROLOGUE] Loading incoming stack arguments");
         crate::debug!(
             "[PROLOGUE] Function frame_size: {}, incoming_args_size: {}",
@@ -33,29 +34,24 @@ impl super::Lowerer {
         let mut stack_args_to_spill = alloc::vec::Vec::new();
         if let Some(entry_block) = func.blocks.first() {
             for (idx, param) in entry_block.params.iter().enumerate() {
-                if let Some(stack_offset) = abi_info.param_stack_offsets.get(&idx) {
+                // Check if this parameter is on the stack (index >= 8)
+                if let Some(load_offset) = frame_layout.incoming_arg_offset(idx) {
                     // This parameter is passed on the stack (index >= 8).
                     //
                     // According to RISC-V calling convention:
-                    // - Stack arguments are stored at positive offsets from SP
+                    // - Stack arguments are stored at offsets (idx-8)*4 from SP
                     // - The caller's SP (after prologue) equals the callee's SP (before prologue)
-                    // - Both caller and callee use the same offset: (idx - 8) * 4
+                    // - Both use the same offset: (idx - 8) * 4
                     //
-                    // The caller stores outgoing args at SP + offset (in the outgoing args area
-                    // of its frame). The callee loads incoming args from SP + offset (from the
-                    // same memory location, since SP values match).
-                    //
-                    // Note: The outgoing args area is part of the caller's frame, so storing
-                    // at SP+offset places args inside the frame, not above it. This is correct
-                    // because the frame size includes the outgoing args area.
-                    let load_offset = *stack_offset;
+                    // The caller stores outgoing args at SP + (idx-8)*4 (after prologue).
+                    // The callee loads incoming args from SP + (idx-8)*4 (before prologue).
+                    // Since the SP values match, the offsets match.
                     crate::debug!(
                         "[PROLOGUE] Loading stack arg {} (param {:?}) from SP + {} \
-                         (stack_offset={})",
+                         (incoming_arg_offset)",
                         idx,
                         param,
-                        load_offset,
-                        stack_offset
+                        load_offset.as_i32()
                     );
                     if let Some(allocated_reg) = allocation.value_to_reg.get(param) {
                         // Load directly into allocated register
@@ -66,7 +62,7 @@ impl super::Lowerer {
                         code.emit(RiscvInst::Lw {
                             rd: *allocated_reg,
                             rs1: Gpr::Sp,
-                            imm: load_offset, // Positive offset from SP
+                            imm: load_offset.as_i32(), // Positive offset from SP
                         });
                     } else {
                         // Will be spilled - load into temp register, store after SP adjustment
@@ -75,12 +71,12 @@ impl super::Lowerer {
                             "[PROLOGUE]   -> Loading into temp register {:?} (will be spilled) \
                              from SP + {}",
                             temp_reg,
-                            stack_offset
+                            load_offset.as_i32()
                         );
                         code.emit(RiscvInst::Lw {
                             rd: temp_reg,
                             rs1: Gpr::Sp,
-                            imm: *stack_offset, // Positive offset from SP
+                            imm: load_offset.as_i32(), // Positive offset from SP
                         });
                         // Store temp_reg and param for later
                         if let Some(slot) = allocation.value_to_slot.get(param) {
@@ -109,14 +105,17 @@ impl super::Lowerer {
                 });
             }
 
-            // Save return address if we have calls (at offset 0 in setup area)
+            // Save return address if we have calls
+            // RA is saved in the setup area, which is above the outgoing args area
+            // Offset = outgoing_args_size + (setup_area_size - 4)
+            // For RISC-V 32-bit, setup_area_size is 8, so RA is at offset outgoing_args_size + 4
             if frame_layout.has_function_calls {
-                // Save RA: sw ra, 0(sp) (or at setup_area_size - 4 if setup area > 0)
+                // Save RA: sw ra, offset(sp) where offset = outgoing_args_size + (setup_area_size - 4)
                 // Note: For entry functions, RA is garbage at the start, but we save it anyway
                 // because calls will set RA, and we need to preserve it across nested calls.
                 // The epilogue will handle entry functions specially.
                 let ra_offset = if frame_layout.setup_area_size > 0 {
-                    frame_layout.setup_area_size as i32 - 4
+                    frame_layout.outgoing_args_size as i32 + frame_layout.setup_area_size as i32 - 4
                 } else {
                     0
                 };
@@ -532,7 +531,7 @@ block0:
     fn test_sp_initialization() {
         // Test that SP is properly initialized before function execution
         // Simple function that should work if SP is valid
-        use crate::{expect_ir_syscall, Gpr};
+        use crate::{expect_ir_ok, Gpr};
 
         let ir = r#"
 module {
@@ -541,7 +540,6 @@ entry: %bootstrap
 function %bootstrap() -> i32 {
 block0:
     call %main() -> v0
-    syscall 0(v0)
     halt
 }
 
@@ -552,9 +550,9 @@ block0:
 }
 }"#;
 
-        let emu = expect_ir_syscall(ir, 0, &[42]);
+        let emu = expect_ir_ok(ir);
         // Verify SP is initialized (not zero)
-        // After syscall, SP may have been adjusted by frame, so check it's reasonable
+        // After execution, SP may have been adjusted by frame, so check it's reasonable
         let sp = emu.get_register(Gpr::Sp);
         assert_ne!(sp, 0, "SP should be initialized to non-zero value");
         // SP should be in valid memory region

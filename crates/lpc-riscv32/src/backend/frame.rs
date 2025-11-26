@@ -5,8 +5,8 @@
 
 use alloc::vec::Vec;
 
-use crate::Gpr;
 use super::lower::ByteOffset;
+use crate::Gpr;
 
 /// Storage location for a value in the frame.
 ///
@@ -33,17 +33,21 @@ pub enum StorageLocation {
 /// ┌─────────────────────────────────────┐
 /// │  Caller's Stack Frame               │
 /// ├─────────────────────────────────────┤
-/// │  Outgoing Arguments (if any)        │  ← SP (after call)
+/// │  Outgoing Arguments (if any)        │  ← SP (after prologue, bottom of frame)
 /// ├─────────────────────────────────────┤
-/// │  Spill Slots                        │
+/// │  Setup Area (FP/LR)                 │
 /// ├─────────────────────────────────────┤
 /// │  Clobber Area (callee-saved regs)   │
 /// ├─────────────────────────────────────┤
-/// │  Setup Area (FP/LR)                 │  ← FP (if used)
-/// ├─────────────────────────────────────┤
-/// │  Incoming Arguments (if any)        │
+/// │  Spill Slots                        │
 /// └─────────────────────────────────────┘
 /// ```
+///
+/// Key points:
+/// - Outgoing args are stored at SP+0, SP+4, etc. (relative to SP after prologue)
+/// - Incoming args are loaded from SP+0, SP+4, etc. (relative to SP before prologue)
+/// - Since caller's SP (after prologue) = callee's SP (before prologue), offsets match
+/// - The frame grows downward: SP is adjusted by total_size() in prologue
 #[derive(Debug, Clone)]
 pub struct FrameLayout {
     /// Word size in bytes (4 for RISC-V 32-bit)
@@ -95,7 +99,8 @@ impl FrameLayout {
     ) -> Self {
         #[cfg(feature = "debug-lowering")]
         crate::debug_lowering!(
-            "FrameLayout::compute: used_callee_saved={}, spill_slots={}, has_calls={}, incoming_args={}, outgoing_args={}",
+            "FrameLayout::compute: used_callee_saved={}, spill_slots={}, has_calls={}, \
+             incoming_args={}, outgoing_args={}",
             used_callee_saved.len(),
             spill_slots,
             has_calls,
@@ -156,26 +161,66 @@ impl FrameLayout {
     }
 
     /// Get the total frame size in bytes.
+    ///
+    /// This includes outgoing_args_size, setup_area_size, clobber_size, and
+    /// fixed_frame_storage_size. The frame is laid out as:
+    /// [outgoing args] [setup] [clobber] [spills]
+    /// SP points to the bottom (outgoing args area) after prologue.
     pub fn total_size(&self) -> u32 {
-        let size = self.setup_area_size
+        let size = self.outgoing_args_size
+            + self.setup_area_size
             + self.clobber_size
-            + self.fixed_frame_storage_size
-            + self.outgoing_args_size;
-        crate::debug!("[FRAME] total_size(): setup={}, clobber={}, spills={}, outgoing_args={}, total={}", 
-            self.setup_area_size, self.clobber_size, self.fixed_frame_storage_size, 
-            self.outgoing_args_size, size);
+            + self.fixed_frame_storage_size;
+        crate::debug!(
+            "[FRAME] total_size(): outgoing_args={}, setup={}, clobber={}, spills={}, total={}",
+            self.outgoing_args_size,
+            self.setup_area_size,
+            self.clobber_size,
+            self.fixed_frame_storage_size,
+            size
+        );
         size
+    }
+
+    /// Get the offset of the outgoing args base (relative to adjusted SP).
+    ///
+    /// Outgoing args are at the bottom of the frame: SP+0 to SP+(outgoing_args_size-1)
+    pub fn outgoing_args_base_offset(&self) -> ByteOffset {
+        ByteOffset(0)
+    }
+
+    /// Get the offset of the setup area base (relative to adjusted SP).
+    ///
+    /// Setup area is above outgoing args: SP+outgoing_args_size to SP+outgoing_args_size+setup_area_size-1
+    pub fn setup_area_base_offset(&self) -> ByteOffset {
+        ByteOffset(self.outgoing_args_size as i32)
+    }
+
+    /// Get the offset of the clobber area base (relative to adjusted SP).
+    ///
+    /// Clobber area is above the setup area.
+    pub fn clobber_area_base_offset(&self) -> ByteOffset {
+        ByteOffset((self.outgoing_args_size + self.setup_area_size) as i32)
+    }
+
+    /// Get the offset of spill slots base (relative to adjusted SP).
+    ///
+    /// Spill slots are above the clobber area.
+    pub fn spill_slots_base_offset(&self) -> ByteOffset {
+        ByteOffset((self.outgoing_args_size + self.setup_area_size + self.clobber_size) as i32)
     }
 
     /// Get the stack offset for a callee-saved register.
     ///
     /// Returns the offset from SP where the register is saved.
+    /// Negative offset because frame grows downward from SP.
     pub fn callee_saved_offset(&self, reg: Gpr) -> Option<ByteOffset> {
         self.clobbered_callee_saves
             .iter()
             .position(|&r| r.num() == reg.num())
             .map(|idx| {
-                let offset = self.setup_area_size + (idx as u32 * 4);
+                let base = self.outgoing_args_size + self.setup_area_size;
+                let offset = base + (idx as u32 * 4);
                 ByteOffset(-(offset as i32))
             })
     }
@@ -183,8 +228,9 @@ impl FrameLayout {
     /// Get the stack offset for a spill slot.
     ///
     /// Returns the offset from SP where the spill slot is located.
+    /// Negative offset because frame grows downward from SP.
     pub fn spill_slot_offset(&self, slot: u32) -> ByteOffset {
-        let base_offset = self.setup_area_size + self.clobber_size;
+        let base_offset = self.outgoing_args_size + self.setup_area_size + self.clobber_size;
         let offset = ByteOffset(-((base_offset + slot * 4) as i32));
         #[cfg(feature = "debug-lowering")]
         crate::debug_lowering!(
@@ -198,8 +244,13 @@ impl FrameLayout {
 
     /// Get stack offset for incoming argument (index >= 8)
     ///
-    /// Returns offset relative to SP **before** prologue (positive offset).
-    /// After prologue, the actual offset is: total_size() + offset
+    /// Returns offset relative to callee's SP (before prologue).
+    /// This equals the caller's SP (after prologue).
+    ///
+    /// The offset is (idx-8)*4, which matches outgoing_arg_offset because:
+    /// - Caller stores outgoing args at SP + (idx-8)*4 (after prologue)
+    /// - Callee loads incoming args from SP + (idx-8)*4 (before prologue)
+    /// - Since caller's SP (after prologue) = callee's SP (before prologue), offsets match
     pub fn incoming_arg_offset(&self, arg_index: usize) -> Option<ByteOffset> {
         if arg_index < 8 {
             return None; // In register
@@ -210,17 +261,22 @@ impl FrameLayout {
 
     /// Get stack offset for outgoing argument (index >= 8)
     ///
-    /// Returns offset relative to SP (positive offset, per RISC-V convention).
-    /// Stack arguments are stored at positive offsets from SP.
-    /// The caller stores them, and the callee reads them at the same positive offsets.
+    /// Returns offset relative to caller's adjusted SP (positive offset).
+    /// Stack arguments are stored at SP + (idx-8)*4, which matches incoming_arg_offset
+    /// because caller's SP (after prologue) = callee's SP (before prologue).
     pub fn outgoing_arg_offset(&self, arg_index: usize) -> Option<ByteOffset> {
         if arg_index < 8 {
             return None; // In register
         }
         let stack_index = arg_index - 8;
-        // Stack arguments start at SP + 0, each is 4 bytes
+        // Outgoing args are stored at the bottom of the frame (SP+0, SP+4, etc.)
         let offset = ByteOffset((stack_index * 4) as i32);
-        crate::debug!("[FRAME] outgoing_arg_offset(arg_index={}): stack_index={}, offset={}", arg_index, stack_index, offset.as_i32());
+        crate::debug!(
+            "[FRAME] outgoing_arg_offset(arg_index={}): stack_index={}, offset={}",
+            arg_index,
+            stack_index,
+            offset.as_i32()
+        );
         Some(offset)
     }
 
@@ -276,16 +332,20 @@ impl FrameLayout {
     /// Get the incoming argument offset after prologue.
     ///
     /// This computes the actual offset accounting for SP adjustment after prologue.
-    /// Incoming stack arguments are at positive offsets from SP before prologue,
-    /// but after prologue, SP is adjusted, so the offset becomes: total_size() + original_offset.
+    /// Incoming stack arguments are loaded BEFORE prologue (at SP + (idx-8)*4).
+    /// After prologue, SP is adjusted downward by total_size(), so the offset becomes
+    /// negative: -(total_size() - (idx-8)*4) = (idx-8)*4 - total_size()
+    ///
+    /// However, this method is typically not needed because incoming args should
+    /// be loaded before the prologue adjusts SP.
     pub fn incoming_arg_offset_after_prologue(&self, arg_index: usize) -> Option<ByteOffset> {
         if arg_index < 8 {
             return None; // In register
         }
         let stack_index = arg_index - 8;
-        // After prologue, SP is adjusted by total_size(), so we add that to the original offset
+        // After prologue, SP is adjusted downward, so incoming args are at negative offsets
         let original_offset = (stack_index * 4) as i32;
-        Some(ByteOffset(original_offset + self.total_size() as i32))
+        Some(ByteOffset(original_offset - self.total_size() as i32))
     }
 }
 
@@ -310,7 +370,8 @@ mod tests {
         let layout = FrameLayout::compute(&[], 0, true, 0, 0);
         assert_eq!(layout.setup_area_size, 8);
         assert_eq!(layout.has_function_calls, true);
-        assert_eq!(layout.total_size(), 8);
+        assert_eq!(layout.outgoing_args_size, 0);
+        assert_eq!(layout.total_size(), 8); // setup only
     }
 
     #[test]
@@ -318,7 +379,8 @@ mod tests {
         let layout = FrameLayout::compute(&[], 2, false, 0, 0);
         assert_eq!(layout.setup_area_size, 8);
         assert_eq!(layout.fixed_frame_storage_size, 16); // Aligned to 16
-        assert_eq!(layout.total_size(), 24);
+        assert_eq!(layout.outgoing_args_size, 0);
+        assert_eq!(layout.total_size(), 24); // setup + spills
     }
 
     #[test]
@@ -336,7 +398,7 @@ mod tests {
         let used = vec![Gpr::S0, Gpr::S1];
         let layout = FrameLayout::compute(&used, 0, false, 0, 0);
 
-        // S0 should be at offset -8 (after setup area)
+        // S0 should be at offset -(outgoing_args + setup_area) = -(0 + 8) = -8
         let offset_s0 = layout.callee_saved_offset(Gpr::S0).unwrap();
         assert_eq!(offset_s0.as_i32(), -8);
 
@@ -350,6 +412,7 @@ mod tests {
         let layout = FrameLayout::compute(&[], 2, false, 0, 0);
 
         // First spill slot should be after setup area (8 bytes)
+        // Offset = -(outgoing_args + setup_area) = -(0 + 8) = -8
         let offset_slot0 = layout.spill_slot_offset(0);
         assert_eq!(offset_slot0.as_i32(), -8);
 
@@ -381,14 +444,16 @@ mod tests {
             assert_eq!(layout.incoming_arg_offset(i), None);
         }
 
-        // Stack args should have positive offsets (relative to SP before prologue)
-        assert_eq!(layout.incoming_arg_offset(8), Some(ByteOffset(0)));
-        assert_eq!(layout.incoming_arg_offset(9), Some(ByteOffset(4)));
-        assert_eq!(layout.incoming_arg_offset(10), Some(ByteOffset(8)));
+        // Stack args should have offsets (idx-8)*4 (relative to SP before prologue)
+        // These match outgoing_arg_offset because caller's SP (after prologue) = callee's SP (before prologue)
+        assert_eq!(layout.incoming_arg_offset(8), Some(ByteOffset(0))); // SP + 0
+        assert_eq!(layout.incoming_arg_offset(9), Some(ByteOffset(4))); // SP + 4
+        assert_eq!(layout.incoming_arg_offset(10), Some(ByteOffset(8))); // SP + 8
     }
 
     #[test]
     fn test_outgoing_arg_offset() {
+        // Test with a frame that has setup area (8 bytes)
         let layout = FrameLayout::compute(&[], 0, true, 0, 10);
 
         // First 8 args should return None (in registers)
@@ -396,11 +461,68 @@ mod tests {
             assert_eq!(layout.outgoing_arg_offset(i), None);
         }
 
-        // Stack args should have positive offsets (per RISC-V convention)
-        // Stack arguments start at SP + 0, each is 4 bytes
-        assert_eq!(layout.outgoing_arg_offset(8), Some(ByteOffset(0)));
-        assert_eq!(layout.outgoing_arg_offset(9), Some(ByteOffset(4)));
-        assert_eq!(layout.outgoing_arg_offset(10), Some(ByteOffset(8)));
+        // Stack args should be stored at the bottom of the frame (SP+0, SP+4, etc.)
+        // These match incoming_arg_offset because caller's SP (after prologue) = callee's SP (before prologue)
+        assert_eq!(layout.outgoing_arg_offset(8), Some(ByteOffset(0))); // SP + 0
+        assert_eq!(layout.outgoing_arg_offset(9), Some(ByteOffset(4))); // SP + 4
+        assert_eq!(layout.outgoing_arg_offset(10), Some(ByteOffset(8))); // SP + 8
+    }
+
+    #[test]
+    fn test_outgoing_arg_offset_with_spills() {
+        // Test with spills - outgoing args are still at the bottom of the frame
+        let layout = FrameLayout::compute(&[], 2, true, 0, 10);
+
+        // Outgoing args are at SP+0, SP+4, etc. (not affected by spills)
+        assert_eq!(layout.outgoing_arg_offset(8), Some(ByteOffset(0))); // SP + 0
+        assert_eq!(layout.outgoing_arg_offset(9), Some(ByteOffset(4))); // SP + 4
+                                                                        // total_size includes outgoing_args(16) + setup(8) + spills(16) = 40
+        assert_eq!(layout.total_size(), 40);
+    }
+
+    #[test]
+    fn test_incoming_and_outgoing_same_offset() {
+        // Incoming and outgoing args should use the same offsets
+        // because caller's SP (after prologue) = callee's SP (before prologue)
+        let layout = FrameLayout::compute(&[], 0, true, 10, 10);
+
+        for i in 8..=10 {
+            let incoming = layout.incoming_arg_offset(i);
+            let outgoing = layout.outgoing_arg_offset(i);
+            assert_eq!(
+                incoming, outgoing,
+                "Incoming and outgoing offsets should match for arg {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_frame_offset_helpers() {
+        let layout = FrameLayout::compute(&[Gpr::S0], 2, true, 0, 0);
+
+        // Outgoing args are at the bottom (SP+0)
+        assert_eq!(layout.outgoing_args_base_offset().as_i32(), 0);
+
+        // Setup area is above outgoing args
+        assert_eq!(
+            layout.setup_area_base_offset().as_i32(),
+            layout.outgoing_args_size as i32
+        );
+
+        // Clobber area is above setup area
+        assert_eq!(
+            layout.clobber_area_base_offset().as_i32(),
+            (layout.outgoing_args_size + layout.setup_area_size) as i32
+        );
+
+        // Spill slots are above clobber area
+        let expected_spill_base =
+            layout.outgoing_args_size + layout.setup_area_size + layout.clobber_size;
+        assert_eq!(
+            layout.spill_slots_base_offset().as_i32(),
+            expected_spill_base as i32
+        );
     }
 
     #[test]
@@ -416,5 +538,144 @@ mod tests {
         assert_eq!(layout.return_value_offset(8), Some(ByteOffset(0)));
         assert_eq!(layout.return_value_offset(9), Some(ByteOffset(4)));
         assert_eq!(layout.return_value_offset(10), Some(ByteOffset(8)));
+    }
+
+    #[test]
+    fn test_outgoing_args_at_bottom_of_frame() {
+        // Verify outgoing args are at the bottom of the frame (offset 0)
+        let layout = FrameLayout::compute(&[], 0, true, 0, 10);
+
+        // Outgoing args should start at offset 0
+        assert_eq!(layout.outgoing_args_base_offset().as_i32(), 0);
+        assert_eq!(layout.outgoing_arg_offset(8), Some(ByteOffset(0)));
+
+        // Setup area should be above outgoing args
+        assert_eq!(
+            layout.setup_area_base_offset().as_i32(),
+            layout.outgoing_args_size as i32
+        );
+    }
+
+    #[test]
+    fn test_total_size_includes_outgoing_args() {
+        // Verify total_size includes outgoing_args_size
+        let layout = FrameLayout::compute(&[], 0, true, 0, 10);
+
+        // total_size = outgoing_args(16) + setup(8) = 24
+        let expected_total = layout.outgoing_args_size + layout.setup_area_size;
+        assert_eq!(layout.total_size(), expected_total);
+        assert_eq!(layout.total_size(), 24);
+    }
+
+    #[test]
+    fn test_frame_layout_order_with_all_components() {
+        // Test frame layout order: outgoing args -> setup -> clobber -> spills
+        let used = vec![Gpr::S0];
+        let layout = FrameLayout::compute(&used, 2, true, 0, 10);
+
+        // Verify order: outgoing args at bottom (0)
+        assert_eq!(layout.outgoing_args_base_offset().as_i32(), 0);
+
+        // Setup area above outgoing args
+        assert_eq!(
+            layout.setup_area_base_offset().as_i32(),
+            layout.outgoing_args_size as i32
+        );
+
+        // Clobber area above setup
+        assert_eq!(
+            layout.clobber_area_base_offset().as_i32(),
+            (layout.outgoing_args_size + layout.setup_area_size) as i32
+        );
+
+        // Spills above clobber
+        assert_eq!(
+            layout.spill_slots_base_offset().as_i32(),
+            (layout.outgoing_args_size + layout.setup_area_size + layout.clobber_size) as i32
+        );
+
+        // Total size should include all components
+        let expected_total = layout.outgoing_args_size
+            + layout.setup_area_size
+            + layout.clobber_size
+            + layout.fixed_frame_storage_size;
+        assert_eq!(layout.total_size(), expected_total);
+    }
+
+    #[test]
+    fn test_callee_saved_offset_with_outgoing_args() {
+        // Verify callee-saved offsets account for outgoing args
+        let used = vec![Gpr::S0];
+        let layout = FrameLayout::compute(&used, 0, true, 0, 10);
+
+        // S0 should be at offset -(outgoing_args + setup_area) = -(16 + 8) = -24
+        let offset_s0 = layout.callee_saved_offset(Gpr::S0).unwrap();
+        assert_eq!(offset_s0.as_i32(), -24);
+    }
+
+    #[test]
+    fn test_spill_slot_offset_with_outgoing_args() {
+        // Verify spill slot offsets account for outgoing args
+        let layout = FrameLayout::compute(&[], 2, true, 0, 10);
+
+        // First spill slot should be at -(outgoing_args + setup_area) = -(16 + 8) = -24
+        let offset_slot0 = layout.spill_slot_offset(0);
+        assert_eq!(offset_slot0.as_i32(), -24);
+
+        // Second spill slot should be 4 bytes after first
+        let offset_slot1 = layout.spill_slot_offset(1);
+        assert_eq!(offset_slot1.as_i32(), -28);
+    }
+
+    #[test]
+    fn test_incoming_outgoing_offset_match_with_frame() {
+        // Verify incoming and outgoing offsets match even with complex frame
+        let used = vec![Gpr::S0];
+        let layout = FrameLayout::compute(&used, 2, true, 10, 10);
+
+        // Both should use same offsets regardless of frame complexity
+        for i in 8..=10 {
+            let incoming = layout.incoming_arg_offset(i);
+            let outgoing = layout.outgoing_arg_offset(i);
+            assert_eq!(
+                incoming, outgoing,
+                "Incoming and outgoing offsets should match for arg {} even with complex frame",
+                i
+            );
+            // Both should be simple (idx-8)*4 offsets
+            assert_eq!(incoming, Some(ByteOffset((i - 8) as i32 * 4)));
+        }
+    }
+
+    #[test]
+    fn test_ra_offset_with_outgoing_args() {
+        // Verify RA offset accounts for outgoing args
+        // RA is saved at setup_area_size - 4, but setup_area_base includes outgoing_args
+        let layout = FrameLayout::compute(&[], 0, true, 0, 10);
+
+        // Setup area base is at outgoing_args_size (16)
+        // RA is saved at setup_area_base + (setup_area_size - 4) = 16 + (8 - 4) = 20
+        let setup_base = layout.setup_area_base_offset().as_i32();
+        let ra_offset = setup_base + layout.setup_area_size as i32 - 4;
+        assert_eq!(ra_offset, 20);
+    }
+
+    #[test]
+    fn test_no_outgoing_args_but_has_frame() {
+        // Test frame with no outgoing args but has other components
+        let used = vec![Gpr::S0];
+        let layout = FrameLayout::compute(&used, 1, true, 0, 0);
+
+        // Outgoing args should still be at offset 0 (even if size is 0)
+        assert_eq!(layout.outgoing_args_base_offset().as_i32(), 0);
+        assert_eq!(layout.outgoing_args_size, 0);
+
+        // Setup area should still be above (at offset 0 when no outgoing args)
+        assert_eq!(layout.setup_area_base_offset().as_i32(), 0);
+
+        // Total size should not include outgoing args when size is 0
+        let expected_total =
+            layout.setup_area_size + layout.clobber_size + layout.fixed_frame_storage_size;
+        assert_eq!(layout.total_size(), expected_total);
     }
 }
