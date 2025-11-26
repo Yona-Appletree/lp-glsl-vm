@@ -113,12 +113,17 @@ dependencies = [
 [[package]]
 name = "r5-ir"
 version = "0.1.0"
+dependencies = [
+ "nom",
+]
 
 [[package]]
 name = "r5-target-riscv32"
 version = "0.1.0"
 dependencies = [
+ "r5-builder",
  "r5-ir",
+ "r5-test-util",
  "riscv32-encoder",
 ]
 

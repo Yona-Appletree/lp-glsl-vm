@@ -17,6 +17,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/riscv-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/riscv32-codegen/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/riscv32-encoder/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/r5-target-riscv32/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

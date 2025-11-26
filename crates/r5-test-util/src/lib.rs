@@ -6,9 +6,9 @@
 //! # Example
 //!
 //! ```rust
-//! use r5_test_util::R5FnTest;
 //! use r5_builder::FunctionBuilder;
 //! use r5_ir::{Signature, Type};
+//! use r5_test_util::R5FnTest;
 //!
 //! #[test]
 //! fn test_add() {
@@ -39,3 +39,4 @@ mod r5_fn_test;
 mod vm_runner;
 
 pub use r5_fn_test::R5FnTest;
+pub use vm_runner::VmRunner;

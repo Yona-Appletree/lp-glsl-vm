@@ -69,7 +69,9 @@ fn fixup_relocations(
             .ok_or_else(|| alloc::string::String::from("Relocation offset overflow"))?;
         let offset = (*target_addr as i32)
             .checked_sub(jal_pc as i32)
-            .ok_or_else(|| alloc::string::String::from("Relocation offset calculation underflow"))?;
+            .ok_or_else(|| {
+                alloc::string::String::from("Relocation offset calculation underflow")
+            })?;
 
         // Update the jal instruction
         let jal_inst = riscv32_encoder::jal(riscv32_encoder::Gpr::RA, offset);
@@ -124,7 +126,12 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
     // Compile remaining functions
     for (name, func) in &module.functions {
         // Skip entry function (already compiled)
-        if module.entry_function.as_ref().map(|e| e == name).unwrap_or(false) {
+        if module
+            .entry_function
+            .as_ref()
+            .map(|e| e == name)
+            .unwrap_or(false)
+        {
             continue;
         }
         lowerer.clear_relocations();
@@ -158,7 +165,10 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
                 current_offset,
             )
             .unwrap_or_else(|e| {
-                panic!("Failed to fix up relocations for function '{}': {}", name, e);
+                panic!(
+                    "Failed to fix up relocations for function '{}': {}",
+                    name, e
+                );
             });
 
             result.extend_from_slice(&code_with_fixups);
@@ -178,9 +188,11 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloc::{collections::BTreeMap, string::String, vec};
+
     use r5_ir::{Block, Function, Module, Signature, Type, Value};
+
+    use super::*;
 
     #[test]
     fn test_align_to_4_bytes() {
@@ -216,8 +228,7 @@ mod tests {
 
         // Fix up relocations
         let current_offset = 0;
-        fixup_relocations(&mut code, &relocations, &function_addresses, current_offset)
-            .unwrap();
+        fixup_relocations(&mut code, &relocations, &function_addresses, current_offset).unwrap();
 
         // Verify the jal instruction was updated
         let fixed_jal_bytes = &code[jal_offset..jal_offset + 4];

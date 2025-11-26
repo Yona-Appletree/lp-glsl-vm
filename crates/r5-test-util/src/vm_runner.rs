@@ -3,13 +3,15 @@
 extern crate alloc;
 
 use alloc::{string::String, vec::Vec};
-
 use core::num::NonZeroI32;
-use embive::interpreter::{
-    memory::{SliceMemory, RAM_OFFSET},
-    Error, Interpreter, State, SYSCALL_ARGS,
+
+use embive::{
+    interpreter::{
+        memory::{SliceMemory, RAM_OFFSET},
+        Error, Interpreter, State, SYSCALL_ARGS,
+    },
+    transpiler::transpile_elf,
 };
-use embive::transpiler::transpile_elf;
 use r5_ir::Function;
 
 /// Result of running a test function.
@@ -40,26 +42,19 @@ pub enum Expectation {
 
 impl Expectation {
     /// Check if this expectation is met.
-    pub fn check(
-        &self,
-        result: &TestResult,
-        func: &Function,
-        args: &[i32],
-    ) -> Result<(), String> {
+    pub fn check(&self, result: &TestResult, func: &Function, args: &[i32]) -> Result<(), String> {
         match self {
-            Expectation::ReturnValue(expected) => {
-                match result.return_value {
-                    Some(actual) if actual == *expected => Ok(()),
-                    Some(actual) => Err(format!(
-                        "Expected return value {}, got {}",
-                        expected, actual
-                    )),
-                    None => Err(format!(
-                        "Expected return value {}, but function returned no value",
-                        expected
-                    )),
-                }
-            }
+            Expectation::ReturnValue(expected) => match result.return_value {
+                Some(actual) if actual == *expected => Ok(()),
+                Some(actual) => Err(format!(
+                    "Expected return value {}, got {}",
+                    expected, actual
+                )),
+                None => Err(format!(
+                    "Expected return value {}, but function returned no value",
+                    expected
+                )),
+            },
             Expectation::ReturnValues(expected) => {
                 // Note: Multiple return values are not yet supported.
                 // The calling convention currently only supports a single return value in a0.
@@ -74,31 +69,29 @@ impl Expectation {
                     ))
                 }
             }
-            Expectation::Panic { message } => {
-                match &result.panic_info {
-                    Some(panic_msg) => {
-                        if let Some(expected_msg) = message {
-                            if panic_msg.contains(expected_msg) {
-                                Ok(())
-                            } else {
-                                Err(format!(
-                                    "Expected panic with message containing '{}', got '{}'",
-                                    expected_msg, panic_msg
-                                ))
-                            }
-                        } else {
+            Expectation::Panic { message } => match &result.panic_info {
+                Some(panic_msg) => {
+                    if let Some(expected_msg) = message {
+                        if panic_msg.contains(expected_msg) {
                             Ok(())
+                        } else {
+                            Err(format!(
+                                "Expected panic with message containing '{}', got '{}'",
+                                expected_msg, panic_msg
+                            ))
                         }
+                    } else {
+                        Ok(())
                     }
-                    None => Err(format!(
-                        "Expected panic{}, but no panic occurred",
-                        message
-                            .as_ref()
-                            .map(|m| format!(" with message containing '{}'", m))
-                            .unwrap_or_default()
-                    )),
                 }
-            }
+                None => Err(format!(
+                    "Expected panic{}, but no panic occurred",
+                    message
+                        .as_ref()
+                        .map(|m| format!(" with message containing '{}'", m))
+                        .unwrap_or_default()
+                )),
+            },
             Expectation::NoPanic => {
                 if result.panic_info.is_some() {
                     Err(format!(
@@ -124,7 +117,8 @@ impl Expectation {
                     Ok(())
                 } else {
                     Err(format!(
-                        "Memory mismatch at address 0x{:08x}\n  Expected: {:02x?}\n  Actual:   {:02x?}",
+                        "Memory mismatch at address 0x{:08x}\n  Expected: {:02x?}\n  Actual:   \
+                         {:02x?}",
                         address, value, actual
                     ))
                 }
@@ -173,9 +167,7 @@ impl VmRunner {
     ///
     /// Test result with return value, panic info, and memory state.
     pub fn run(&mut self, elf_data: &[u8], _args: &[i32]) -> Result<TestResult, String> {
-        use std::sync::mpsc;
-        use std::thread;
-        use std::time::Duration;
+        use std::{sync::mpsc, thread, time::Duration};
 
         // Transpile ELF to embive bytecode
         const MAX_BINARY_SIZE: usize = 4 * 1024 * 1024;

@@ -5,7 +5,7 @@ extern crate alloc;
 use alloc::{string::String, vec::Vec};
 
 use r5_builder::FunctionBuilder;
-use r5_ir::{Function, Module, Signature, Type};
+use r5_ir::{parse_function, parse_module, Function, Module, Signature, Type};
 use r5_target_riscv32::{compile_module, debug_elf, generate_elf};
 use riscv32_encoder::disassemble_code;
 
@@ -13,7 +13,9 @@ use crate::vm_runner::{Expectation, VmRunner};
 
 /// Builder for testing R5 IR functions.
 ///
-/// # Example
+/// # Examples
+///
+/// ## Using a Function object
 ///
 /// ```rust
 /// use r5_test_util::R5FnTest;
@@ -21,6 +23,48 @@ use crate::vm_runner::{Expectation, VmRunner};
 /// let func = build_my_function();
 /// R5FnTest::new(func)
 ///     .with_args(&[5, 10])
+///     .expect_return(15)
+///     .run();
+/// ```
+///
+/// ## Using IR module code
+///
+/// ```rust
+/// use r5_test_util::R5FnTest;
+///
+/// let ir_module = r#"
+/// module {
+///     entry: %main
+///
+///     function %main(i32) -> i32 {
+///     block0(v0: i32):
+///         v1 = iconst 10
+///         v2 = iadd v0, v1
+///         return v2
+///     }
+/// }"#;
+///
+/// R5FnTest::from_ir_module(ir_module)
+///     .with_args(&[5])
+///     .expect_return(15)
+///     .run();
+/// ```
+///
+/// ## Using IR function code
+///
+/// ```rust
+/// use r5_test_util::R5FnTest;
+///
+/// let ir_fn = r#"
+/// function %main(i32) -> i32 {
+/// block0(v0: i32):
+///     v1 = iconst 10
+///     v2 = iadd v0, v1
+///     return v2
+/// }"#;
+///
+/// R5FnTest::from_ir_fn(ir_fn)
+///     .with_args(&[5])
 ///     .expect_return(15)
 ///     .run();
 /// ```
@@ -35,6 +79,91 @@ pub struct R5FnTest {
 impl R5FnTest {
     /// Create a new test for the given function.
     pub fn new(func: Function) -> Self {
+        Self::with_function(func)
+    }
+
+    /// Create a new test from IR module code.
+    ///
+    /// Parses a complete module and uses the entry function as the test function.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the IR code cannot be parsed or if the module does not have
+    /// an entry function specified.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use r5_test_util::R5FnTest;
+    ///
+    /// let ir_module = r#"
+    /// module {
+    ///     entry: %main
+    ///
+    ///     function %main(i32) -> i32 {
+    ///     block0(v0: i32):
+    ///         v1 = iconst 10
+    ///         v2 = iadd v0, v1
+    ///         return v2
+    ///     }
+    /// }"#;
+    ///
+    /// R5FnTest::from_ir_module(ir_module)
+    ///     .with_args(&[5])
+    ///     .expect_return(15)
+    ///     .run();
+    /// ```
+    pub fn from_ir_module(ir_code: &str) -> Self {
+        let module = parse_module(ir_code).unwrap_or_else(|e| {
+            panic!("Failed to parse IR module: {:?}", e);
+        });
+
+        let entry_func = module.entry_function().unwrap_or_else(|| {
+            panic!(
+                "Module does not have an entry function specified. Use 'entry: %function_name' in \
+                 the module."
+            );
+        });
+
+        Self::with_function(entry_func.clone())
+    }
+
+    /// Create a new test from IR function code.
+    ///
+    /// Parses a single function without requiring a module wrapper.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the IR code cannot be parsed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use r5_test_util::R5FnTest;
+    ///
+    /// let ir_fn = r#"
+    /// function %main(i32) -> i32 {
+    /// block0(v0: i32):
+    ///     v1 = iconst 10
+    ///     v2 = iadd v0, v1
+    ///     return v2
+    /// }"#;
+    ///
+    /// R5FnTest::from_ir_fn(ir_fn)
+    ///     .with_args(&[5])
+    ///     .expect_return(15)
+    ///     .run();
+    /// ```
+    pub fn from_ir_fn(ir_code: &str) -> Self {
+        let func = parse_function(ir_code).unwrap_or_else(|e| {
+            panic!("Failed to parse IR function: {:?}", e);
+        });
+
+        Self::with_function(func)
+    }
+
+    /// Internal helper to create a test with a function.
+    fn with_function(func: Function) -> Self {
         Self {
             func,
             args: Vec::new(),
@@ -229,7 +358,7 @@ impl R5FnTest {
     /// 2. Calls the test function using Call instruction
     /// 3. Returns the result (which will be used by syscall)
     fn generate_bootstrap_function(
-        test_func: &Function,
+        _test_func: &Function,
         args: &[i32],
         test_func_name: &str,
     ) -> Function {
