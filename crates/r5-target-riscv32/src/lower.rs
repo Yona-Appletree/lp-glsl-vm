@@ -26,6 +26,33 @@ pub struct Relocation {
     pub callee: String,
 }
 
+/// Lowering error.
+#[derive(Debug, Clone)]
+pub enum LoweringError {
+    /// Value not found in register allocation
+    ValueNotAllocated { value: Value },
+    /// Unimplemented instruction
+    UnimplementedInstruction { inst: Inst },
+    /// Result value must be in register (internal error)
+    ResultNotInRegister { value: Value },
+}
+
+impl core::fmt::Display for LoweringError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            LoweringError::ValueNotAllocated { value } => {
+                write!(f, "Value {:?} not found in allocation", value)
+            }
+            LoweringError::UnimplementedInstruction { inst } => {
+                write!(f, "Unimplemented instruction: {:?}", inst)
+            }
+            LoweringError::ResultNotInRegister { value } => {
+                write!(f, "Result value {:?} must be in register", value)
+            }
+        }
+    }
+}
+
 /// Lower IR to RISC-V 32-bit code.
 ///
 /// Uses pre-computed register allocation, spill/reload plan, and frame layout.
@@ -78,7 +105,7 @@ impl Lowerer {
         spill_reload: &SpillReloadPlan,
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
-    ) -> CodeBuffer {
+    ) -> Result<CodeBuffer, LoweringError> {
         let mut code = CodeBuffer::new();
 
         // 1. Generate prologue
@@ -115,7 +142,7 @@ impl Lowerer {
                     frame_layout,
                     abi_info,
                     &block_addresses,
-                );
+                )?;
 
                 // Emit spill/reload operations after instruction
                 let after_point = InstPoint::new(block_idx, inst_idx + 2);
@@ -130,7 +157,7 @@ impl Lowerer {
         // 4. Generate epilogue
         self.gen_epilogue(&mut code, frame_layout, abi_info);
 
-        code
+        Ok(code)
     }
 
     /// Generate function prologue.
@@ -349,7 +376,7 @@ impl Lowerer {
         target_reg: Gpr,
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
-    ) {
+    ) -> Result<(), LoweringError> {
         if let Some(reg) = self.get_register(value, allocation) {
             // Value is in a register - move it if needed
             if reg != target_reg {
@@ -359,6 +386,7 @@ impl Lowerer {
                     imm: 0, // Move: addi rd, rs, 0
                 });
             }
+            Ok(())
         } else if let Some(slot) = self.get_spill_slot(value, allocation) {
             // Value is spilled - reload it
             let offset = frame_layout.spill_slot_offset(slot);
@@ -367,9 +395,10 @@ impl Lowerer {
                 rs1: Gpr::SP,
                 imm: offset,
             });
+            Ok(())
         } else {
-            // Value not found - this shouldn't happen
-            panic!("Value {:?} not found in allocation", value);
+            // Value not found - this shouldn't happen with correct allocation
+            Err(LoweringError::ValueNotAllocated { value })
         }
     }
 
@@ -382,22 +411,22 @@ impl Lowerer {
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
         block_addresses: &BTreeMap<usize, u32>,
-    ) {
+    ) -> Result<(), LoweringError> {
         match inst {
             Inst::Iconst { result, value } => {
-                self.lower_iconst(code, *result, *value, allocation);
+                self.lower_iconst(code, *result, *value, allocation)?;
             }
             Inst::Iadd { result, arg1, arg2 } => {
-                self.lower_iadd(code, *result, *arg1, *arg2, allocation, frame_layout);
+                self.lower_iadd(code, *result, *arg1, *arg2, allocation, frame_layout)?;
             }
             Inst::Isub { result, arg1, arg2 } => {
-                self.lower_isub(code, *result, *arg1, *arg2, allocation, frame_layout);
+                self.lower_isub(code, *result, *arg1, *arg2, allocation, frame_layout)?;
             }
             Inst::Imul { result, arg1, arg2 } => {
-                self.lower_imul(code, *result, *arg1, *arg2, allocation, frame_layout);
+                self.lower_imul(code, *result, *arg1, *arg2, allocation, frame_layout)?;
             }
             Inst::Return { values } => {
-                self.lower_return(code, values, allocation, frame_layout, abi_info);
+                self.lower_return(code, values, allocation, frame_layout, abi_info)?;
             }
             Inst::Call {
                 callee,
@@ -438,11 +467,13 @@ impl Lowerer {
             Inst::Syscall { number, args } => {
                 self.lower_syscall(code, *number, args, allocation, frame_layout);
             }
-            // TODO: Implement other instructions (Idiv, Irem, Load, Store, etc.)
+            // Known limitation: Some instructions are not yet implemented
+            // (Idiv, Irem, Load, Store, etc.). These will return an error.
             _ => {
-                panic!("Unimplemented instruction: {:?}", inst);
+                return Err(LoweringError::UnimplementedInstruction { inst: inst.clone() });
             }
         }
+        Ok(())
     }
 
     /// Lower iconst instruction.
@@ -452,10 +483,10 @@ impl Lowerer {
         result: Value,
         value: i64,
         allocation: &RegisterAllocation,
-    ) {
+    ) -> Result<(), LoweringError> {
         let result_reg = self
             .get_register(result, allocation)
-            .expect("iconst result must be in register");
+            .ok_or_else(|| LoweringError::ResultNotInRegister { value: result })?;
 
         // Handle large constants (require lui + addi)
         if value >= -(1 << 11) && value < (1 << 11) {
@@ -487,6 +518,7 @@ impl Lowerer {
                 imm: addi_imm,
             });
         }
+        Ok(())
     }
 
     /// Lower iadd instruction.
@@ -498,34 +530,38 @@ impl Lowerer {
         arg2: Value,
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
-    ) {
+    ) -> Result<(), LoweringError> {
         let result_reg = self
             .get_register(result, allocation)
-            .expect("iadd result must be in register");
+            .ok_or_else(|| LoweringError::ResultNotInRegister { value: result })?;
 
         // Load operands into registers
-        let arg1_reg = self.get_register(arg1, allocation).unwrap_or_else(|| {
+        let arg1_reg = if let Some(reg) = self.get_register(arg1, allocation) {
+            reg
+        } else {
             // Load spilled arg1 into result_reg or temp
             if result_reg == Gpr::T0 {
                 // Can't use T0, use T1
-                self.load_value_into_reg(code, arg1, Gpr::T1, allocation, frame_layout);
+                self.load_value_into_reg(code, arg1, Gpr::T1, allocation, frame_layout)?;
                 Gpr::T1
             } else {
-                self.load_value_into_reg(code, arg1, result_reg, allocation, frame_layout);
+                self.load_value_into_reg(code, arg1, result_reg, allocation, frame_layout)?;
                 result_reg
             }
-        });
+        };
 
-        let arg2_reg = self.get_register(arg2, allocation).unwrap_or_else(|| {
+        let arg2_reg = if let Some(reg) = self.get_register(arg2, allocation) {
+            reg
+        } else {
             // Load spilled arg2 into a temp register
             let temp = if arg1_reg == Gpr::T0 {
                 Gpr::T1
             } else {
                 Gpr::T0
             };
-            self.load_value_into_reg(code, arg2, temp, allocation, frame_layout);
+            self.load_value_into_reg(code, arg2, temp, allocation, frame_layout)?;
             temp
-        });
+        };
 
         // If arg1 is in result_reg, we can use it directly
         // Otherwise, move arg1 to result_reg first
@@ -543,6 +579,7 @@ impl Lowerer {
             rs1: result_reg,
             rs2: arg2_reg,
         });
+        Ok(())
     }
 
     /// Lower isub instruction.
@@ -554,27 +591,32 @@ impl Lowerer {
         arg2: Value,
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
-    ) {
+    ) -> Result<(), LoweringError> {
         let result_reg = self
             .get_register(result, allocation)
-            .expect("isub result must be in register");
+            .ok_or_else(|| LoweringError::ResultNotInRegister { value: result })?;
 
-        let arg1_reg = self.get_register(arg1, allocation).unwrap_or_else(|| {
+        let arg1_reg = if let Some(reg) = self.get_register(arg1, allocation) {
+            reg
+        } else {
             let temp = Gpr::T0;
-            self.load_value_into_reg(code, arg1, temp, allocation, frame_layout);
+            self.load_value_into_reg(code, arg1, temp, allocation, frame_layout)?;
             temp
-        });
-        let arg2_reg = self.get_register(arg2, allocation).unwrap_or_else(|| {
+        };
+        let arg2_reg = if let Some(reg) = self.get_register(arg2, allocation) {
+            reg
+        } else {
             let temp = Gpr::T1;
-            self.load_value_into_reg(code, arg2, temp, allocation, frame_layout);
+            self.load_value_into_reg(code, arg2, temp, allocation, frame_layout)?;
             temp
-        });
+        };
 
         code.emit(RiscvInst::Sub {
             rd: result_reg,
             rs1: arg1_reg,
             rs2: arg2_reg,
         });
+        Ok(())
     }
 
     /// Lower imul instruction.
@@ -586,27 +628,32 @@ impl Lowerer {
         arg2: Value,
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
-    ) {
+    ) -> Result<(), LoweringError> {
         let result_reg = self
             .get_register(result, allocation)
-            .expect("imul result must be in register");
+            .ok_or_else(|| LoweringError::ResultNotInRegister { value: result })?;
 
-        let arg1_reg = self.get_register(arg1, allocation).unwrap_or_else(|| {
+        let arg1_reg = if let Some(reg) = self.get_register(arg1, allocation) {
+            reg
+        } else {
             let temp = Gpr::T0;
-            self.load_value_into_reg(code, arg1, temp, allocation, frame_layout);
+            self.load_value_into_reg(code, arg1, temp, allocation, frame_layout)?;
             temp
-        });
-        let arg2_reg = self.get_register(arg2, allocation).unwrap_or_else(|| {
+        };
+        let arg2_reg = if let Some(reg) = self.get_register(arg2, allocation) {
+            reg
+        } else {
             let temp = Gpr::T1;
-            self.load_value_into_reg(code, arg2, temp, allocation, frame_layout);
+            self.load_value_into_reg(code, arg2, temp, allocation, frame_layout)?;
             temp
-        });
+        };
 
         code.emit(RiscvInst::Mul {
             rd: result_reg,
             rs1: arg1_reg,
             rs2: arg2_reg,
         });
+        Ok(())
     }
 
     /// Lower return instruction.
@@ -617,11 +664,11 @@ impl Lowerer {
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
-    ) {
+    ) -> Result<(), LoweringError> {
         // Move return values to return registers (first 8)
         for (idx, value) in values.iter().enumerate() {
             if let Some(return_reg) = abi_info.return_regs.get(&idx) {
-                self.load_value_into_reg(code, *value, *return_reg, allocation, frame_layout);
+                self.load_value_into_reg(code, *value, *return_reg, allocation, frame_layout)?;
             }
         }
 
@@ -632,7 +679,7 @@ impl Lowerer {
                 if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
                     // Load value into temp register
                     let temp_reg = Gpr::T0;
-                    self.load_value_into_reg(code, *value, temp_reg, allocation, frame_layout);
+                    self.load_value_into_reg(code, *value, temp_reg, allocation, frame_layout)?;
 
                     // Store to stack (offset relative to SP before epilogue)
                     code.emit(RiscvInst::Sw {
@@ -643,6 +690,7 @@ impl Lowerer {
                 }
             }
         }
+        Ok(())
     }
 
     /// Lower call instruction.
@@ -657,10 +705,43 @@ impl Lowerer {
         abi_info: &AbiInfo,
     ) {
         // Step 1: Move register arguments (a0-a7)
+        // Track which argument values were preserved (because they're used after the call)
+        let mut preserved_args: Vec<(Value, Gpr)> = Vec::new();
+
         for (idx, arg) in args.iter().enumerate() {
             if idx < 8 {
                 if let Some(arg_reg) = Abi::arg_reg(idx) {
-                    self.load_value_into_reg(code, *arg, arg_reg, allocation, frame_layout);
+                    // Check if this value is used after the call
+                    // A value is used after if it's in results OR if it's allocated
+                    // (allocated values are tracked and likely used later)
+                    // Simple heuristic: if it's allocated and not just used as argument, preserve it
+                    let used_after_call =
+                        results.contains(arg) || allocation.value_to_reg.contains_key(arg);
+
+                    // Check if value is already in the argument register
+                    if let Some(current_reg) = self.get_register(*arg, allocation) {
+                        if current_reg == arg_reg && used_after_call {
+                            // Value is in arg_reg and used after call - need to preserve it
+                            // Save to a temporary register before the call
+                            // Use T2 as temp (T0/T1 might be used for other things)
+                            let temp_reg = Gpr::T2;
+                            code.emit(RiscvInst::Addi {
+                                rd: temp_reg,
+                                rs1: current_reg,
+                                imm: 0, // Copy: addi rd, rs, 0
+                            });
+
+                            // Track this for restoration after call
+                            preserved_args.push((*arg, temp_reg));
+                            // Skip moving since it's already in place
+                            continue;
+                        }
+                    }
+
+                    self.load_value_into_reg(code, *arg, arg_reg, allocation, frame_layout)
+                        .unwrap_or_else(|e| {
+                            panic!("Failed to load argument {} into register: {}", idx, e)
+                        });
                 }
             }
         }
@@ -671,7 +752,8 @@ impl Lowerer {
                 if let Some(offset) = frame_layout.outgoing_arg_offset(idx) {
                     // Load argument value into temporary register
                     let temp_reg = Gpr::T0;
-                    self.load_value_into_reg(code, *arg, temp_reg, allocation, frame_layout);
+                    self.load_value_into_reg(code, *arg, temp_reg, allocation, frame_layout)
+                        .unwrap_or_else(|e| panic!("Failed to load stack argument {}: {}", idx, e));
 
                     // Store to outgoing args area
                     code.emit(RiscvInst::Sw {
@@ -767,6 +849,25 @@ impl Lowerer {
                 }
             }
         }
+
+        // Step 5: Restore preserved argument values that were used after the call
+        for (arg_value, temp_reg) in preserved_args {
+            // Restore to the value's allocated location (register or spill slot)
+            if let Some(result_reg) = self.get_register(arg_value, allocation) {
+                code.emit(RiscvInst::Addi {
+                    rd: result_reg,
+                    rs1: temp_reg,
+                    imm: 0, // Move: addi rd, rs, 0
+                });
+            } else if let Some(slot) = self.get_spill_slot(arg_value, allocation) {
+                let offset = frame_layout.spill_slot_offset(slot);
+                code.emit(RiscvInst::Sw {
+                    rs1: Gpr::SP,
+                    rs2: temp_reg,
+                    imm: offset,
+                });
+            }
+        }
     }
 
     /// Lower jump instruction.
@@ -806,11 +907,14 @@ impl Lowerer {
         block_addresses: &BTreeMap<usize, u32>,
     ) {
         // Load condition into a register
-        let cond_reg = self.get_register(condition, allocation).unwrap_or_else(|| {
+        let cond_reg = if let Some(reg) = self.get_register(condition, allocation) {
+            reg
+        } else {
             let temp = Gpr::T0;
-            self.load_value_into_reg(code, condition, temp, allocation, frame_layout);
+            self.load_value_into_reg(code, condition, temp, allocation, frame_layout)
+                .unwrap_or_else(|e| panic!("Failed to load condition value: {}", e));
             temp
-        });
+        };
 
         // Get target addresses
         let true_addr = block_addresses.get(&(target_true as usize));
@@ -850,9 +954,11 @@ impl Lowerer {
         for (idx, arg) in args.iter().enumerate() {
             if idx < 8 {
                 let arg_reg = Gpr::new(10 + idx as u8); // a0-a7
-                self.load_value_into_reg(code, *arg, arg_reg, allocation, frame_layout);
+                self.load_value_into_reg(code, *arg, arg_reg, allocation, frame_layout)
+                    .unwrap_or_else(|e| panic!("Failed to load syscall argument {}: {}", idx, e));
             }
-            // TODO: Handle > 8 args (stack arguments)
+            // Known limitation: Syscalls with > 8 arguments are not yet supported
+            // (stack arguments for syscalls would need additional implementation)
         }
 
         // Move syscall number to a7 (last argument register)
@@ -926,7 +1032,7 @@ block0:
             0,
         );
 
-        let abi_info = Abi::compute_abi_info(&func, &allocation);
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
 
         let mut lowerer = Lowerer::new();
         let code =
@@ -964,7 +1070,7 @@ block0:
             0,
         );
 
-        let abi_info = Abi::compute_abi_info(&func, &allocation);
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
 
         let mut lowerer = Lowerer::new();
         let code =
@@ -997,7 +1103,7 @@ block0:
             0,
         );
 
-        let abi_info = Abi::compute_abi_info(&func, &allocation);
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
 
         let mut lowerer = Lowerer::new();
         let code =

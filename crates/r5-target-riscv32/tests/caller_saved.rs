@@ -27,10 +27,10 @@ fn lower_function(func: &r5_ir::Function) -> CodeBuffer {
         allocation.spill_slot_count,
         has_calls,
         func.signature.params.len(),
-        8, // TODO: Compute actual outgoing args
+        8, // Default max outgoing args for test helper
     );
 
-    let abi_info = Abi::compute_abi_info(func, &allocation);
+    let abi_info = Abi::compute_abi_info(func, &allocation, 8);
 
     let mut lowerer = Lowerer::new();
     lowerer.lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
@@ -80,7 +80,7 @@ fn test_module(module: &Module, entry_func_name: &str, args: &[i32], expected: i
     test_module.set_entry_function("bootstrap".to_string());
 
     // Compile and run
-    let code = compile_module(&test_module);
+    let code = compile_module(&test_module).expect("Compilation failed");
     let elf = generate_elf(&code);
     let mut runner = VmRunner::new(4 * 1024 * 1024);
 
@@ -163,11 +163,8 @@ module {
     let module = parse_module(ir_module).expect("Failed to parse IR module");
 
     // Test: main(5) should return (5*2) + (5*2 + 100) = 10 + 110 = 120
-    // This will fail if temp is clobbered by the call
-    // Note: v2 is used as argument, so it's in a0, then helper returns in a0
-    // If v2 isn't spilled, it gets overwritten. Current result: 220 suggests v2 = 110 after call
-    // TODO: Fix call-site spilling to preserve v2
-    test_module(&module, "main", &[5], 220); // Temporarily accept current behavior
+    // v2 = 5*2 = 10, helper(10) returns 110, v4 = v2 + v3 = 10 + 110 = 120
+    test_module(&module, "main", &[5], 120);
 }
 
 #[test]
@@ -212,8 +209,8 @@ module {
     let module = parse_module(ir_module).expect("Failed to parse IR module");
 
     // Test: outer(5) = middle(15) + 15 = (inner(30) + 30) + 15 = (31 + 30) + 15 = 76
-    // TODO: Fix call-site spilling to preserve values used as arguments
-    test_module(&module, "outer", &[5], 93); // Temporarily accept current behavior
+    // v2 = 5+10 = 15, middle(15) = inner(30) + 30 = 31 + 30 = 61, v4 = 61 + 15 = 76
+    test_module(&module, "outer", &[5], 76);
 }
 
 #[test]

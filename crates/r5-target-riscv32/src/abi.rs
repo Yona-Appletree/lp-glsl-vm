@@ -100,7 +100,11 @@ impl Abi {
     }
 
     /// Compute ABI info for a function.
-    pub fn compute_abi_info(func: &r5_ir::Function, allocation: &RegisterAllocation) -> AbiInfo {
+    pub fn compute_abi_info(
+        func: &r5_ir::Function,
+        allocation: &RegisterAllocation,
+        max_outgoing_args: usize,
+    ) -> AbiInfo {
         // Map parameters to argument registers
         let mut param_regs = alloc::collections::BTreeMap::new();
         let mut param_stack_offsets = alloc::collections::BTreeMap::new();
@@ -138,10 +142,6 @@ impl Abi {
 
         // Get used callee-saved registers from allocation
         let used_callee_saved = allocation.used_callee_saved.clone();
-
-        // Compute max outgoing arguments (for now, assume max 8)
-        // TODO: Analyze actual call sites
-        let max_outgoing_args = 8;
 
         AbiInfo {
             param_regs,
@@ -219,7 +219,7 @@ block0(v0: i32, v1: i32):
         let func = parse_function(ir).expect("Failed to parse IR function");
         let liveness = crate::liveness::compute_liveness(&func);
         let allocation = crate::regalloc::allocate_registers(&func, &liveness);
-        let abi_info = Abi::compute_abi_info(&func, &allocation);
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 8);
 
         // Should have parameter mappings
         assert!(abi_info.param_regs.contains_key(&0));
@@ -239,7 +239,7 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
         let func = parse_function(ir).expect("Failed to parse IR function");
         let liveness = crate::liveness::compute_liveness(&func);
         let allocation = crate::regalloc::allocate_registers(&func, &liveness);
-        let abi_info = Abi::compute_abi_info(&func, &allocation);
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 8);
 
         // First 8 parameters should be in registers
         for i in 0..8 {
@@ -265,7 +265,7 @@ block0:
         let func = parse_function(ir).expect("Failed to parse IR function");
         let liveness = crate::liveness::compute_liveness(&func);
         let allocation = crate::regalloc::allocate_registers(&func, &liveness);
-        let abi_info = Abi::compute_abi_info(&func, &allocation);
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 8);
 
         // Should have return register mappings
         assert!(abi_info.return_regs.contains_key(&0));
@@ -328,7 +328,7 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
         let func = parse_function(ir).expect("Failed to parse IR function");
         let liveness = crate::liveness::compute_liveness(&func);
         let allocation = crate::regalloc::allocate_registers(&func, &liveness);
-        let abi_info = Abi::compute_abi_info(&func, &allocation);
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 8);
 
         // Parameters 0-7 should be in registers (if allocated)
         // Parameters 8-9 should be on stack
@@ -360,7 +360,7 @@ block0:
         let func = parse_function(ir).expect("Failed to parse IR function");
         let liveness = crate::liveness::compute_liveness(&func);
         let allocation = crate::regalloc::allocate_registers(&func, &liveness);
-        let abi_info = Abi::compute_abi_info(&func, &allocation);
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 8);
 
         // Return values 0-7 should be in registers
         assert!(abi_info.return_regs.contains_key(&0));
@@ -386,7 +386,7 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
         let func = parse_function(ir).expect("Failed to parse IR function");
         let liveness = crate::liveness::compute_liveness(&func);
         let allocation = crate::regalloc::allocate_registers(&func, &liveness);
-        let abi_info = Abi::compute_abi_info(&func, &allocation);
+        let abi_info = Abi::compute_abi_info(&func, &allocation, 8);
 
         // First 8 should be in registers (if allocated)
         // Parameters 8-11 should be on stack

@@ -58,10 +58,12 @@ pub fn compile_function(func: &r5_ir::Function) -> alloc::vec::Vec<u8> {
         max_outgoing_args,
     );
 
-    let abi_info = Abi::compute_abi_info(func, &allocation);
+    let abi_info = Abi::compute_abi_info(func, &allocation, max_outgoing_args);
 
     let mut lowerer = Lowerer::new();
-    let code = lowerer.lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info);
+    let code = lowerer
+        .lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
+        .unwrap_or_else(|e| panic!("Failed to lower function: {}", e));
     code.as_bytes().to_vec()
 }
 
@@ -147,7 +149,7 @@ fn fixup_relocations(
 /// The compilation uses a two-pass approach:
 /// 1. First pass: Compile all functions and record their addresses and relocations
 /// 2. Second pass: Concatenate code and fix up relocations with correct offsets
-pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
+pub fn compile_module(module: &r5_ir::Module) -> Result<alloc::vec::Vec<u8>, alloc::string::String> {
     use alloc::{collections::BTreeMap, vec::Vec};
 
     let mut lowerer = Lowerer::new();
@@ -186,10 +188,11 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
                 max_outgoing_args,
             );
 
-            let abi_info = Abi::compute_abi_info(func, &allocation);
+            let abi_info = Abi::compute_abi_info(func, &allocation, max_outgoing_args);
 
-            let code =
-                lowerer.lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info);
+            let code = lowerer
+                .lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
+                .map_err(|e| alloc::format!("Failed to lower function '{}': {}", entry_name, e))?;
             let mut code_bytes = code.as_bytes().to_vec();
 
             // Prepend SP initialization to entry function
@@ -296,10 +299,11 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
             max_outgoing_args,
         );
 
-        let abi_info = Abi::compute_abi_info(func, &allocation);
+        let abi_info = Abi::compute_abi_info(func, &allocation, max_outgoing_args);
 
-        let code =
-            lowerer.lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info);
+        let code = lowerer
+            .lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
+            .map_err(|e| alloc::format!("Failed to lower function '{}': {}", name, e))?;
         let code_bytes = code.as_bytes().to_vec();
         let code_size = code_bytes.len();
         let relocations = lowerer.relocations().to_vec();
@@ -328,12 +332,7 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
                 &function_addresses,
                 current_offset,
             )
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to fix up relocations for function '{}': {}",
-                    name, e
-                );
-            });
+            .map_err(|e| alloc::format!("Failed to fix up relocations for function '{}': {}", name, e))?;
 
             result.extend_from_slice(&code_with_fixups);
         } else {
@@ -347,7 +346,7 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
         current_offset = result.len() as u32;
     }
 
-    result
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -494,7 +493,7 @@ mod tests {
         module.set_entry_function(String::from("caller"));
 
         // Compile the module
-        let code = compile_module(&module);
+        let code = compile_module(&module).expect("Compilation failed");
 
         // Should have compiled code
         assert!(!code.is_empty());
@@ -505,7 +504,7 @@ mod tests {
     #[test]
     fn test_compile_module_empty() {
         let module = Module::new();
-        let code = compile_module(&module);
+        let code = compile_module(&module).expect("Compilation failed");
         assert!(code.is_empty());
     }
 
@@ -525,7 +524,7 @@ mod tests {
         module.add_function(String::from("test"), func);
         module.set_entry_function(String::from("test"));
 
-        let code = compile_module(&module);
+        let code = compile_module(&module).expect("Compilation failed");
         assert!(!code.is_empty());
         assert_eq!(code.len() % 4, 0);
     }
