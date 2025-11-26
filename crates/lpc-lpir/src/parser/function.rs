@@ -109,4 +109,45 @@ mod tests {
         assert_eq!(func.blocks.len(), 1);
         assert_eq!(func.blocks[0].insts.len(), 2);
     }
+
+    #[test]
+    fn test_parse_signature_multiple_returns() {
+        let input = "() -> i32, i32, i32";
+        let result = parse_signature(input);
+        assert!(result.is_ok(), "parse_signature failed: {:?}", result);
+        let (remaining, sig) = result.unwrap();
+        assert_eq!(remaining, "", "Should consume all input");
+        assert_eq!(sig.params.len(), 0);
+        assert_eq!(sig.returns.len(), 3, "Expected 3 return types");
+    }
+
+    #[test]
+    fn test_parse_signature_many_returns() {
+        let input = "(i32, i32) -> i32, i32, i32, i32, i32, i32, i32, i32, i32, i32";
+        let result = parse_signature(input);
+        assert!(result.is_ok(), "parse_signature failed: {:?}", result);
+        let (remaining, sig) = result.unwrap();
+        assert_eq!(remaining, "", "Should consume all input");
+        assert_eq!(sig.params.len(), 2);
+        assert_eq!(sig.returns.len(), 10, "Expected 10 return types");
+    }
+
+    #[test]
+    fn test_parse_function_with_multiple_returns() {
+        let input = r#"function %test() -> i32, i32 {
+block0:
+    v0 = iconst 1
+    v1 = iconst 2
+    return v0 v1
+}"#;
+        let result = parse_function_internal(input);
+        assert!(
+            result.is_ok(),
+            "parse_function_internal failed: {:?}",
+            result
+        );
+        let (remaining, func) = result.unwrap();
+        assert_eq!(remaining, "", "Should consume all input");
+        assert_eq!(func.signature.returns.len(), 2);
+    }
 }

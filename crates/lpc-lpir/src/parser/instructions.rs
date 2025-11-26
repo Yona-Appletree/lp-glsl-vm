@@ -517,6 +517,76 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_call_multiple_returns() {
+        // Test call with multiple return values
+        let input = "call %func(v0, v1) -> v2, v3, v4";
+        let result = parse_call(input);
+        assert!(result.is_ok(), "parse_call failed: {:?}", result);
+        let (remaining, inst) = result.unwrap();
+        assert_eq!(
+            remaining, "",
+            "Should consume all input, got: {:?}",
+            remaining
+        );
+        if let Inst::Call {
+            callee,
+            args,
+            results,
+        } = inst
+        {
+            assert_eq!(callee, "func");
+            assert_eq!(args.len(), 2);
+            assert_eq!(results.len(), 3, "Expected 3 results, got: {:?}", results);
+        } else {
+            panic!("Expected Call");
+        }
+    }
+
+    #[test]
+    fn test_parse_call_multiple_returns_via_instruction() {
+        // Test parsing call with multiple returns via parse_instruction
+        let input = "call %helper(v10) -> v11, v12, v13";
+        let result = parse_instruction(input);
+        assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
+        let (remaining, inst) = result.unwrap();
+        assert_eq!(remaining, "", "Should consume all input");
+        if let Inst::Call { results, .. } = inst {
+            assert_eq!(results.len(), 3, "Expected 3 results, got: {:?}", results);
+        } else {
+            panic!("Expected Call instruction");
+        }
+    }
+
+    #[test]
+    fn test_parse_return_multiple_values() {
+        // Test return with multiple values (more than 2)
+        let input = "return v0 v1 v2 v3";
+        let result = parse_return(input);
+        assert!(result.is_ok());
+        let (_, inst) = result.unwrap();
+        if let Inst::Return { values } = inst {
+            assert_eq!(values.len(), 4, "Expected 4 values, got: {:?}", values);
+        } else {
+            panic!("Expected Return with 4 values");
+        }
+    }
+
+    #[test]
+    fn test_parse_return_multiple_values_via_instruction() {
+        // Test parsing return with multiple values via parse_instruction
+        let input = "return v0 v1 v2 v3 v4";
+        let result = parse_instruction(input);
+        assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
+        let (remaining, inst) = result.unwrap();
+        assert_eq!(remaining, "", "Should consume all input");
+        if let Inst::Return { values } = inst {
+            assert_eq!(values.len(), 5, "Expected 5 values, got: {:?}", values);
+        } else {
+            panic!("Expected Return instruction");
+        }
+    }
+
+    #[test]
     fn test_parse_return_empty() {
         // Test that return without values is valid
         let result = parse_instruction("return");

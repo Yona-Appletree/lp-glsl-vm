@@ -28,17 +28,22 @@ impl super::Lowerer {
                 self.load_value_into_reg(code, *value, *return_reg, allocation, frame_layout)?;
             } else if idx >= 8 {
                 // Store to stack (values at index >= 8)
-                // These are stored at positive offsets from SP (before epilogue)
+                // These must be stored ABOVE the callee's frame so they persist after epilogue
+                // Before epilogue: SP points to bottom of frame
+                // After epilogue: SP is restored, so return values should be at SP + (idx-8)*4
+                // So we store at SP + total_size() + (idx-8)*4 before epilogue
                 if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
                     // Load value into temp register
                     let temp_reg = Gpr::T0;
                     self.load_value_into_reg(code, *value, temp_reg, allocation, frame_layout)?;
 
-                    // Store to stack (offset relative to SP before epilogue)
+                    // Store above the frame: SP + total_size() + stack_offset
+                    // After epilogue restores SP, these will be at SP + stack_offset
+                    let storage_offset = frame_layout.total_size() as i32 + *stack_offset;
                     code.emit(RiscvInst::Sw {
                         rs1: Gpr::Sp,
                         rs2: temp_reg,
-                        imm: *stack_offset, // Positive offset
+                        imm: storage_offset,
                     });
                 }
             }

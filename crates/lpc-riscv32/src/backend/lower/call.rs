@@ -798,4 +798,192 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
         // Sum of 1+2+3+4+5+6+7+8+9+10 = 55
         expect_ir_syscall(ir, 0, &[55]);
     }
+
+    #[test]
+    fn test_large_function_stress_test() {
+        // Stress test: function with 16 args (8 regs + 8 stack) and 16 returns (8 regs + 8 stack)
+        // This exercises:
+        // - Stack argument passing (incoming and outgoing)
+        // - Stack return value handling
+        // - Frame layout with large outgoing args area
+        // - Prologue/epilogue with stack args
+        // - Call lowering with many stack args
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    ; Pass 16 arguments: 1-16
+    v0 = iconst 1
+    v1 = iconst 2
+    v2 = iconst 3
+    v3 = iconst 4
+    v4 = iconst 5
+    v5 = iconst 6
+    v6 = iconst 7
+    v7 = iconst 8
+    v8 = iconst 9
+    v9 = iconst 10
+    v10 = iconst 11
+    v11 = iconst 12
+    v12 = iconst 13
+    v13 = iconst 14
+    v14 = iconst 15
+    v15 = iconst 16
+    call %test(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) -> v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31
+    ; Sum all return values to verify correctness
+    ; First 8 are in registers, last 8 are on stack
+    v32 = iadd v16, v17
+    v33 = iadd v32, v18
+    v34 = iadd v33, v19
+    v35 = iadd v34, v20
+    v36 = iadd v35, v21
+    v37 = iadd v36, v22
+    v38 = iadd v37, v23
+    v39 = iadd v38, v24
+    v40 = iadd v39, v25
+    v41 = iadd v40, v26
+    v42 = iadd v41, v27
+    v43 = iadd v42, v28
+    v44 = iadd v43, v29
+    v45 = iadd v44, v30
+    v46 = iadd v45, v31
+    syscall 0(v46)
+    halt
+}
+
+function %test(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32, v10: i32, v11: i32, v12: i32, v13: i32, v14: i32, v15: i32):
+    ; Return each argument multiplied by 2 to verify they were passed correctly
+    ; This exercises both register args (v0-v7) and stack args (v8-v15)
+    v16 = iconst 2
+    v17 = imul v0, v16
+    v18 = imul v1, v16
+    v19 = imul v2, v16
+    v20 = imul v3, v16
+    v21 = imul v4, v16
+    v22 = imul v5, v16
+    v23 = imul v6, v16
+    v24 = imul v7, v16
+    v25 = imul v8, v16
+    v26 = imul v9, v16
+    v27 = imul v10, v16
+    v28 = imul v11, v16
+    v29 = imul v12, v16
+    v30 = imul v13, v16
+    v31 = imul v14, v16
+    v32 = imul v15, v16
+    return v17 v18 v19 v20 v21 v22 v23 v24 v25 v26 v27 v28 v29 v30 v31 v32
+}
+}"#;
+
+        // Expected: sum of (1*2 + 2*2 + ... + 16*2) = 2 * (1+2+...+16) = 2 * 136 = 272
+        expect_ir_syscall(ir, 0, &[272]);
+    }
+
+    #[test]
+    fn test_nested_calls_with_many_stack_args() {
+        // Test nested calls where each function has many stack args
+        // This exercises frame layout with outgoing args when the caller also has a frame
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 1
+    v1 = iconst 2
+    v2 = iconst 3
+    v3 = iconst 4
+    v4 = iconst 5
+    v5 = iconst 6
+    v6 = iconst 7
+    v7 = iconst 8
+    v8 = iconst 9
+    v9 = iconst 10
+    call %outer(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9) -> v10
+    syscall 0(v10)
+    halt
+}
+
+function %inner(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32):
+    ; Sum all args: v0+v1+...+v9
+    v10 = iadd v0, v1
+    v11 = iadd v10, v2
+    v12 = iadd v11, v3
+    v13 = iadd v12, v4
+    v14 = iadd v13, v5
+    v15 = iadd v14, v6
+    v16 = iadd v15, v7
+    v17 = iadd v16, v8
+    v18 = iadd v17, v9
+    return v18
+}
+
+function %outer(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32):
+    ; Call inner with same args, then add 100 to result
+    call %inner(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9) -> v10
+    v11 = iconst 100
+    v12 = iadd v10, v11
+    return v12
+}
+}"#;
+
+        // Expected: sum(1..10) + 100 = 55 + 100 = 155
+        expect_ir_syscall(ir, 0, &[155]);
+    }
+
+    #[test]
+    fn test_many_args_with_computation() {
+        // Test function with 12 args (4 on stack) that does computation using all args
+        // This verifies stack args are accessible and correct
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    v0 = iconst 1
+    v1 = iconst 2
+    v2 = iconst 3
+    v3 = iconst 4
+    v4 = iconst 5
+    v5 = iconst 6
+    v6 = iconst 7
+    v7 = iconst 8
+    v8 = iconst 9
+    v9 = iconst 10
+    v10 = iconst 11
+    v11 = iconst 12
+    call %compute(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11) -> v12
+    syscall 0(v12)
+    halt
+}
+
+function %compute(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32, v10: i32, v11: i32):
+    ; Compute: (v0*v1) + (v2*v3) + ... + (v10*v11)
+    ; This uses all args including stack args (v8-v11)
+    v12 = imul v0, v1
+    v13 = imul v2, v3
+    v14 = imul v4, v5
+    v15 = imul v6, v7
+    v16 = imul v8, v9
+    v17 = imul v10, v11
+    v18 = iadd v12, v13
+    v19 = iadd v18, v14
+    v20 = iadd v19, v15
+    v21 = iadd v20, v16
+    v22 = iadd v21, v17
+    return v22
+}
+}"#;
+
+        // Expected: (1*2) + (3*4) + (5*6) + (7*8) + (9*10) + (11*12)
+        // = 2 + 12 + 30 + 56 + 90 + 132 = 322
+        expect_ir_syscall(ir, 0, &[322]);
+    }
 }
