@@ -19,6 +19,12 @@ pub struct AbiInfo {
     pub used_callee_saved: Vec<Gpr>,
     /// Maximum outgoing arguments (for frame layout)
     pub max_outgoing_args: usize,
+    /// Parameter -> stack offset mapping (for stack args, index >= 8)
+    /// Offset is relative to SP before prologue (positive offset)
+    pub param_stack_offsets: alloc::collections::BTreeMap<usize, i32>,
+    /// Return value -> stack offset mapping (for stack returns, index >= 8)
+    /// Offset is relative to SP before prologue (positive offset)
+    pub return_stack_offsets: alloc::collections::BTreeMap<usize, i32>,
 }
 
 /// ABI helper functions.
@@ -94,12 +100,10 @@ impl Abi {
     }
 
     /// Compute ABI info for a function.
-    pub fn compute_abi_info(
-        func: &r5_ir::Function,
-        allocation: &RegisterAllocation,
-    ) -> AbiInfo {
+    pub fn compute_abi_info(func: &r5_ir::Function, allocation: &RegisterAllocation) -> AbiInfo {
         // Map parameters to argument registers
         let mut param_regs = alloc::collections::BTreeMap::new();
+        let mut param_stack_offsets = alloc::collections::BTreeMap::new();
         if let Some(entry_block) = func.blocks.first() {
             for (i, param) in entry_block.params.iter().enumerate() {
                 if let Some(reg) = Self::arg_reg(i) {
@@ -107,15 +111,28 @@ impl Abi {
                     if allocation.value_to_reg.contains_key(param) {
                         param_regs.insert(i, reg);
                     }
+                } else {
+                    // Parameter index >= 8, goes on stack
+                    // Stack offset is (index - 8) * 4, relative to SP before prologue
+                    let stack_index = i - 8;
+                    let stack_offset = (stack_index * 4) as i32;
+                    param_stack_offsets.insert(i, stack_offset);
                 }
             }
         }
 
         // Map return values to return registers
         let mut return_regs = alloc::collections::BTreeMap::new();
+        let mut return_stack_offsets = alloc::collections::BTreeMap::new();
         for (i, _) in func.signature.returns.iter().enumerate() {
             if let Some(reg) = Self::return_reg(i) {
                 return_regs.insert(i, reg);
+            } else {
+                // Return value index >= 8, goes on stack
+                // Stack offset is (index - 8) * 4, relative to SP before prologue
+                let stack_index = i - 8;
+                let stack_offset = (stack_index * 4) as i32;
+                return_stack_offsets.insert(i, stack_offset);
             }
         }
 
@@ -131,6 +148,8 @@ impl Abi {
             return_regs,
             used_callee_saved,
             max_outgoing_args,
+            param_stack_offsets,
+            return_stack_offsets,
         }
     }
 }
@@ -295,5 +314,86 @@ block0:
         assert_eq!(Abi::return_reg(8), None);
         assert_eq!(Abi::return_reg(9), None);
     }
-}
 
+    #[test]
+    fn test_abi_info_tracks_stack_params() {
+        // Function with 10 parameters (8 in regs, 2 on stack)
+        let ir = r#"
+function %test(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32):
+    v10 = iadd v0, v9
+    return v10
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR function");
+        let liveness = crate::liveness::compute_liveness(&func);
+        let allocation = crate::regalloc::allocate_registers(&func, &liveness);
+        let abi_info = Abi::compute_abi_info(&func, &allocation);
+
+        // Parameters 0-7 should be in registers (if allocated)
+        // Parameters 8-9 should be on stack
+        assert!(abi_info.param_stack_offsets.contains_key(&8));
+        assert!(abi_info.param_stack_offsets.contains_key(&9));
+        assert_eq!(abi_info.param_stack_offsets.get(&8), Some(&0)); // First stack arg at offset 0
+        assert_eq!(abi_info.param_stack_offsets.get(&9), Some(&4)); // Second stack arg at offset 4
+    }
+
+    #[test]
+    fn test_abi_info_tracks_stack_returns() {
+        // Function with 10 return values (8 in regs, 2 on stack)
+        let ir = r#"
+function %test() -> i32, i32, i32, i32, i32, i32, i32, i32, i32, i32 {
+block0:
+    v0 = iconst 0
+    v1 = iconst 1
+    v2 = iconst 2
+    v3 = iconst 3
+    v4 = iconst 4
+    v5 = iconst 5
+    v6 = iconst 6
+    v7 = iconst 7
+    v8 = iconst 8
+    v9 = iconst 9
+    return v0 v1 v2 v3 v4 v5 v6 v7 v8 v9
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR function");
+        let liveness = crate::liveness::compute_liveness(&func);
+        let allocation = crate::regalloc::allocate_registers(&func, &liveness);
+        let abi_info = Abi::compute_abi_info(&func, &allocation);
+
+        // Return values 0-7 should be in registers
+        assert!(abi_info.return_regs.contains_key(&0));
+        assert!(abi_info.return_regs.contains_key(&7));
+
+        // Return values 8-9 should be on stack
+        assert!(abi_info.return_stack_offsets.contains_key(&8));
+        assert!(abi_info.return_stack_offsets.contains_key(&9));
+        assert_eq!(abi_info.return_stack_offsets.get(&8), Some(&0)); // First stack return at offset 0
+        assert_eq!(abi_info.return_stack_offsets.get(&9), Some(&4)); // Second stack return at offset 4
+    }
+
+    #[test]
+    fn test_abi_info_mixed_reg_and_stack() {
+        // Function with 12 parameters (8 in regs, 4 on stack)
+        let ir = r#"
+function %test(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32, v10: i32, v11: i32):
+    v12 = iadd v0, v11
+    return v12
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR function");
+        let liveness = crate::liveness::compute_liveness(&func);
+        let allocation = crate::regalloc::allocate_registers(&func, &liveness);
+        let abi_info = Abi::compute_abi_info(&func, &allocation);
+
+        // First 8 should be in registers (if allocated)
+        // Parameters 8-11 should be on stack
+        for i in 8..12 {
+            assert!(abi_info.param_stack_offsets.contains_key(&i));
+            let expected_offset = ((i - 8) * 4) as i32;
+            assert_eq!(abi_info.param_stack_offsets.get(&i), Some(&expected_offset));
+        }
+    }
+}

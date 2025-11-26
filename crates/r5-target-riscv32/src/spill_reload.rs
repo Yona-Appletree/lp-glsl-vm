@@ -8,8 +8,10 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 use r5_ir::{Function, Inst, Value};
 use riscv32_encoder::Gpr;
 
-use crate::liveness::{InstPoint, LivenessInfo};
-use crate::regalloc::RegisterAllocation;
+use crate::{
+    liveness::{InstPoint, LivenessInfo},
+    regalloc::RegisterAllocation,
+};
 
 /// Spill or reload operation.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -133,8 +135,10 @@ mod tests {
     use r5_ir::{parse_function, Block, Function, Signature};
 
     use super::*;
-    use crate::liveness::{compute_liveness, InstPoint};
-    use crate::regalloc::allocate_registers;
+    use crate::{
+        liveness::{compute_liveness, InstPoint},
+        regalloc::allocate_registers,
+    };
 
     #[test]
     fn test_spill_after_def() {
@@ -226,7 +230,7 @@ block0:
             if crate::abi::Abi::is_caller_saved(*reg) {
                 // Should have spill/reload around call site
                 let _call_point = InstPoint::new(0, 3); // Call instruction
-                // Check that there's handling around the call
+                                                        // Check that there's handling around the call
             }
         }
     }
@@ -259,7 +263,10 @@ block0:
                 .flatten()
                 .filter(|op| matches!(op, SpillReloadOp::Reload { value, .. } if *value == v0))
                 .count();
-            assert!(reload_count >= 2, "Spilled value v0 should have multiple reloads");
+            assert!(
+                reload_count >= 2,
+                "Spilled value v0 should have multiple reloads"
+            );
         }
     }
 
@@ -320,4 +327,3 @@ block1:
         }
     }
 }
-

@@ -134,30 +134,10 @@ pub fn debug_elf(elf_data: &[u8]) -> String {
     let version = elf_data[6];
     let e_type = u16::from_le_bytes([elf_data[16], elf_data[17]]);
     let e_machine = u16::from_le_bytes([elf_data[18], elf_data[19]]);
-    let e_version = u32::from_le_bytes([
-        elf_data[20],
-        elf_data[21],
-        elf_data[22],
-        elf_data[23],
-    ]);
-    let e_entry = u32::from_le_bytes([
-        elf_data[24],
-        elf_data[25],
-        elf_data[26],
-        elf_data[27],
-    ]);
-    let e_phoff = u32::from_le_bytes([
-        elf_data[28],
-        elf_data[29],
-        elf_data[30],
-        elf_data[31],
-    ]);
-    let e_shoff = u32::from_le_bytes([
-        elf_data[32],
-        elf_data[33],
-        elf_data[34],
-        elf_data[35],
-    ]);
+    let e_version = u32::from_le_bytes([elf_data[20], elf_data[21], elf_data[22], elf_data[23]]);
+    let e_entry = u32::from_le_bytes([elf_data[24], elf_data[25], elf_data[26], elf_data[27]]);
+    let e_phoff = u32::from_le_bytes([elf_data[28], elf_data[29], elf_data[30], elf_data[31]]);
+    let e_shoff = u32::from_le_bytes([elf_data[32], elf_data[33], elf_data[34], elf_data[35]]);
     let e_ehsize = u16::from_le_bytes([elf_data[40], elf_data[41]]);
     let e_phentsize = u16::from_le_bytes([elf_data[42], elf_data[43]]);
     let e_phnum = u16::from_le_bytes([elf_data[44], elf_data[45]]);
@@ -326,7 +306,8 @@ pub fn debug_elf(elf_data: &[u8]) -> String {
 
             // Try to get section name from string table
             let name_str = if e_shstrndx < e_shnum {
-                let strtab_sh_offset = e_shoff as usize + (e_shstrndx as usize * e_shentsize as usize);
+                let strtab_sh_offset =
+                    e_shoff as usize + (e_shstrndx as usize * e_shentsize as usize);
                 if strtab_sh_offset + 16 <= elf_data.len() {
                     let strtab_offset = u32::from_le_bytes([
                         elf_data[strtab_sh_offset + 16],
@@ -343,8 +324,7 @@ pub fn debug_elf(elf_data: &[u8]) -> String {
                             .map(|p| name_start + p)
                             .unwrap_or(elf_data.len());
                         String::from(
-                            core::str::from_utf8(&elf_data[name_start..name_end])
-                                .unwrap_or("?")
+                            core::str::from_utf8(&elf_data[name_start..name_end]).unwrap_or("?"),
                         )
                     } else {
                         format!("?{}", sh_name)

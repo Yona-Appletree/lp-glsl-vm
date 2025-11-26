@@ -9,7 +9,7 @@ use r5_ir::{Function, Inst, Value};
 use riscv32_encoder::{Gpr, Inst as RiscvInst};
 
 use crate::{
-    abi::AbiInfo,
+    abi::{Abi, AbiInfo},
     emit::CodeBuffer,
     frame::FrameLayout,
     liveness::InstPoint,
@@ -82,7 +82,7 @@ impl Lowerer {
         let mut code = CodeBuffer::new();
 
         // 1. Generate prologue
-        self.gen_prologue(&mut code, frame_layout, abi_info);
+        self.gen_prologue(&mut code, func, allocation, frame_layout, abi_info);
 
         // 2. Track block addresses for jumps/branches
         let mut block_addresses = BTreeMap::new();
@@ -137,22 +137,97 @@ impl Lowerer {
     fn gen_prologue(
         &mut self,
         code: &mut CodeBuffer,
+        func: &Function,
+        allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
     ) {
         let frame_size = frame_layout.total_size();
 
-        if frame_size > 0 {
-            // First, adjust stack pointer for entire frame
+        // Step 1: Load incoming stack arguments (before SP adjustment)
+        // Stack args are at positive offsets from SP before prologue
+        if let Some(entry_block) = func.blocks.first() {
+            let mut stack_args_to_spill = Vec::new();
+            for (idx, param) in entry_block.params.iter().enumerate() {
+                if let Some(stack_offset) = abi_info.param_stack_offsets.get(&idx) {
+                    // This parameter is on the stack
+                    if let Some(allocated_reg) = allocation.value_to_reg.get(param) {
+                        // Load directly into allocated register
+                        code.emit(RiscvInst::Lw {
+                            rd: *allocated_reg,
+                            rs1: Gpr::SP,
+                            imm: *stack_offset, // Positive offset
+                        });
+                    } else {
+                        // Will be spilled - load into temp register, store after SP adjustment
+                        let temp_reg = Gpr::T0;
+                        code.emit(RiscvInst::Lw {
+                            rd: temp_reg,
+                            rs1: Gpr::SP,
+                            imm: *stack_offset, // Positive offset
+                        });
+                        // Store temp_reg and param for later
+                        if let Some(slot) = allocation.value_to_slot.get(param) {
+                            stack_args_to_spill.push((temp_reg, *slot));
+                        }
+                    }
+                }
+            }
+
+            // Step 2: Adjust SP for entire frame
+            if frame_size > 0 {
+                code.emit(RiscvInst::Addi {
+                    rd: Gpr::SP,
+                    rs1: Gpr::SP,
+                    imm: -(frame_size as i32),
+                });
+
+                // Step 3: Store spilled stack args to their spill slots
+                for (temp_reg, slot) in stack_args_to_spill {
+                    let offset = frame_layout.spill_slot_offset(slot);
+                    code.emit(RiscvInst::Sw {
+                        rs1: Gpr::SP,
+                        rs2: temp_reg,
+                        imm: offset,
+                    });
+                }
+
+                // Save return address if we have calls (at offset 0 in setup area)
+                if frame_layout.has_function_calls {
+                    // Save RA: sw ra, 0(sp) (or at setup_area_size - 4 if setup area > 0)
+                    let ra_offset = if frame_layout.setup_area_size > 0 {
+                        frame_layout.setup_area_size as i32 - 4
+                    } else {
+                        0
+                    };
+                    code.emit(RiscvInst::Sw {
+                        rs1: Gpr::SP,
+                        rs2: Gpr::RA,
+                        imm: ra_offset,
+                    });
+                }
+
+                // Save callee-saved registers (at their computed offsets)
+                for (_idx, reg) in abi_info.used_callee_saved.iter().enumerate() {
+                    if let Some(offset) = frame_layout.callee_saved_offset(*reg) {
+                        code.emit(RiscvInst::Sw {
+                            rs1: Gpr::SP,
+                            rs2: *reg,
+                            imm: offset,
+                        });
+                    }
+                }
+            }
+        } else if frame_size > 0 {
+            // No entry block, but still need to adjust SP
             code.emit(RiscvInst::Addi {
                 rd: Gpr::SP,
                 rs1: Gpr::SP,
                 imm: -(frame_size as i32),
             });
 
-            // Save return address if we have calls (at offset 0 in setup area)
+            // Save return address if we have calls
             if frame_layout.has_function_calls {
-                // Save RA: sw ra, 0(sp) (or at setup_area_size - 4 if setup area > 0)
                 let ra_offset = if frame_layout.setup_area_size > 0 {
                     frame_layout.setup_area_size as i32 - 4
                 } else {
@@ -165,7 +240,7 @@ impl Lowerer {
                 });
             }
 
-            // Save callee-saved registers (at their computed offsets)
+            // Save callee-saved registers
             for (_idx, reg) in abi_info.used_callee_saved.iter().enumerate() {
                 if let Some(offset) = frame_layout.callee_saved_offset(*reg) {
                     code.emit(RiscvInst::Sw {
@@ -361,7 +436,7 @@ impl Lowerer {
                 code.emit(RiscvInst::Ebreak);
             }
             Inst::Syscall { number, args } => {
-                self.lower_syscall(code, *number, args, allocation, frame_layout, abi_info);
+                self.lower_syscall(code, *number, args, allocation, frame_layout);
             }
             // TODO: Implement other instructions (Idiv, Irem, Load, Store, etc.)
             _ => {
@@ -543,12 +618,30 @@ impl Lowerer {
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
     ) {
-        // Move return values to return registers
+        // Move return values to return registers (first 8)
         for (idx, value) in values.iter().enumerate() {
             if let Some(return_reg) = abi_info.return_regs.get(&idx) {
                 self.load_value_into_reg(code, *value, *return_reg, allocation, frame_layout);
             }
-            // TODO: Handle stack returns (> 8 return values)
+        }
+
+        // Store stack return values (index >= 8) to stack
+        // These are stored at positive offsets from SP (before epilogue)
+        for (idx, value) in values.iter().enumerate() {
+            if idx >= 8 {
+                if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
+                    // Load value into temp register
+                    let temp_reg = Gpr::T0;
+                    self.load_value_into_reg(code, *value, temp_reg, allocation, frame_layout);
+
+                    // Store to stack (offset relative to SP before epilogue)
+                    code.emit(RiscvInst::Sw {
+                        rs1: Gpr::SP,
+                        rs2: temp_reg,
+                        imm: *stack_offset, // Positive offset
+                    });
+                }
+            }
         }
     }
 
@@ -563,12 +656,31 @@ impl Lowerer {
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
     ) {
-        // Move arguments to argument registers
+        // Step 1: Move register arguments (a0-a7)
         for (idx, arg) in args.iter().enumerate() {
-            if let Some(arg_reg) = abi_info.param_regs.get(&idx) {
-                self.load_value_into_reg(code, *arg, *arg_reg, allocation, frame_layout);
+            if idx < 8 {
+                if let Some(arg_reg) = Abi::arg_reg(idx) {
+                    self.load_value_into_reg(code, *arg, arg_reg, allocation, frame_layout);
+                }
             }
-            // TODO: Handle stack arguments (> 8 args)
+        }
+
+        // Step 2: Store stack arguments (index >= 8) to outgoing args area
+        for (idx, arg) in args.iter().enumerate() {
+            if idx >= 8 {
+                if let Some(offset) = frame_layout.outgoing_arg_offset(idx) {
+                    // Load argument value into temporary register
+                    let temp_reg = Gpr::T0;
+                    self.load_value_into_reg(code, *arg, temp_reg, allocation, frame_layout);
+
+                    // Store to outgoing args area
+                    code.emit(RiscvInst::Sw {
+                        rs1: Gpr::SP,
+                        rs2: temp_reg,
+                        imm: offset, // Negative offset
+                    });
+                }
+            }
         }
 
         // Emit call (jalr or jal depending on whether we know the address)
@@ -594,7 +706,7 @@ impl Lowerer {
             });
         }
 
-        // Move results from return registers
+        // Step 3: Move results from return registers (first 8)
         for (idx, result) in results.iter().enumerate() {
             if let Some(return_reg) = abi_info.return_regs.get(&idx) {
                 if let Some(result_reg) = self.get_register(*result, allocation) {
@@ -617,7 +729,43 @@ impl Lowerer {
                     }
                 }
             }
-            // TODO: Handle stack returns
+        }
+
+        // Step 4: Load stack return values (index >= 8) from stack
+        // These are at positive offsets from SP (in caller's frame, above our frame)
+        // After the call, they're at SP + frame_size + offset
+        for (idx, result) in results.iter().enumerate() {
+            if idx >= 8 {
+                if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
+                    // Compute actual offset: frame_size + stack_offset
+                    let frame_size = frame_layout.total_size();
+                    let actual_offset = (frame_size as i32) + *stack_offset;
+
+                    // Load from stack into temp register
+                    let temp_reg = Gpr::T0;
+                    code.emit(RiscvInst::Lw {
+                        rd: temp_reg,
+                        rs1: Gpr::SP,
+                        imm: actual_offset,
+                    });
+
+                    // Store to result location (register or spill slot)
+                    if let Some(result_reg) = self.get_register(*result, allocation) {
+                        code.emit(RiscvInst::Addi {
+                            rd: result_reg,
+                            rs1: temp_reg,
+                            imm: 0, // Move
+                        });
+                    } else if let Some(slot) = self.get_spill_slot(*result, allocation) {
+                        let offset = frame_layout.spill_slot_offset(slot);
+                        code.emit(RiscvInst::Sw {
+                            rs1: Gpr::SP,
+                            rs2: temp_reg,
+                            imm: offset,
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -697,7 +845,6 @@ impl Lowerer {
         args: &[Value],
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,
-        abi_info: &AbiInfo,
     ) {
         // Move arguments to a0-a7 registers
         for (idx, arg) in args.iter().enumerate() {

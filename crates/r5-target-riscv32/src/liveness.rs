@@ -4,7 +4,10 @@
 //! enabling register allocation to make informed decisions about when
 //! values can be spilled or registers can be reused.
 
-use alloc::{collections::BTreeMap, collections::BTreeSet, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 
 use r5_ir::{Function, Inst, Value};
 
@@ -166,9 +169,7 @@ pub fn compute_liveness(func: &Function) -> LivenessInfo {
                         target_true,
                         target_false,
                         ..
-                    } => {
-                        *target_true as usize == block_idx || *target_false as usize == block_idx
-                    }
+                    } => *target_true as usize == block_idx || *target_false as usize == block_idx,
                     _ => false,
                 };
 
@@ -210,10 +211,7 @@ pub fn compute_liveness(func: &Function) -> LivenessInfo {
             } else {
                 InstPoint::new(block_idx, inst_idx)
             };
-            let mut live_set = live_sets
-                .get(&prev_point)
-                .cloned()
-                .unwrap_or_default();
+            let mut live_set = live_sets.get(&prev_point).cloned().unwrap_or_default();
 
             // Add values that are used here (they become live)
             for used_value in inst.args() {
@@ -531,7 +529,9 @@ block0:
         // Return instruction is at inst 9 (0-indexed block entry + 9 instructions)
         // But we use 1-indexed for instructions, so it's InstPoint::new(0, 9)
         // Check that v8 is used at or before the return
-        assert!(v8_range.last_use.inst >= 9, "v8 should be live until return");
+        assert!(
+            v8_range.last_use.inst >= 9,
+            "v8 should be live until return"
+        );
     }
 }
-

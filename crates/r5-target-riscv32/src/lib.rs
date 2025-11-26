@@ -48,12 +48,14 @@ pub fn compile_function(func: &r5_ir::Function) -> alloc::vec::Vec<u8> {
             .any(|inst| matches!(inst, r5_ir::Inst::Call { .. }))
     });
 
+    // For deprecated function, use default max outgoing args
+    let max_outgoing_args = 8;
     let frame_layout = FrameLayout::compute(
         &allocation.used_callee_saved,
         allocation.spill_slot_count,
         has_calls,
         func.signature.params.len(),
-        8, // TODO: Compute actual outgoing args
+        max_outgoing_args,
     );
 
     let abi_info = Abi::compute_abi_info(func, &allocation);
@@ -66,6 +68,27 @@ pub fn compile_function(func: &r5_ir::Function) -> alloc::vec::Vec<u8> {
 /// Align a size to a 4-byte boundary.
 fn align_to_4_bytes(size: usize) -> usize {
     (size + 3) & !3
+}
+
+/// Compute the maximum number of outgoing arguments for a function.
+///
+/// This analyzes all call sites in the function to determine the maximum
+/// number of arguments passed to any callee.
+fn compute_max_outgoing_args(func: &r5_ir::Function, module: &r5_ir::Module) -> usize {
+    let mut max_args = 0;
+    for block in &func.blocks {
+        for inst in &block.insts {
+            if let r5_ir::Inst::Call { callee, args, .. } = inst {
+                // Look up callee signature in module
+                if let Some(callee_func) = module.functions.get(callee) {
+                    max_args = max_args.max(callee_func.signature.params.len());
+                }
+                // Also check direct args count (in case callee not in module)
+                max_args = max_args.max(args.len());
+            }
+        }
+    }
+    max_args
 }
 
 /// Fix up relocations in compiled code.
@@ -154,12 +177,13 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
                     .any(|inst| matches!(inst, r5_ir::Inst::Call { .. }))
             });
 
+            let max_outgoing_args = compute_max_outgoing_args(func, module);
             let frame_layout = FrameLayout::compute(
                 &allocation.used_callee_saved,
                 allocation.spill_slot_count,
                 has_calls,
                 func.signature.params.len(),
-                8, // TODO: Compute actual outgoing args
+                max_outgoing_args,
             );
 
             let abi_info = Abi::compute_abi_info(func, &allocation);
@@ -263,12 +287,13 @@ pub fn compile_module(module: &r5_ir::Module) -> alloc::vec::Vec<u8> {
                 .any(|inst| matches!(inst, r5_ir::Inst::Call { .. }))
         });
 
+        let max_outgoing_args = compute_max_outgoing_args(func, module);
         let frame_layout = FrameLayout::compute(
             &allocation.used_callee_saved,
             allocation.spill_slot_count,
             has_calls,
             func.signature.params.len(),
-            8, // TODO: Compute actual outgoing args
+            max_outgoing_args,
         );
 
         let abi_info = Abi::compute_abi_info(func, &allocation);
@@ -503,5 +528,130 @@ mod tests {
         let code = compile_module(&module);
         assert!(!code.is_empty());
         assert_eq!(code.len() % 4, 0);
+    }
+
+    #[test]
+    fn test_compute_max_outgoing_args_single_call() {
+        let ir_module = r#"
+module {
+    function %callee(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+    block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32):
+        v10 = iadd v0, v1
+        return v10
+    }
+
+    function %caller() -> i32 {
+    block0:
+        v0 = iconst 0
+        v1 = iconst 1
+        v2 = iconst 2
+        v3 = iconst 3
+        v4 = iconst 4
+        v5 = iconst 5
+        v6 = iconst 6
+        v7 = iconst 7
+        v8 = iconst 8
+        v9 = iconst 9
+        call %callee(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9) -> v10
+        return v10
+    }
+}"#;
+
+        let module = r5_ir::parse_module(ir_module).expect("Failed to parse module");
+        let caller_func = module
+            .get_function("caller")
+            .expect("caller function not found");
+
+        let max_args = compute_max_outgoing_args(caller_func, &module);
+        assert_eq!(max_args, 10);
+    }
+
+    #[test]
+    fn test_compute_max_outgoing_args_multiple_calls() {
+        let ir_module = r#"
+module {
+    function %callee1(i32, i32, i32, i32, i32) -> i32 {
+    block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32):
+        return v0
+    }
+
+    function %callee2(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+    block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32, v10: i32, v11: i32):
+        return v0
+    }
+
+    function %caller() -> i32 {
+    block0:
+        v0 = iconst 0
+        v1 = iconst 1
+        v2 = iconst 2
+        v3 = iconst 3
+        v4 = iconst 4
+        v5 = iconst 5
+        v6 = iconst 6
+        v7 = iconst 7
+        v8 = iconst 8
+        v9 = iconst 9
+        v10 = iconst 10
+        v11 = iconst 11
+        call %callee1(v0, v1, v2, v3, v4) -> v12
+        call %callee2(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11) -> v13
+        return v12
+    }
+}"#;
+
+        let module = r5_ir::parse_module(ir_module).expect("Failed to parse module");
+        let caller_func = module
+            .get_function("caller")
+            .expect("caller function not found");
+
+        let max_args = compute_max_outgoing_args(caller_func, &module);
+        assert_eq!(max_args, 12); // Should be max of 5 and 12
+    }
+
+    #[test]
+    fn test_compute_max_outgoing_args_nested_calls() {
+        let ir_module = r#"
+module {
+    function %callee(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+    block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32, v10: i32, v11: i32, v12: i32, v13: i32, v14: i32):
+        return v0
+    }
+
+    function %intermediate() -> i32 {
+    block0:
+        v0 = iconst 0
+        v1 = iconst 1
+        v2 = iconst 2
+        v3 = iconst 3
+        v4 = iconst 4
+        v5 = iconst 5
+        v6 = iconst 6
+        v7 = iconst 7
+        v8 = iconst 8
+        v9 = iconst 9
+        v10 = iconst 10
+        v11 = iconst 11
+        v12 = iconst 12
+        v13 = iconst 13
+        v14 = iconst 14
+        call %callee(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14) -> v15
+        return v15
+    }
+
+    function %outer() -> i32 {
+    block0:
+        call %intermediate() -> v0
+        return v0
+    }
+}"#;
+
+        let module = r5_ir::parse_module(ir_module).expect("Failed to parse module");
+        let outer_func = module
+            .get_function("outer")
+            .expect("outer function not found");
+
+        let max_args = compute_max_outgoing_args(outer_func, &module);
+        assert_eq!(max_args, 0); // Outer caller doesn't call callee directly
     }
 }

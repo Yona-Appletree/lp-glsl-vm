@@ -3,8 +3,8 @@
 use r5_builder::FunctionBuilder;
 use r5_ir::{parse_module, Module, Signature, Type};
 use r5_target_riscv32::{
-    compile_module, generate_elf, Abi, CodeBuffer, FrameLayout, Lowerer, compute_liveness,
-    allocate_registers, create_spill_reload_plan,
+    allocate_registers, compile_module, compute_liveness, create_spill_reload_plan, generate_elf,
+    Abi, CodeBuffer, FrameLayout, Lowerer,
 };
 use r5_test_util::VmRunner;
 use riscv32_encoder::{disassemble_code, Gpr, Inst};
@@ -15,10 +15,12 @@ fn lower_function(func: &r5_ir::Function) -> CodeBuffer {
     let allocation = allocate_registers(func, &liveness);
     let spill_reload = create_spill_reload_plan(func, &allocation, &liveness);
 
-    let has_calls = func
-        .blocks
-        .iter()
-        .any(|block| block.insts.iter().any(|inst| matches!(inst, r5_ir::Inst::Call { .. })));
+    let has_calls = func.blocks.iter().any(|block| {
+        block
+            .insts
+            .iter()
+            .any(|inst| matches!(inst, r5_ir::Inst::Call { .. }))
+    });
 
     let frame_layout = FrameLayout::compute(
         &allocation.used_callee_saved,
@@ -271,7 +273,8 @@ fn get_prologue_instructions(
 ) -> Vec<String> {
     // Use structured instructions and format them
     let start_idx = function_start / 4; // Convert byte offset to instruction index
-    code_buffer.instructions()
+    code_buffer
+        .instructions()
         .iter()
         .skip(start_idx)
         .take(max_instructions)
@@ -280,7 +283,11 @@ fn get_prologue_instructions(
 }
 
 /// Helper to verify epilogue order
-fn verify_epilogue_order(code_buffer: &CodeBuffer, function_end: usize, max_instructions: usize) -> Vec<String> {
+fn verify_epilogue_order(
+    code_buffer: &CodeBuffer,
+    function_end: usize,
+    max_instructions: usize,
+) -> Vec<String> {
     // Get last max_instructions instructions before function end
     let start_offset = function_end.saturating_sub(max_instructions * 4);
     get_prologue_instructions(code_buffer, start_offset, max_instructions)
@@ -421,19 +428,15 @@ module {
     // Verify epilogue order: restore callee-saved (if any) → restore RA → adjust SP
     let start_idx = epilogue_start / 4;
     let instructions = &func_code.instructions()[start_idx..];
-    
-    let ra_restore_pos = instructions
-        .iter()
-        .position(|inst| {
-            matches!(inst, Inst::Lw { rd, rs1, .. } 
+
+    let ra_restore_pos = instructions.iter().position(|inst| {
+        matches!(inst, Inst::Lw { rd, rs1, .. } 
                 if rd == &Gpr::RA && rs1 == &Gpr::SP)
-        });
-    let sp_adjust_pos = instructions
-        .iter()
-        .position(|inst| {
-            matches!(inst, Inst::Addi { rd, rs1, imm } 
+    });
+    let sp_adjust_pos = instructions.iter().position(|inst| {
+        matches!(inst, Inst::Addi { rd, rs1, imm } 
                 if rd == &Gpr::SP && rs1 == &Gpr::SP && imm > &0)
-        });
+    });
 
     // RA should be restored before SP is adjusted
     if let (Some(ra_pos), Some(sp_pos)) = (ra_restore_pos, sp_adjust_pos) {
@@ -468,7 +471,7 @@ module {
 }"#;
 
     let module = parse_module(ir_module).expect("Failed to parse IR module");
-    
+
     // Use test_module helper which creates bootstrap wrapper
     // This ensures SP is initialized and function is called correctly
     test_module(&module, "main", &[], 42);
@@ -507,7 +510,7 @@ module {
 }"#;
 
     let module = parse_module(ir_module).expect("Failed to parse IR module");
-    
+
     // This function will use spill slots (many live values across call)
     // If SP is invalid, stack writes will fail
     // Calculation: main(5) = helper(5+1+2+3+4+5) + 100 = helper(20) + 100 = (20+1) + 100 = 121
@@ -555,15 +558,18 @@ module {
 }"#;
 
     let module = parse_module(ir_module).expect("Failed to parse IR module");
-    
+
     // Compile the function and check spill slots
-    let func = module.functions.get("main").expect("main function not found");
+    let func = module
+        .functions
+        .get("main")
+        .expect("main function not found");
     let func_code = lower_function(func);
-    
+
     let bytes = func_code.as_bytes();
     eprintln!("\n=== Function Code (Call-Site Spills) ===");
     eprintln!("{}", disassemble_code(&bytes));
-    
+
     // Verify function executes correctly
     // Calculation: main(10)
     // v2 = 10+1 = 11, v4 = 11+2 = 13, v6 = 13+3 = 16, v8 = 16+4 = 20, v10 = 20+5 = 25
@@ -627,17 +633,20 @@ module {
 }"#;
 
     let module = parse_module(ir_module).expect("Failed to parse IR module");
-    
+
     // Compile the function and verify it works (even with large frame)
-    let func = module.functions.get("main").expect("main function not found");
+    let func = module
+        .functions
+        .get("main")
+        .expect("main function not found");
     let func_code = lower_function(func);
-    
+
     // The function should compile without panicking
     // Frame size should be handled correctly (even if > 2047 bytes)
     let bytes = func_code.as_bytes();
     eprintln!("\n=== Function Code (Large Frame) ===");
     eprintln!("{}", disassemble_code(&bytes));
-    
+
     // Verify function compiles and executes correctly
     // This will use test_module which ensures SP is initialized
     test_module(&module, "main", &[], 210); // 1+2+...+20 = 210

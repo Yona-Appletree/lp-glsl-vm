@@ -144,6 +144,41 @@ impl FrameLayout {
         let base_offset = self.setup_area_size + self.clobber_size;
         -((base_offset + slot * 4) as i32)
     }
+
+    /// Get stack offset for incoming argument (index >= 8)
+    ///
+    /// Returns offset relative to SP **before** prologue (positive offset).
+    /// After prologue, the actual offset is: total_size() + offset
+    pub fn incoming_arg_offset(&self, arg_index: usize) -> Option<i32> {
+        if arg_index < 8 {
+            return None; // In register
+        }
+        let stack_index = arg_index - 8;
+        Some((stack_index * 4) as i32)
+    }
+
+    /// Get stack offset for outgoing argument (index >= 8)
+    ///
+    /// Returns offset relative to SP (negative, like other frame slots)
+    pub fn outgoing_arg_offset(&self, arg_index: usize) -> Option<i32> {
+        if arg_index < 8 {
+            return None; // In register
+        }
+        let stack_index = (arg_index - 8) as u32;
+        let base = self.setup_area_size + self.clobber_size + self.fixed_frame_storage_size;
+        Some(-((base + stack_index * 4) as i32))
+    }
+
+    /// Get stack offset for return value (index >= 8)
+    ///
+    /// Similar to incoming args, but caller allocates space
+    pub fn return_value_offset(&self, ret_index: usize) -> Option<i32> {
+        if ret_index < 8 {
+            return None; // In register
+        }
+        let stack_index = ret_index - 8;
+        Some((stack_index * 4) as i32)
+    }
 }
 
 #[cfg(test)]
@@ -192,11 +227,11 @@ mod tests {
     fn test_callee_saved_offset() {
         let used = vec![Gpr::S0, Gpr::S1];
         let layout = FrameLayout::compute(&used, 0, false, 0, 0);
-        
+
         // S0 should be at offset -8 (after setup area)
         let offset_s0 = layout.callee_saved_offset(Gpr::S0).unwrap();
         assert_eq!(offset_s0, -8);
-        
+
         // S1 should be at offset -12 (after S0)
         let offset_s1 = layout.callee_saved_offset(Gpr::S1).unwrap();
         assert_eq!(offset_s1, -12);
@@ -205,11 +240,11 @@ mod tests {
     #[test]
     fn test_spill_slot_offset() {
         let layout = FrameLayout::compute(&[], 2, false, 0, 0);
-        
+
         // First spill slot should be after setup area (8 bytes)
         let offset_slot0 = layout.spill_slot_offset(0);
         assert_eq!(offset_slot0, -8);
-        
+
         // Second spill slot should be 4 bytes after first
         let offset_slot1 = layout.spill_slot_offset(1);
         assert_eq!(offset_slot1, -12);
@@ -227,5 +262,52 @@ mod tests {
         // Test with 10 incoming args (2 need to go on stack)
         let layout = FrameLayout::compute(&[], 0, true, 10, 0);
         assert_eq!(layout.incoming_args_size, 16); // (10-8)*4 = 8, aligned to 16
+    }
+
+    #[test]
+    fn test_incoming_arg_offset() {
+        let layout = FrameLayout::compute(&[], 0, true, 10, 0);
+
+        // First 8 args should return None (in registers)
+        for i in 0..8 {
+            assert_eq!(layout.incoming_arg_offset(i), None);
+        }
+
+        // Stack args should have positive offsets (relative to SP before prologue)
+        assert_eq!(layout.incoming_arg_offset(8), Some(0));
+        assert_eq!(layout.incoming_arg_offset(9), Some(4));
+        assert_eq!(layout.incoming_arg_offset(10), Some(8));
+    }
+
+    #[test]
+    fn test_outgoing_arg_offset() {
+        let layout = FrameLayout::compute(&[], 0, true, 0, 10);
+
+        // First 8 args should return None (in registers)
+        for i in 0..8 {
+            assert_eq!(layout.outgoing_arg_offset(i), None);
+        }
+
+        // Stack args should have negative offsets (relative to SP after prologue)
+        // Base = setup_area_size (8) + clobber_size (0) + fixed_frame_storage_size (0) = 8
+        let base = 8;
+        assert_eq!(layout.outgoing_arg_offset(8), Some(-(base as i32)));
+        assert_eq!(layout.outgoing_arg_offset(9), Some(-((base + 4) as i32)));
+        assert_eq!(layout.outgoing_arg_offset(10), Some(-((base + 8) as i32)));
+    }
+
+    #[test]
+    fn test_return_value_offset() {
+        let layout = FrameLayout::compute(&[], 0, true, 0, 0);
+
+        // First 8 return values should return None (in registers)
+        for i in 0..8 {
+            assert_eq!(layout.return_value_offset(i), None);
+        }
+
+        // Stack returns should have positive offsets (relative to SP before prologue)
+        assert_eq!(layout.return_value_offset(8), Some(0));
+        assert_eq!(layout.return_value_offset(9), Some(4));
+        assert_eq!(layout.return_value_offset(10), Some(8));
     }
 }
