@@ -19,17 +19,16 @@ impl super::Lowerer {
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
     ) -> Result<(), LoweringError> {
-        // Move return values to return registers (first 8)
+        // Process all return values in a single pass:
+        // - First 8 values go to return registers (a0-a7)
+        // - Values at index >= 8 go to stack at positive offsets from SP
         for (idx, value) in values.iter().enumerate() {
             if let Some(return_reg) = abi_info.return_regs.get(&idx) {
+                // Move to return register (first 8 values)
                 self.load_value_into_reg(code, *value, *return_reg, allocation, frame_layout)?;
-            }
-        }
-
-        // Store stack return values (index >= 8) to stack
-        // These are stored at positive offsets from SP (before epilogue)
-        for (idx, value) in values.iter().enumerate() {
-            if idx >= 8 {
+            } else if idx >= 8 {
+                // Store to stack (values at index >= 8)
+                // These are stored at positive offsets from SP (before epilogue)
                 if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
                     // Load value into temp register
                     let temp_reg = Gpr::T0;
@@ -66,6 +65,8 @@ impl super::Lowerer {
 #[cfg(test)]
 mod tests {
     extern crate std;
+
+    use alloc::vec::Vec;
 
     use r5_ir::parse_function;
 
@@ -109,11 +110,76 @@ block0:
 
         assert!(code.instruction_count().as_usize() > 0);
 
-        // Should end with jalr (return)
+        // Verify that a relocation was recorded for the epilogue
+        let epilogue_relocs: Vec<_> = lowerer
+            .function_relocations
+            .iter()
+            .filter(|reloc| matches!(reloc.target, super::super::types::RelocationTarget::Epilogue))
+            .collect();
+        assert_eq!(
+            epilogue_relocs.len(),
+            1,
+            "Expected exactly one epilogue relocation for return instruction"
+        );
+
+        // Verify that the relocation is for a jal instruction with rd=ZERO
+        let reloc = &epilogue_relocs[0];
+        match &reloc.inst_type {
+            super::super::types::RelocationInstType::Jal { rd } => {
+                assert_eq!(
+                    rd,
+                    &riscv32_encoder::Gpr::ZERO,
+                    "Return jal should have rd=ZERO"
+                );
+            }
+            _ => panic!("Return relocation should be for jal instruction"),
+        }
+
+        // Verify that a jal instruction was emitted at the relocation offset
+        // (Note: the offset is in instruction count, and instructions are 4 bytes)
         let instructions = code.instructions();
-        assert!(matches!(
-            instructions.last(),
-            Some(riscv32_encoder::Inst::Jalr { .. })
-        ));
+        let jal_inst = instructions
+            .get(reloc.offset.as_usize())
+            .expect("Jal instruction should exist at relocation offset");
+        assert!(
+            matches!(jal_inst, riscv32_encoder::Inst::Jal { .. }),
+            "Jal instruction should be emitted by return (not jalr)"
+        );
+
+        // Verify that the return value is in a0 (return register)
+        // The return value (v0 = iconst 10) should either:
+        // 1. Be created directly in a0 (addi a0, x0, 10), or
+        // 2. Be moved to a0 before the jal
+        let mut found_a0_usage = false;
+        for inst in instructions.iter().take(reloc.offset.as_usize()) {
+            match inst {
+                riscv32_encoder::Inst::Addi { rd, rs1, imm } if *rd == riscv32_encoder::Gpr::A0 => {
+                    if *rs1 == riscv32_encoder::Gpr::ZERO {
+                        // Value created directly in a0 (addi a0, x0, imm)
+                        found_a0_usage = true;
+                        break;
+                    } else if *imm == 0 {
+                        // This is a move instruction (addi rd, rs, 0) to a0
+                        found_a0_usage = true;
+                        break;
+                    }
+                }
+                riscv32_encoder::Inst::Lw { rd, .. } if *rd == riscv32_encoder::Gpr::A0 => {
+                    // Value was reloaded from spill slot to a0
+                    found_a0_usage = true;
+                    break;
+                }
+                riscv32_encoder::Inst::Lui { rd, .. } if *rd == riscv32_encoder::Gpr::A0 => {
+                    // Part of large constant loading into a0
+                    found_a0_usage = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            found_a0_usage,
+            "Return value should be in a0 (return register) before jal - either created there or moved"
+        );
     }
 }

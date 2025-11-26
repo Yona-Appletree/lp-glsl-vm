@@ -11,6 +11,7 @@ use riscv32_encoder::Gpr;
 use crate::{
     liveness::{InstPoint, LivenessInfo},
     regalloc::RegisterAllocation,
+    register_role::RegisterRole,
 };
 
 /// Spill or reload operation.
@@ -140,8 +141,7 @@ pub fn create_spill_reload_plan(
                         }
 
                         // For arguments in a0-a7: check if they're used after the call
-                        let reg_num = reg.num();
-                        if (10..=17).contains(&reg_num) && call_args.contains(value) {
+                        if reg.is_argument_register() && call_args.contains(value) {
                             // This is a register argument (index < 8) in a0-a7
                             // Check if it's used after the call
                             if let Some(live_range) = liveness.live_range(*value) {

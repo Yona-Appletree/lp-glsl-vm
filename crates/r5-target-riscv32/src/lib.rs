@@ -17,6 +17,7 @@ mod frame;
 mod liveness;
 mod lower;
 mod regalloc;
+mod register_role;
 mod spill_reload;
 mod test_helpers;
 
@@ -27,6 +28,7 @@ pub use frame::FrameLayout;
 pub use liveness::{compute_liveness, LivenessInfo};
 pub use lower::Lowerer;
 pub use regalloc::{allocate_registers, is_callee_saved, is_caller_saved, RegisterAllocation};
+pub use register_role::RegisterRole;
 pub use spill_reload::{create_spill_reload_plan, SpillReloadPlan};
 pub use test_helpers::{
     debug_ir, debug_ir_with_ram, expect_ir_a0, expect_ir_error, expect_ir_error_with_ram,

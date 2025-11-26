@@ -2,11 +2,14 @@
 //!
 //! This module handles calling conventions, argument passing, and return values.
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use riscv32_encoder::Gpr;
 
-use crate::regalloc::{is_callee_saved, is_caller_saved, RegisterAllocation};
+use crate::{
+    regalloc::RegisterAllocation,
+    register_role::RegisterRole,
+};
 
 /// ABI information for a function.
 #[derive(Debug, Clone)]
@@ -57,46 +60,56 @@ impl Abi {
 
     /// Get all caller-saved registers.
     pub fn caller_saved_regs() -> Vec<Gpr> {
-        let mut regs = Vec::new();
-        // a0-a7 (10-17)
-        for i in 10..=17 {
-            regs.push(Gpr::new(i));
-        }
-        // t0-t2 (5-7)
-        for i in 5..=7 {
-            regs.push(Gpr::new(i));
-        }
-        // t3-t6 (28-31)
-        for i in 28..=31 {
-            regs.push(Gpr::new(i));
-        }
-        // ra (1)
-        regs.push(Gpr::RA);
-        regs
+        vec![
+            // Argument registers: a0-a7
+            Gpr::A0,
+            Gpr::A1,
+            Gpr::A2,
+            Gpr::A3,
+            Gpr::A4,
+            Gpr::A5,
+            Gpr::A6,
+            Gpr::A7,
+            // Temporary registers: t0-t6
+            Gpr::T0,
+            Gpr::T1,
+            Gpr::T2,
+            Gpr::T3,
+            Gpr::T4,
+            Gpr::T5,
+            Gpr::T6,
+            // Return address
+            Gpr::RA,
+        ]
     }
 
     /// Get all callee-saved registers.
     pub fn callee_saved_regs() -> Vec<Gpr> {
-        let mut regs = Vec::new();
-        // s0-s1 (8-9)
-        for i in 8..=9 {
-            regs.push(Gpr::new(i));
-        }
-        // s2-s11 (18-27)
-        for i in 18..=27 {
-            regs.push(Gpr::new(i));
-        }
-        regs
+        vec![
+            // Saved registers: s0-s11
+            Gpr::S0,
+            Gpr::S1,
+            Gpr::S2,
+            Gpr::S3,
+            Gpr::S4,
+            Gpr::S5,
+            Gpr::S6,
+            Gpr::S7,
+            Gpr::S8,
+            Gpr::S9,
+            Gpr::S10,
+            Gpr::S11,
+        ]
     }
 
     /// Check if register is caller-saved.
     pub fn is_caller_saved(reg: Gpr) -> bool {
-        is_caller_saved(reg)
+        reg.is_caller_saved()
     }
 
     /// Check if register is callee-saved.
     pub fn is_callee_saved(reg: Gpr) -> bool {
-        is_callee_saved(reg)
+        reg.is_callee_saved()
     }
 
     /// Compute ABI info for a function.

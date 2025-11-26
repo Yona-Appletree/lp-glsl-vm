@@ -7,7 +7,10 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 use r5_ir::Value;
 use riscv32_encoder::Gpr;
 
-use crate::liveness::{InstPoint, LiveRange, LivenessInfo};
+use crate::{
+    liveness::{InstPoint, LiveRange, LivenessInfo},
+    register_role::RegisterRole,
+};
 
 /// Register allocation result.
 #[derive(Debug, Clone)]
@@ -42,39 +45,39 @@ struct LinearScanAllocator {
 impl LinearScanAllocator {
     fn new() -> Self {
         // Register allocation order: caller-saved first, then callee-saved
-        // a0-a7 (10-17), t0-t2 (5-7), t3-t6 (28-31), s0-s11 (8-9, 18-27)
+        // a0-a7, t0-t2, t3-t6, s0-s11
         let available_regs = vec![
             // Caller-saved: a0-a7
-            Gpr::new(10),
-            Gpr::new(11),
-            Gpr::new(12),
-            Gpr::new(13),
-            Gpr::new(14),
-            Gpr::new(15),
-            Gpr::new(16),
-            Gpr::new(17),
+            Gpr::A0,
+            Gpr::A1,
+            Gpr::A2,
+            Gpr::A3,
+            Gpr::A4,
+            Gpr::A5,
+            Gpr::A6,
+            Gpr::A7,
             // Caller-saved: t0-t2
-            Gpr::new(5),
-            Gpr::new(6),
-            Gpr::new(7),
+            Gpr::T0,
+            Gpr::T1,
+            Gpr::T2,
             // Caller-saved: t3-t6
-            Gpr::new(28),
-            Gpr::new(29),
-            Gpr::new(30),
-            Gpr::new(31),
+            Gpr::T3,
+            Gpr::T4,
+            Gpr::T5,
+            Gpr::T6,
             // Callee-saved: s0-s11
-            Gpr::new(8),
-            Gpr::new(9),
-            Gpr::new(18),
-            Gpr::new(19),
-            Gpr::new(20),
-            Gpr::new(21),
-            Gpr::new(22),
-            Gpr::new(23),
-            Gpr::new(24),
-            Gpr::new(25),
-            Gpr::new(26),
-            Gpr::new(27),
+            Gpr::S0,
+            Gpr::S1,
+            Gpr::S2,
+            Gpr::S3,
+            Gpr::S4,
+            Gpr::S5,
+            Gpr::S6,
+            Gpr::S7,
+            Gpr::S8,
+            Gpr::S9,
+            Gpr::S10,
+            Gpr::S11,
         ];
 
         Self {
@@ -227,16 +230,12 @@ pub fn allocate_registers(_func: &r5_ir::Function, liveness: &LivenessInfo) -> R
 
 /// Check if a register is caller-saved.
 pub fn is_caller_saved(reg: Gpr) -> bool {
-    let num = reg.num();
-    // a0-a7 (10-17), t0-t6 (5-7, 28-31), ra (1)
-    matches!(num, 1 | 5..=7 | 10..=17 | 28..=31)
+    reg.is_caller_saved()
 }
 
 /// Check if a register is callee-saved.
 pub fn is_callee_saved(reg: Gpr) -> bool {
-    let num = reg.num();
-    // s0-s11 (8-9, 18-27)
-    matches!(num, 8..=9 | 18..=27)
+    reg.is_callee_saved()
 }
 
 #[cfg(test)]
