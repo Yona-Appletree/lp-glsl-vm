@@ -8,9 +8,8 @@ description = "Shared code for RISC-V JIT testing"
 [lib]
 
 [dependencies]
-r5-builder = { path = "../r5-builder" }
-r5-ir = { path = "../r5-ir" }
-r5-target-riscv32 = { path = "../r5-target-riscv32" }
+lpc-lpir = { path = "../lpc-lpir" }
+lpc-riscv32 = { path = "../lpc-riscv32" }
 
 
 

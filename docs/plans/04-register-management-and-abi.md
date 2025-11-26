@@ -422,12 +422,12 @@ fn lower_return(
         };
         let value_reg = self.regalloc.get(*value).unwrap();
         if value_reg.num() != ret_reg.num() {
-            code.emit(riscv32_encoder::add(ret_reg, value_reg, Gpr::ZERO));
+            code.emit(lpc_riscv32::add(ret_reg, value_reg, Gpr::ZERO));
         }
     }
 
     // Return
-    code.emit(riscv32_encoder::jalr(Gpr::ZERO, Gpr::RA, 0));
+    code.emit(lpc_riscv32::jalr(Gpr::ZERO, Gpr::RA, 0));
 }
 ```
 

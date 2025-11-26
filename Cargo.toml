@@ -1,27 +1,20 @@
 [workspace]
 members = [
     "crates/lp-glsl-vm",
-    "crates/embive-runtime",
+    "crates/runtime-embive",
     "apps/embive-program",
-    "crates/riscv32-encoder",
-    "crates/riscv32-emulator",
-    "crates/r5-ir",
-    "crates/r5-builder",
-    "crates/r5-target-riscv32",
+    "apps/esp32c3-jit-test",
+    "crates/lpc-riscv32",
+    "crates/lpc-lpir",
     "crates/riscv-shared",
-    "crates/r5-test-util",
 ]
 default-members = [
     "crates/lp-glsl-vm",
-    "crates/riscv32-encoder",
-    "crates/riscv32-emulator",
-    "crates/r5-ir",
-    "crates/r5-builder",
-    "crates/r5-target-riscv32",
-    "crates/r5-test-util",
+    "crates/lpc-riscv32",
+    "crates/lpc-lpir",
 
 # cross compile crates should not be default members
-#    "crates/embive-runtime",
+#    "crates/runtime-embive",
 #    "apps/embive-program",
 ]
 resolver = "2"

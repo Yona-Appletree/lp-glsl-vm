@@ -59,7 +59,7 @@ This plan outlines the implementation of full RISC-V 32-bit instruction support 
 
 **Files to modify:**
 
-- `crates/riscv32-encoder/src/encode.rs` (add `slt`, `sltu`, `slti`, `sltiu`)
+- `crates/lpc-riscv32/src/encode.rs` (add `slt`, `sltu`, `slti`, `sltiu`)
 - `crates/r5-target-riscv32/src/lower.rs` (lower comparisons)
 
 **Tests:**
@@ -146,7 +146,7 @@ This plan outlines the implementation of full RISC-V 32-bit instruction support 
 
 **Files to modify:**
 
-- `crates/r5-ir/src/inst.rs` (add `Call`)
+- `crates/lpc-lpir/src/inst.rs` (add `Call`)
 - `crates/r5-builder/src/block_builder.rs` (add `call` method)
 - `crates/r5-target-riscv32/src/lower.rs` (lower `Call`)
 
@@ -284,7 +284,7 @@ This plan outlines the implementation of full RISC-V 32-bit instruction support 
 
 **Files to modify:**
 
-- `crates/riscv32-encoder/src/encode.rs` (add `div`, `divu`, `rem`, `remu`)
+- `crates/lpc-riscv32/src/encode.rs` (add `div`, `divu`, `rem`, `remu`)
 - `crates/r5-target-riscv32/src/lower.rs` (lower `Idiv`, `Irem`)
 
 **Tests:**
@@ -313,9 +313,9 @@ This plan outlines the implementation of full RISC-V 32-bit instruction support 
 
 **Files to modify:**
 
-- `crates/r5-ir/src/inst.rs` (add bitwise operations)
+- `crates/lpc-lpir/src/inst.rs` (add bitwise operations)
 - `crates/r5-builder/src/block_builder.rs` (add builder methods)
-- `crates/riscv32-encoder/src/encode.rs` (add encoding functions)
+- `crates/lpc-riscv32/src/encode.rs` (add encoding functions)
 - `crates/r5-target-riscv32/src/lower.rs` (lower bitwise operations)
 
 **Tests:**
@@ -344,9 +344,9 @@ This plan outlines the implementation of full RISC-V 32-bit instruction support 
 
 **Files to modify:**
 
-- `crates/r5-ir/src/inst.rs` (add shift operations)
+- `crates/lpc-lpir/src/inst.rs` (add shift operations)
 - `crates/r5-builder/src/block_builder.rs` (add builder methods)
-- `crates/riscv32-encoder/src/encode.rs` (add encoding functions)
+- `crates/lpc-riscv32/src/encode.rs` (add encoding functions)
 - `crates/r5-target-riscv32/src/lower.rs` (lower shift operations)
 
 **Tests:**
@@ -378,7 +378,7 @@ This plan outlines the implementation of full RISC-V 32-bit instruction support 
 
 **Files to modify:**
 
-- `crates/riscv32-encoder/src/encode.rs` (add load/store variants)
+- `crates/lpc-riscv32/src/encode.rs` (add load/store variants)
 - `crates/r5-target-riscv32/src/lower.rs` (lower based on type)
 
 **Tests:**
@@ -401,7 +401,7 @@ This plan outlines the implementation of full RISC-V 32-bit instruction support 
 
 **Files to modify:**
 
-- `crates/riscv32-encoder/src/encode.rs` (add `bltu`, `bgeu`)
+- `crates/lpc-riscv32/src/encode.rs` (add `bltu`, `bgeu`)
 - `crates/r5-target-riscv32/src/lower.rs` (handle unsigned comparisons)
 
 **Tests:**
@@ -424,7 +424,7 @@ This plan outlines the implementation of full RISC-V 32-bit instruction support 
 
 **Files to modify:**
 
-- `crates/riscv32-encoder/src/encode.rs` (add system instructions)
+- `crates/lpc-riscv32/src/encode.rs` (add system instructions)
 
 **Tests:**
 
@@ -451,9 +451,9 @@ This plan outlines the implementation of full RISC-V 32-bit instruction support 
 
 **Files to modify:**
 
-- `crates/r5-ir/src/inst.rs` (add FP operations)
+- `crates/lpc-lpir/src/inst.rs` (add FP operations)
 - `crates/r5-builder/src/block_builder.rs` (add builder methods)
-- `crates/riscv32-encoder/src/encode.rs` (add FP encoding)
+- `crates/lpc-riscv32/src/encode.rs` (add FP encoding)
 - `crates/r5-target-riscv32/src/lower.rs` (lower FP operations)
 
 **Tests:**

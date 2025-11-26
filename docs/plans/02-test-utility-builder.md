@@ -87,7 +87,7 @@ FunctionTest::new(func)
 
 ```rust
 pub struct FunctionTest {
-    func: r5_ir::Function,
+    func: lpc_lpir::Function,
     args: Vec<i32>,
     vm_config: VmConfig,
     expectations: Vec<Expectation>,
@@ -144,7 +144,7 @@ pub enum Expectation {
 
 ```rust
 impl FunctionTest {
-    pub fn new(func: r5_ir::Function) -> Self {
+    pub fn new(func: lpc_lpir::Function) -> Self {
         Self {
             func,
             args: Vec::new(),
@@ -325,13 +325,13 @@ impl Expectation {
 
 ```rust
 // Helper to build simple functions
-pub fn build_add_function() -> r5_ir::Function {
+pub fn build_add_function() -> lpc_lpir::Function {
     // Build fn add(a: i32, b: i32) -> i32 { a + b }
 }
 
 // Macro for tests
 #[r5_test]
-fn test_add(func: r5_ir::Function) {
+fn test_add(func: lpc_lpir::Function) {
     FunctionTest::new(func)
         .with_args(5, 10)
         .expect_return(15)
@@ -364,7 +364,7 @@ crates/r5-test-util/
 
 ```toml
 [dependencies]
-r5-ir = { path = "../r5-ir" }
+lpc-lpir = { path = "../lpc-lpir" }
 r5-target-riscv32 = { path = "../r5-target-riscv32" }
 lp-glsl-vm = { path = "../lp-glsl-vm" }
 embive = { path = "/path/to/embive", default-features = false, features = ["transpiler"] }
@@ -378,7 +378,7 @@ embive = { path = "/path/to/embive", default-features = false, features = ["tran
 #[test]
 fn test_add() {
     use r5_builder::FunctionBuilder;
-    use r5_ir::{Signature, Type};
+    use lpc_lpir::{Signature, Type};
     use r5_test_util::FunctionTest;
 
     let sig = Signature::new(vec![Type::I32, Type::I32], vec![Type::I32]);

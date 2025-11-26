@@ -1110,11 +1110,11 @@ checksum = "bd7a31eed1591dcbc95d92ad7161908e72f4677f8fabf2a32ca49b4237cbf211"
 name = "r5-builder"
 version = "0.1.0"
 dependencies = [
- "r5-ir",
+ "lpc-lpir",
 ]
 
 [[package]]
-name = "r5-ir"
+name = "lpc-lpir"
 version = "0.1.0"
 dependencies = [
  "nom",
@@ -1124,9 +1124,9 @@ dependencies = [
 name = "r5-target-riscv32"
 version = "0.1.0"
 dependencies = [
- "r5-ir",
+ "lpc-lpir",
  "riscv32-emulator",
- "riscv32-encoder",
+ "lpc-riscv32",
 ]
 
 [[package]]
@@ -1187,7 +1187,7 @@ name = "riscv-shared"
 version = "0.1.0"
 dependencies = [
  "r5-builder",
- "r5-ir",
+ "lpc-lpir",
  "r5-target-riscv32",
 ]
 
@@ -1195,11 +1195,11 @@ dependencies = [
 name = "riscv32-emulator"
 version = "0.1.0"
 dependencies = [
- "riscv32-encoder",
+ "lpc-riscv32",
 ]
 
 [[package]]
-name = "riscv32-encoder"
+name = "lpc-riscv32"
 version = "0.1.0"
 dependencies = [
  "nom",

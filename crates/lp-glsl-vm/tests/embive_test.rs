@@ -40,7 +40,7 @@ fn run_embive_test() -> Result<(), String> {
         .ok_or_else(|| "Could not find workspace root".to_string())?;
 
     // Build the program (cargo handles dependency tracking automatically)
-    // If embive-program or embive-runtime changes, cargo will rebuild automatically
+    // If embive-program or runtime-embive changes, cargo will rebuild automatically
     let output = std::process::Command::new("cargo")
         .args([
             "build",

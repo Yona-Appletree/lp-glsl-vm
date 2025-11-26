@@ -61,7 +61,7 @@ Design a clean, modular, no_std-compatible compiler architecture for generating 
 
 ### 1. IR (Intermediate Representation)
 
-**Crate**: `r5-ir` (RISC-V 5 IR)
+**Crate**: `lpc-lpir` (RISC-V 5 IR)
 
 **Core Types**:
 - `Function`: A function with basic blocks, instructions, signature
@@ -193,7 +193,7 @@ trait Backend {
 **Key Components**:
 
 #### Instruction Encoding
-- Use `riscv32-encoder` crate for encoding instructions
+- Use `lpc-riscv32` crate for encoding instructions
 - Map abstract instructions to RISC-V opcodes
 - Handle instruction formats (R, I, S, U, J, B)
 
@@ -211,7 +211,7 @@ trait Backend {
 
 ### 6. Instruction Encoder
 
-**Crate**: `riscv32-encoder`
+**Crate**: `lpc-riscv32`
 
 **Purpose**: Low-level RISC-V 32-bit instruction encoding
 
@@ -227,7 +227,7 @@ trait Backend {
 
 ### Phase 1: Core IR (Foundation)
 
-1. **Create `r5-ir` crate**
+1. **Create `lpc-lpir` crate**
    - Define `Type` enum (i32, i64, f32, f64)
    - Define `Value` (SSA value identifier)
    - Define `Inst` enum (all instruction types)
@@ -236,7 +236,7 @@ trait Backend {
    - Define `Signature` (function signature: params + returns)
    - Write comprehensive tests
 
-2. **Create `riscv32-encoder` crate**
+2. **Create `lpc-riscv32` crate**
    - Recreate instruction encoder
    - Support all instruction formats
    - Register definitions
@@ -265,7 +265,7 @@ trait Backend {
    - Implement backend traits for RISC-V
    - Instruction lowering (IR → RISC-V)
    - Simple register allocator (linear scan)
-   - Code emission using `riscv32-encoder`
+   - Code emission using `lpc-riscv32`
    - ELF generation
    - Tests
 
@@ -290,7 +290,7 @@ trait Backend {
 
 ```
 crates/
-├── r5-ir/                    # Core IR types
+├── lpc-lpir/                    # Core IR types
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
@@ -336,7 +336,7 @@ crates/
 │       ├── const_fold.rs     # Constant folding
 │       └── simplify_cfg.rs   # CFG simplification
 │
-└── riscv32-encoder/          # RISC-V instruction encoder
+└── lpc-riscv32/          # RISC-V instruction encoder
     ├── Cargo.toml
     └── src/
         ├── lib.rs
@@ -346,27 +346,27 @@ crates/
 
 ## Dependencies
 
-### `r5-ir`
+### `lpc-lpir`
 - `no_std` compatible
 - Uses `alloc` for collections
 
 ### `r5-builder`
-- Depends on: `r5-ir`
+- Depends on: `lpc-lpir`
 - `no_std` compatible
 
 ### `r5-backend`
-- Depends on: `r5-ir`
+- Depends on: `lpc-lpir`
 - `no_std` compatible
 
 ### `r5-target-riscv32`
-- Depends on: `r5-ir`, `r5-backend`, `riscv32-encoder`
+- Depends on: `lpc-lpir`, `r5-backend`, `lpc-riscv32`
 - `no_std` compatible
 
 ### `r5-opt`
-- Depends on: `r5-ir`
+- Depends on: `lpc-lpir`
 - `no_std` compatible
 
-### `riscv32-encoder`
+### `lpc-riscv32`
 - Pure `no_std` (no `alloc` needed)
 - No dependencies
 

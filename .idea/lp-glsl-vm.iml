@@ -5,22 +5,22 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/cranelift-jit-no-std/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/crates/embive-runtime/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/lp-glsl-vm/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/lp-glsl-vm/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/r5-builder/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/crates/r5-ir/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/r5-target-riscv32/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/r5-test-util/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/r5-test-util/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/riscv-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/riscv32-codegen/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/crates/riscv32-encoder/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/apps/embive-program/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/apps/esp32c3-jit-test/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/crates/r5-target-riscv32/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/riscv32-emulator/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/riscv32-emulator/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-lpir/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-riscv32/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-riscv32/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/runtime-embive/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/apps/esp32c3-jit-test/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>

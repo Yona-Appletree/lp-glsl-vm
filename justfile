@@ -16,9 +16,9 @@ build-host:
 
 # Build cross-compile crates (uses default targets from .cargo/config.toml)
 build-cross:
-    cargo build --package embive-runtime
-    cargo build --package embive-program
-    cargo build --package esp32c3-jit-test
+    cargo build --package runtime-embive --target riscv32imac-unknown-none-elf
+    cargo build --package embive-program --target riscv32imac-unknown-none-elf
+    cargo build --package esp32c3-jit-test --target riscv32imac-unknown-none-elf
 
 # Build everything (host + cross)
 build: build-host build-cross
@@ -54,7 +54,7 @@ install-hooks:
 
 # Build embive-program (uses default target from .cargo/config.toml)
 # Cargo automatically handles dependency tracking, so this will rebuild
-# if embive-program or embive-runtime source files change
+# if embive-program or runtime-embive source files change
 embive-program:
     cargo build --package embive-program
 

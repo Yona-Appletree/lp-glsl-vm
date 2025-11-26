@@ -3,11 +3,11 @@
 
 extern crate alloc;
 #[macro_use]
-extern crate embive_runtime;
+extern crate runtime_embive;
 
 use core::panic::PanicInfo;
 
-use embive_runtime::{ebreak, panic_syscall};
+use runtime_embive::{ebreak, panic_syscall};
 mod jit_test;
 
 /// Panics will report to the host VM and then exit

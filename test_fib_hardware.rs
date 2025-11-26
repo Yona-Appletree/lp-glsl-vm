@@ -1,4 +1,4 @@
-use r5_target_riscv32::expect_ir_a0;
+use lpc_riscv32::expect_ir_a0;
 
 const FIB_SSA_HARDWARE: &str = r#"
 module {
@@ -32,9 +32,7 @@ block2:
 }"#;
 
 fn main() {
-    println!("Testing FIB_SSA_HARDWARE in emulator...");
+    println!("Testing FIB_SSA_HARDWARE in emu...");
     expect_ir_a0(FIB_SSA_HARDWARE, 55);
     println!("Test passed!");
 }
-
-

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use embive::transpiler::transpile_elf;
-use embive_runtime::syscall;
+use runtime_embive::syscall;
 use riscv_shared::build_and_compile_fib;
 
 /// JIT experiment: generate RISC-V fibonacci function using the new compiler architecture,

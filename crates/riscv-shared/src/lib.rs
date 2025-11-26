@@ -9,8 +9,9 @@ extern crate alloc;
 
 use alloc::string::String;
 
-use r5_ir::parse_module;
-use r5_target_riscv32::{compile_module_to_insts, generate_elf};
+use lpc_lpir::parse_module;
+use lpc_riscv32::generate_elf;
+use lpc_riscv32::compile_module_to_insts;
 
 /// Result of JIT compilation
 pub struct JitResult {
@@ -64,7 +65,7 @@ block0(v0: i32, v1: i32):
 
     compile_ssa_to_elf(ssa).expect("Failed to compile mul function")
 }
-// Version for emulator tests (call puts result in a0, then halt)
+// Version for emu tests (call puts result in a0, then halt)
 // The call instruction puts the return value in a0, then we halt so expect_ir_a0 can read it
 #[cfg(test)]
 const FIB_SSA_EMULATOR: &str = r#"
@@ -180,13 +181,13 @@ pub fn build_and_compile_fib_hardware() -> JitResult {
 
 #[cfg(test)]
 mod tests {
-    use r5_target_riscv32::expect_ir_a0;
+    use lpc_riscv32::expect_ir_a0;
 
     use super::*;
 
     #[test]
     fn test_fibonacci() {
-        // Test fib(10) = 55 using emulator version (no syscall)
+        // Test fib(10) = 55 using emu version (no syscall)
         expect_ir_a0(FIB_SSA_EMULATOR, 55);
     }
 }
