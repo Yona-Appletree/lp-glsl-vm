@@ -8,6 +8,7 @@ description = "RISC-V 5 Intermediate Representation"
 [lib]
 
 [dependencies]
+nom = { version = "7", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 

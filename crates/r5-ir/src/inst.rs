@@ -169,7 +169,9 @@ impl Inst {
             | Inst::IcmpLe { arg1, arg2, .. }
             | Inst::IcmpGt { arg1, arg2, .. }
             | Inst::IcmpGe { arg1, arg2, .. } => vec![*arg1, *arg2],
-            Inst::Iconst { .. } | Inst::Fconst { .. } | Inst::Jump { .. } | Inst::Halt => Vec::new(),
+            Inst::Iconst { .. } | Inst::Fconst { .. } | Inst::Jump { .. } | Inst::Halt => {
+                Vec::new()
+            }
             Inst::Br { condition, .. } => vec![*condition],
             Inst::Call { args, .. } => args.clone(),
             Inst::Syscall { args, .. } => args.clone(),
@@ -184,45 +186,111 @@ impl fmt::Display for Inst {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Inst::Iadd { result, arg1, arg2 } => {
-                write!(f, "%{} = iadd %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = iadd v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::Isub { result, arg1, arg2 } => {
-                write!(f, "%{} = isub %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = isub v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::Imul { result, arg1, arg2 } => {
-                write!(f, "%{} = imul %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = imul v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::Idiv { result, arg1, arg2 } => {
-                write!(f, "%{} = idiv %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = idiv v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::Irem { result, arg1, arg2 } => {
-                write!(f, "%{} = irem %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = irem v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::IcmpEq { result, arg1, arg2 } => {
-                write!(f, "%{} = icmp_eq %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = icmp_eq v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::IcmpNe { result, arg1, arg2 } => {
-                write!(f, "%{} = icmp_ne %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = icmp_ne v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::IcmpLt { result, arg1, arg2 } => {
-                write!(f, "%{} = icmp_lt %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = icmp_lt v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::IcmpLe { result, arg1, arg2 } => {
-                write!(f, "%{} = icmp_le %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = icmp_le v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::IcmpGt { result, arg1, arg2 } => {
-                write!(f, "%{} = icmp_gt %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = icmp_gt v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::IcmpGe { result, arg1, arg2 } => {
-                write!(f, "%{} = icmp_ge %{}, %{}", result.index(), arg1.index(), arg2.index())
+                write!(
+                    f,
+                    "v{} = icmp_ge v{}, v{}",
+                    result.index(),
+                    arg1.index(),
+                    arg2.index()
+                )
             }
             Inst::Iconst { result, value } => {
-                write!(f, "%{} = iconst {}", result.index(), value)
+                write!(f, "v{} = iconst {}", result.index(), value)
             }
             Inst::Fconst { result, value_bits } => {
                 // Decode f64 from bits
                 let f64_value = f64::from_bits(*value_bits);
-                write!(f, "%{} = fconst {}", result.index(), f64_value)
+                write!(f, "v{} = fconst {}", result.index(), f64_value)
             }
             Inst::Jump { target } => {
                 write!(f, "jump block{}", target)
@@ -234,19 +302,23 @@ impl fmt::Display for Inst {
             } => {
                 write!(
                     f,
-                    "br %{}, block{}, block{}",
+                    "brif v{}, block{}, block{}",
                     condition.index(),
                     target_true,
                     target_false
                 )
             }
-            Inst::Call { callee, args, results } => {
-                write!(f, "call @{}(", callee)?;
+            Inst::Call {
+                callee,
+                args,
+                results,
+            } => {
+                write!(f, "call %{}(", callee)?;
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "%{}", arg.index())?;
+                    write!(f, "v{}", arg.index())?;
                 }
                 write!(f, ")")?;
                 if !results.is_empty() {
@@ -255,7 +327,7 @@ impl fmt::Display for Inst {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        write!(f, "%{}", res.index())?;
+                        write!(f, "v{}", res.index())?;
                     }
                 }
                 Ok(())
@@ -266,28 +338,28 @@ impl fmt::Display for Inst {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "%{}", arg.index())?;
+                    write!(f, "v{}", arg.index())?;
                 }
                 write!(f, ")")
             }
             Inst::Return { values } => {
                 write!(f, "return")?;
                 if !values.is_empty() {
-                    write!(f, " ")?;
-                    for (i, val) in values.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "%{}", val.index())?;
+                    for val in values.iter() {
+                        write!(f, " v{}", val.index())?;
                     }
                 }
                 Ok(())
             }
-            Inst::Load { result, address, ty } => {
-                write!(f, "%{} = load {} %{}", result.index(), ty, address.index())
+            Inst::Load {
+                result,
+                address,
+                ty,
+            } => {
+                write!(f, "v{} = load.{} v{}", result.index(), ty, address.index())
             }
             Inst::Store { address, value, ty } => {
-                write!(f, "store {} %{}, %{}", ty, address.index(), value.index())
+                write!(f, "store.{} v{}, v{}", ty, address.index(), value.index())
             }
             Inst::Halt => write!(f, "halt"),
         }

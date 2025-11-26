@@ -1,6 +1,6 @@
 //! Functions.
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use core::fmt;
 
 use crate::{block::Block, signature::Signature};
@@ -88,7 +88,7 @@ impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Function name (if any)
         if let Some(name) = &self.name {
-            write!(f, "function @{}", name)?;
+            write!(f, "function %{}", name)?;
         } else {
             write!(f, "function")?;
         }
@@ -115,9 +115,10 @@ impl fmt::Display for Function {
 
         writeln!(f, " {{")?;
 
-        // Print each block
+        // Print each block with inline parameters (Cranelift format)
         for (i, block) in self.blocks.iter().enumerate() {
-            writeln!(f, "block{}:", i)?;
+            block.fmt_header(f, i)?;
+            writeln!(f)?;
             write!(f, "{}", block)?;
         }
 

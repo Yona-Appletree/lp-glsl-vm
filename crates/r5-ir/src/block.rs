@@ -59,17 +59,9 @@ impl Default for Block {
 
 impl fmt::Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Show block parameters (phi nodes) if any
-        if !self.params.is_empty() {
-            write!(f, "  params: ")?;
-            for (i, param) in self.params.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "%{}", param.index())?;
-            }
-            writeln!(f)?;
-        }
+        // Note: Block parameters are displayed inline in the block header
+        // by the Function Display implementation. This method only displays
+        // the instructions.
 
         // Show instructions
         for inst in &self.insts {
@@ -77,6 +69,29 @@ impl fmt::Display for Block {
         }
 
         Ok(())
+    }
+}
+
+impl Block {
+    /// Format block header with parameters inline (Cranelift format).
+    /// This is used by Function Display to show block0(v0: i32, v1: i32):
+    pub fn fmt_header(&self, f: &mut fmt::Formatter<'_>, block_index: usize) -> fmt::Result {
+        write!(f, "block{}", block_index)?;
+
+        if !self.params.is_empty() {
+            write!(f, "(")?;
+            for (i, param) in self.params.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                // Default to i32 for parameter types (as per plan)
+                // TODO: Could enhance later to track actual types
+                write!(f, "v{}: i32", param.index())?;
+            }
+            write!(f, ")")?;
+        }
+
+        write!(f, ":")
     }
 }
 

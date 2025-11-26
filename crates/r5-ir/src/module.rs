@@ -95,7 +95,7 @@ impl fmt::Display for Module {
         writeln!(f, "module {{")?;
 
         if let Some(entry) = &self.entry_function {
-            writeln!(f, "  entry: @{}", entry)?;
+            writeln!(f, "    entry: %{}", entry)?;
         }
 
         // Print each function
@@ -104,7 +104,7 @@ impl fmt::Display for Module {
             // Temporarily set the function name for display
             let mut func_with_name = func.clone();
             func_with_name.set_name(name.clone());
-            write!(f, "{}", func_with_name)?;
+            write!(f, "    {}", func_with_name)?;
         }
 
         writeln!(f, "}}")?;
@@ -114,23 +114,25 @@ impl fmt::Display for Module {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::String, vec};
+
     use super::*;
-    use crate::{Signature, Type};
+    use crate::Signature;
 
     #[test]
     fn test_module_creation() {
         let module = Module::new();
         assert_eq!(module.function_count(), 0);
-        assert_eq!(module.entry_function(), None);
+        assert!(module.entry_function().is_none());
     }
 
     #[test]
     fn test_module_add_function() {
         let mut module = Module::new();
-        let sig = Signature::new(vec![Type::I32], vec![Type::I32]);
+        let sig = Signature::new(vec![crate::Type::I32], vec![crate::Type::I32]);
         let func = Function::new(sig);
 
-        module.add_function("test".to_string(), func);
+        module.add_function(String::from("test"), func);
         assert_eq!(module.function_count(), 1);
         assert!(module.get_function("test").is_some());
     }
@@ -141,8 +143,8 @@ mod tests {
         let sig = Signature::empty();
         let func = Function::new(sig);
 
-        module.add_function("main".to_string(), func);
-        module.set_entry_function("main".to_string());
+        module.add_function(String::from("main"), func);
+        module.set_entry_function(String::from("main"));
 
         assert!(module.entry_function().is_some());
         assert_eq!(module.entry_function.as_ref().unwrap(), "main");
@@ -156,14 +158,14 @@ mod tests {
         let func1 = Function::new(sig.clone());
         let func2 = Function::new(sig);
 
-        module.add_function("test".to_string(), func1);
-        module.add_function("test".to_string(), func2);
+        module.add_function(String::from("test"), func1);
+        module.add_function(String::from("test"), func2);
     }
 
     #[test]
     #[should_panic(expected = "Function 'nonexistent' does not exist")]
     fn test_module_invalid_entry_function() {
         let mut module = Module::new();
-        module.set_entry_function("nonexistent".to_string());
+        module.set_entry_function(String::from("nonexistent"));
     }
 }
