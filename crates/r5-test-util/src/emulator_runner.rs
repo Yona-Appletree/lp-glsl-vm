@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use alloc::{string::String, vec::Vec};
+
 use riscv32_emulator::{LogLevel, Riscv32Emulator, StepResult};
 
 use crate::vm_runner::TestResult;
@@ -119,7 +120,11 @@ impl EmulatorRunner {
                                 "{} at {}:{}",
                                 msg,
                                 file.as_deref().unwrap_or("unknown"),
-                                if line > 0 { line.to_string() } else { "?".to_string() }
+                                if line > 0 {
+                                    line.to_string()
+                                } else {
+                                    "?".to_string()
+                                }
                             ));
 
                             // Halt on panic
@@ -187,4 +192,3 @@ impl EmulatorRunner {
         String::from_utf8_lossy(&buf).to_string()
     }
 }
-

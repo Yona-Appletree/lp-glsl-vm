@@ -657,4 +657,3 @@ block0:
     // 1+2+3+4 = 10
     expect_ir_syscall(ir, 0, &[10]);
 }
-

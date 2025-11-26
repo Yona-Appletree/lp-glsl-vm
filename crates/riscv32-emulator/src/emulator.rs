@@ -3,13 +3,16 @@
 extern crate alloc;
 
 use alloc::{format, string::String, vec::Vec};
+
 use riscv32_encoder::Gpr;
 
-use crate::decoder::decode_instruction;
-use crate::error::EmulatorError;
-use crate::executor::execute_instruction;
-use crate::logging::{InstLog, LogLevel};
-use crate::memory::Memory;
+use crate::{
+    decoder::decode_instruction,
+    error::EmulatorError,
+    executor::execute_instruction,
+    logging::{InstLog, LogLevel},
+    memory::Memory,
+};
 
 /// Result of a single step.
 #[derive(Debug, Clone)]
@@ -88,11 +91,19 @@ impl Riscv32Emulator {
         // Fetch instruction
         let inst_word = self.memory.fetch_instruction(self.pc).map_err(|mut e| {
             match &mut e {
-                EmulatorError::InvalidMemoryAccess { regs: err_regs, pc: err_pc, .. } => {
+                EmulatorError::InvalidMemoryAccess {
+                    regs: err_regs,
+                    pc: err_pc,
+                    ..
+                } => {
                     *err_regs = self.regs;
                     *err_pc = self.pc;
                 }
-                EmulatorError::UnalignedAccess { regs: err_regs, pc: err_pc, .. } => {
+                EmulatorError::UnalignedAccess {
+                    regs: err_regs,
+                    pc: err_pc,
+                    ..
+                } => {
                     *err_regs = self.regs;
                     *err_pc = self.pc;
                 }
@@ -102,14 +113,13 @@ impl Riscv32Emulator {
         })?;
 
         // Decode instruction
-        let decoded = decode_instruction(inst_word).map_err(|reason| {
-            EmulatorError::InvalidInstruction {
+        let decoded =
+            decode_instruction(inst_word).map_err(|reason| EmulatorError::InvalidInstruction {
                 pc: self.pc,
                 instruction: inst_word,
                 reason,
                 regs: self.regs,
-            }
-        })?;
+            })?;
 
         // Increment instruction count before execution (for cycle counting)
         self.instruction_count += 1;
@@ -248,7 +258,10 @@ impl Riscv32Emulator {
     pub fn dump_state(&self) -> String {
         let mut result = String::new();
         result.push_str(&format!("PC: 0x{:08x}\n", self.pc));
-        result.push_str(&format!("Instructions executed: {}\n", self.instruction_count));
+        result.push_str(&format!(
+            "Instructions executed: {}\n",
+            self.instruction_count
+        ));
         result.push_str("\nRegisters:\n");
 
         // Named registers first
@@ -276,7 +289,13 @@ impl Riscv32Emulator {
         for (reg, name) in &named_regs {
             let value = self.get_register(*reg);
             if value != 0 || *reg == Gpr::ZERO {
-                result.push_str(&format!("  {} (x{}) = 0x{:08x} ({})\n", name, reg.num(), value as u32, value));
+                result.push_str(&format!(
+                    "  {} (x{}) = 0x{:08x} ({})\n",
+                    name,
+                    reg.num(),
+                    value as u32,
+                    value
+                ));
             }
         }
 
@@ -327,6 +346,7 @@ impl Riscv32Emulator {
     /// * `log_count` - Number of recent logs to show (default 20)
     pub fn format_debug_info(&self, highlight_pc: Option<u32>, log_count: usize) -> String {
         use alloc::format;
+
         use riscv32_encoder::disassemble_instruction;
 
         let mut result = String::new();
@@ -336,7 +356,8 @@ impl Riscv32Emulator {
         let mut instructions = Vec::new();
         for i in (0..code.len()).step_by(4) {
             if i + 4 <= code.len() {
-                let inst_word = u32::from_le_bytes([code[i], code[i + 1], code[i + 2], code[i + 3]]);
+                let inst_word =
+                    u32::from_le_bytes([code[i], code[i + 1], code[i + 2], code[i + 3]]);
                 let pc = i as u32;
                 let disasm = disassemble_instruction(inst_word);
                 instructions.push((pc, inst_word, disasm));
@@ -409,4 +430,3 @@ impl Riscv32Emulator {
         result
     }
 }
-

@@ -33,7 +33,11 @@ pub fn parse_module(input: &str) -> Result<Module, ParseError> {
                 ))
             }
         }
-        Err(e) => Err(parse_error(trimmed, trimmed, &alloc::format!("Parse error: {:?}", e))),
+        Err(e) => Err(parse_error(
+            trimmed,
+            trimmed,
+            &alloc::format!("Parse error: {:?}", e),
+        )),
     }
 }
 
@@ -55,7 +59,11 @@ pub fn parse_function(input: &str) -> Result<Function, ParseError> {
                 ))
             }
         }
-        Err(e) => Err(parse_error(trimmed, trimmed, &alloc::format!("Parse error: {:?}", e))),
+        Err(e) => Err(parse_error(
+            trimmed,
+            trimmed,
+            &alloc::format!("Parse error: {:?}", e),
+        )),
     }
 }
 
@@ -123,7 +131,11 @@ mod tests {
                 return v0 ; return comment
         }"#;
         let result = parse_function(input.trim());
-        assert!(result.is_ok(), "parse_function with comments failed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "parse_function with comments failed: {:?}",
+            result
+        );
         let func = result.unwrap();
         assert_eq!(func.blocks.len(), 1);
         assert_eq!(func.blocks[0].insts.len(), 2);
@@ -144,7 +156,11 @@ mod tests {
             }
         }"#;
         let result = parse_module(input.trim());
-        assert!(result.is_ok(), "parse_module with comments failed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "parse_module with comments failed: {:?}",
+            result
+        );
         let module = result.unwrap();
         assert_eq!(module.function_count(), 1);
         assert!(module.entry_function().is_some());

@@ -2,11 +2,7 @@
 
 use riscv32_encoder::{Gpr, Inst as RiscvInst};
 
-use crate::{
-    abi::AbiInfo,
-    emit::CodeBuffer,
-    frame::FrameLayout,
-};
+use crate::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout};
 
 impl super::Lowerer {
     /// Generate function epilogue.
@@ -31,7 +27,9 @@ impl super::Lowerer {
             }
 
             // Restore return address if we saved it (before restoring SP)
-            if frame_layout.has_function_calls {
+            // For entry functions, we saved garbage RA at the start, so don't restore it.
+            // The current RA (set by calls) should be used, or we'll emit ebreak.
+            if frame_layout.has_function_calls && !self.is_entry_function {
                 let ra_offset = if frame_layout.setup_area_size > 0 {
                     frame_layout.setup_area_size as i32 - 4
                 } else {
@@ -52,12 +50,37 @@ impl super::Lowerer {
             });
         }
 
-        // Return: jalr x0, ra, 0
-        code.emit(RiscvInst::Jalr {
-            rd: Gpr::ZERO,
-            rs1: Gpr::RA,
-            imm: 0,
-        });
+        // Return: jalr x0, ra, 0 (if RA is valid)
+        // For entry functions, we saved garbage RA at the start, so we didn't restore it.
+        // If the function made calls, RA should be valid (set by the last call).
+        // If it didn't make calls, RA is still garbage, so emit ebreak.
+        if self.is_entry_function {
+            if frame_layout.has_function_calls {
+                // Entry function that made calls: RA is valid (set by calls), use it
+                code.emit(RiscvInst::Jalr {
+                    rd: Gpr::ZERO,
+                    rs1: Gpr::RA,
+                    imm: 0,
+                });
+            } else {
+                // Entry function with no calls: RA is garbage, halt execution
+                code.emit(RiscvInst::Ebreak);
+            }
+        } else if frame_layout.has_function_calls {
+            // RA was saved and restored, so we can return normally
+            code.emit(RiscvInst::Jalr {
+                rd: Gpr::ZERO,
+                rs1: Gpr::RA,
+                imm: 0,
+            });
+        } else {
+            // Leaf function: RA is valid (set by caller), so we can return normally
+            code.emit(RiscvInst::Jalr {
+                rd: Gpr::ZERO,
+                rs1: Gpr::RA,
+                imm: 0,
+            });
+        }
     }
 }
 
@@ -69,8 +92,8 @@ mod tests {
 
     use super::super::Lowerer;
     use crate::{
-        abi::Abi, frame::FrameLayout, liveness::compute_liveness,
-        regalloc::allocate_registers, spill_reload::create_spill_reload_plan,
+        abi::Abi, frame::FrameLayout, liveness::compute_liveness, regalloc::allocate_registers,
+        spill_reload::create_spill_reload_plan,
     };
 
     #[test]
@@ -113,4 +136,3 @@ block0:
         ));
     }
 }
-

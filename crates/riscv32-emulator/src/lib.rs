@@ -23,4 +23,3 @@ pub use test_helpers::{
     expect_a0, expect_error, expect_error_with_ram, expect_memory_error,
     expect_memory_error_with_ram, expect_ok, expect_register, expect_unaligned_error,
 };
-

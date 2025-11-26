@@ -1,15 +1,10 @@
 //! Syscall instruction lowering.
 
+use r5_ir::Value;
 use riscv32_encoder::{Gpr, Inst as RiscvInst};
 
-use crate::{
-    emit::CodeBuffer,
-    frame::FrameLayout,
-    regalloc::RegisterAllocation,
-};
-
 use super::types::LoweringError;
-use r5_ir::Value;
+use crate::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
 
 impl super::Lowerer {
     /// Lower syscall instruction.
@@ -60,4 +55,3 @@ impl super::Lowerer {
         Ok(())
     }
 }
-

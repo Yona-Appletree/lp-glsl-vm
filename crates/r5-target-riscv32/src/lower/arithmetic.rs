@@ -1,15 +1,10 @@
 //! Arithmetic instruction lowering.
 
+use r5_ir::Value;
 use riscv32_encoder::{Gpr, Inst as RiscvInst};
 
-use crate::{
-    emit::CodeBuffer,
-    frame::FrameLayout,
-    regalloc::RegisterAllocation,
-};
-
 use super::types::LoweringError;
-use r5_ir::Value;
+use crate::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
 
 impl super::Lowerer {
     /// Lower iadd instruction.
@@ -185,8 +180,8 @@ mod tests {
 
     use super::super::Lowerer;
     use crate::{
-        abi::Abi, frame::FrameLayout, liveness::compute_liveness,
-        regalloc::allocate_registers, spill_reload::create_spill_reload_plan,
+        abi::Abi, frame::FrameLayout, liveness::compute_liveness, regalloc::allocate_registers,
+        spill_reload::create_spill_reload_plan,
     };
 
     #[test]
@@ -231,4 +226,3 @@ block0:
         assert!(!instructions.is_empty());
     }
 }
-

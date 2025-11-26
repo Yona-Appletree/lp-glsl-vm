@@ -1,16 +1,12 @@
 //! Helper methods for instruction lowering.
 
+use r5_ir::Value;
 use riscv32_encoder::{Gpr, Inst as RiscvInst};
 
-use crate::{
-    emit::CodeBuffer,
-    frame::FrameLayout,
-    regalloc::RegisterAllocation,
-    spill_reload::SpillReloadOp,
-};
-
 use super::types::LoweringError;
-use r5_ir::Value;
+use crate::{
+    emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation, spill_reload::SpillReloadOp,
+};
 
 /// Helper methods for Lowerer.
 impl super::Lowerer {
@@ -125,4 +121,3 @@ impl super::Lowerer {
         }
     }
 }
-

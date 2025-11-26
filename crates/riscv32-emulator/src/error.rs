@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use alloc::string::String;
+
 use riscv32_encoder::Gpr;
 
 /// Kind of memory access that failed.
@@ -53,11 +54,7 @@ pub enum EmulatorError {
         regs: [i32; 32],
     },
     /// Invalid register access.
-    InvalidRegister {
-        reg: Gpr,
-        pc: u32,
-        reason: String,
-    },
+    InvalidRegister { reg: Gpr, pc: u32, reason: String },
 }
 
 impl EmulatorError {
@@ -134,7 +131,8 @@ impl core::fmt::Display for EmulatorError {
                 ..
             } => write!(
                 f,
-                "Unaligned memory access at address 0x{:08x} (requires {} byte alignment) at PC 0x{:08x}",
+                "Unaligned memory access at address 0x{:08x} (requires {} byte alignment) at PC \
+                 0x{:08x}",
                 address, alignment, pc
             ),
             EmulatorError::UnknownOpcode {
@@ -157,4 +155,3 @@ impl core::fmt::Display for EmulatorError {
 }
 
 // Note: std::error::Error trait implementation would require std feature
-

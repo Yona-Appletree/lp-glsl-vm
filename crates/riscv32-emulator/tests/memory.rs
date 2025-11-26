@@ -18,7 +18,9 @@ lw a0, 1(sp)",
     let result = emu.step(); // lw - should fail
     assert!(result.is_err());
     match result {
-        Err(riscv32_emulator::EmulatorError::UnalignedAccess { address, alignment, .. }) => {
+        Err(riscv32_emulator::EmulatorError::UnalignedAccess {
+            address, alignment, ..
+        }) => {
             assert_eq!(address, 0x80000001);
             assert_eq!(alignment, 4);
         }
@@ -97,4 +99,3 @@ sw a0, 0(zero)",
         _ => panic!("Expected InvalidMemoryAccess error"),
     }
 }
-

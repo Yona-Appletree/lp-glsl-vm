@@ -231,7 +231,12 @@ impl CompiledModule {
                 format!("slti {}, {}, {}", gpr_name(rd), gpr_name(rs1), imm)
             }
             riscv32_encoder::Inst::Sltu { rd, rs1, rs2 } => {
-                format!("sltu {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+                format!(
+                    "sltu {}, {}, {}",
+                    gpr_name(rd),
+                    gpr_name(rs1),
+                    gpr_name(rs2)
+                )
             }
             riscv32_encoder::Inst::Sltiu { rd, rs1, imm } => {
                 format!("sltiu {}, {}, {}", gpr_name(rd), gpr_name(rs1), imm)
@@ -468,9 +473,12 @@ pub fn compile_module_to_insts(
 
             let abi_info = Abi::compute_abi_info(func, &allocation, max_outgoing_args);
 
+            // Mark this as an entry function
+            lowerer.set_is_entry_function(true);
             let code = lowerer
                 .lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
                 .map_err(|e| alloc::format!("Failed to lower function '{}': {}", entry_name, e))?;
+            lowerer.set_is_entry_function(false);
 
             // Prepend SP initialization to entry function
             use riscv32_encoder::{Gpr, Inst};
@@ -541,6 +549,7 @@ pub fn compile_module_to_insts(
             continue;
         }
         lowerer.clear_relocations();
+        lowerer.set_is_entry_function(false); // Not an entry function
 
         // Compute liveness, allocation, spill/reload, frame layout, and ABI info
         let liveness = compute_liveness(func);

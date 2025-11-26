@@ -1,15 +1,10 @@
 //! Comparison instruction lowering.
 
+use r5_ir::Value;
 use riscv32_encoder::{Gpr, Inst as RiscvInst};
 
-use crate::{
-    emit::CodeBuffer,
-    frame::FrameLayout,
-    regalloc::RegisterAllocation,
-};
-
 use super::types::LoweringError;
-use r5_ir::Value;
+use crate::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
 
 impl super::Lowerer {
     /// Lower icmp_eq instruction: result = (arg1 == arg2) ? 1 : 0
@@ -177,4 +172,3 @@ impl super::Lowerer {
         Ok(())
     }
 }
-

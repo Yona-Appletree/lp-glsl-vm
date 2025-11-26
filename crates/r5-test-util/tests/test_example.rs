@@ -9,12 +9,12 @@ fn test_add_function() {
     // Build IR: fn add(a: i32, b: i32) -> i32 { a + b }
     let sig = Signature::new(vec![Type::I32, Type::I32], vec![Type::I32]);
     let mut builder = FunctionBuilder::new(sig);
-    
+
     // Create entry block with parameters (a and b)
     let a = builder.new_value();
     let b = builder.new_value();
     let block_idx = builder.create_block_with_params(vec![a, b]);
-    
+
     let result = builder.new_value();
 
     {
@@ -31,4 +31,3 @@ fn test_add_function() {
         .expect_return(15)
         .run();
 }
-

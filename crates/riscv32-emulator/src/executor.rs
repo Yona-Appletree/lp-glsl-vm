@@ -1,9 +1,12 @@
 //! Instruction executor for RISC-V 32-bit instructions.
 
-use crate::error::EmulatorError;
-use crate::logging::{InstLog, SystemKind};
-use crate::memory::Memory;
 use riscv32_encoder::{Gpr, Inst};
+
+use crate::{
+    error::EmulatorError,
+    logging::{InstLog, SystemKind},
+    memory::Memory,
+};
 
 /// Result of executing a single instruction.
 #[derive(Debug, Clone)]
@@ -123,11 +126,19 @@ pub fn execute_instruction(
             let error_regs = *regs;
             let value = memory.read_word(address).map_err(|mut e| {
                 match &mut e {
-                    EmulatorError::InvalidMemoryAccess { regs: err_regs, pc: err_pc, .. } => {
+                    EmulatorError::InvalidMemoryAccess {
+                        regs: err_regs,
+                        pc: err_pc,
+                        ..
+                    } => {
                         *err_regs = error_regs;
                         *err_pc = pc;
                     }
-                    EmulatorError::UnalignedAccess { regs: err_regs, pc: err_pc, .. } => {
+                    EmulatorError::UnalignedAccess {
+                        regs: err_regs,
+                        pc: err_pc,
+                        ..
+                    } => {
                         *err_regs = error_regs;
                         *err_pc = pc;
                     }
@@ -165,11 +176,19 @@ pub fn execute_instruction(
             let error_regs = *regs;
             memory.write_word(address, value).map_err(|mut e| {
                 match &mut e {
-                    EmulatorError::InvalidMemoryAccess { regs: err_regs, pc: err_pc, .. } => {
+                    EmulatorError::InvalidMemoryAccess {
+                        regs: err_regs,
+                        pc: err_pc,
+                        ..
+                    } => {
                         *err_regs = error_regs;
                         *err_pc = pc;
                     }
-                    EmulatorError::UnalignedAccess { regs: err_regs, pc: err_pc, .. } => {
+                    EmulatorError::UnalignedAccess {
+                        regs: err_regs,
+                        pc: err_pc,
+                        ..
+                    } => {
                         *err_regs = error_regs;
                         *err_pc = pc;
                     }
@@ -203,7 +222,11 @@ pub fn execute_instruction(
                 pc,
                 instruction: instruction_word,
                 rd_old,
-                rd_new: if rd.num() == 0 { None } else { Some(next_pc as i32) },
+                rd_new: if rd.num() == 0 {
+                    None
+                } else {
+                    Some(next_pc as i32)
+                },
                 target_pc: target,
             }
         }
@@ -222,7 +245,11 @@ pub fn execute_instruction(
                 pc,
                 instruction: instruction_word,
                 rd_old,
-                rd_new: if rd.num() == 0 { None } else { Some(next_pc as i32) },
+                rd_new: if rd.num() == 0 {
+                    None
+                } else {
+                    Some(next_pc as i32)
+                },
                 target_pc: target,
             }
         }

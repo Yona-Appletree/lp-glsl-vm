@@ -63,13 +63,10 @@ block0:
         // Check that the maximum temporary slot offset is within the frame
         let max_offset = frame_layout.spill_slot_offset(max_temp_slot - 1);
         let frame_size = frame_layout.total_size();
-        
+
         // The offset should be negative and within the frame bounds
         // Frame starts at -frame_size (after SP adjustment)
-        assert!(
-            max_offset < 0,
-            "Spill slot offset should be negative"
-        );
+        assert!(max_offset < 0, "Spill slot offset should be negative");
         assert!(
             max_offset.abs() as u32 <= frame_size,
             "Spill slot offset {} should be within frame size {}",
@@ -98,8 +95,7 @@ block0:
 
     // Functions without calls shouldn't need temporary spill slots
     assert_eq!(
-        spill_reload.max_temp_spill_slots,
-        0,
+        spill_reload.max_temp_spill_slots, 0,
         "Functions without calls shouldn't need temporary spill slots"
     );
 }
@@ -144,14 +140,14 @@ block0:
         let max_slot = (total_spill_slots - 1) as u32;
         let max_offset = frame_layout.spill_slot_offset(max_slot);
         let frame_size = frame_layout.total_size();
-        
+
         assert!(
             max_offset.abs() as u32 <= frame_size,
-            "All spill slots should be within frame bounds. Max slot: {}, Max offset: {}, Frame size: {}",
+            "All spill slots should be within frame bounds. Max slot: {}, Max offset: {}, Frame \
+             size: {}",
             max_slot,
             max_offset.abs(),
             frame_size
         );
     }
 }
-

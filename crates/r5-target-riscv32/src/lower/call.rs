@@ -1,16 +1,15 @@
 //! Function call instruction lowering.
 
+use r5_ir::Value;
 use riscv32_encoder::{Gpr, Inst as RiscvInst};
 
+use super::types::{LoweringError, Relocation, RelocationInstType, RelocationTarget};
 use crate::{
     abi::{Abi, AbiInfo},
     emit::CodeBuffer,
     frame::FrameLayout,
     regalloc::RegisterAllocation,
 };
-
-use super::types::{LoweringError, Relocation, RelocationInstType, RelocationTarget};
-use r5_ir::Value;
 
 impl super::Lowerer {
     /// Lower call instruction.
@@ -184,4 +183,3 @@ impl super::Lowerer {
         Ok(())
     }
 }
-

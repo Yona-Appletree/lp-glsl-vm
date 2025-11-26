@@ -40,4 +40,3 @@ fn test_fib_hardware() {
     // ra is set by the call instruction, so return works correctly
     expect_ir_a0(FIB_SSA_HARDWARE, 55);
 }
-

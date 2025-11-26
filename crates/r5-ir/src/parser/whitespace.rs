@@ -14,10 +14,7 @@ use nom::{
 /// Consumes the `;` and everything until (but not including) the newline
 /// If there's no newline (end of input), consumes everything after `;`
 pub(crate) fn comment(input: &str) -> IResult<&str, &str> {
-    preceded(
-        char(';'),
-        take_while(|c| c != '\n' && c != '\r'),
-    )(input)
+    preceded(char(';'), take_while(|c| c != '\n' && c != '\r'))(input)
 }
 
 /// Parse whitespace (spaces, tabs, newlines, comments) - returns the matched string
@@ -25,7 +22,7 @@ pub(crate) fn blank_space(input: &str) -> IResult<&str, &str> {
     recognize(many0(alt((
         map(multispace1, |_| ()),
         map(tag("\\\n"), |_| ()), // Line continuation
-        map(comment, |_| ()),      // Single-line comments
+        map(comment, |_| ()),     // Single-line comments
     ))))(input)
 }
 
@@ -59,7 +56,10 @@ mod tests {
     fn test_comment() {
         // Single-line comment with text
         assert_eq!(comment("; comment\n"), Ok(("\n", " comment")));
-        assert_eq!(comment("; this is a comment\nrest"), Ok(("\nrest", " this is a comment")));
+        assert_eq!(
+            comment("; this is a comment\nrest"),
+            Ok(("\nrest", " this is a comment"))
+        );
 
         // Empty comment
         assert_eq!(comment(";\n"), Ok(("\n", "")));
@@ -87,7 +87,10 @@ mod tests {
         assert_eq!(blank_space("; comment\n  "), Ok(("", "; comment\n  ")));
 
         // Multiple comments
-        assert_eq!(blank_space("; first\n; second\n"), Ok(("", "; first\n; second\n")));
+        assert_eq!(
+            blank_space("; first\n; second\n"),
+            Ok(("", "; first\n; second\n"))
+        );
 
         // Comment between tokens
         assert_eq!(blank_space("  ; comment\n  "), Ok(("", "  ; comment\n  ")));

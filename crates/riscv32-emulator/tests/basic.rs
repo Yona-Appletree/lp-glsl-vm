@@ -14,8 +14,7 @@ ebreak",
     )
     .unwrap();
 
-    let mut emu = Riscv32Emulator::new(code, vec![0; 1024])
-        .with_log_level(LogLevel::Instructions);
+    let mut emu = Riscv32Emulator::new(code, vec![0; 1024]).with_log_level(LogLevel::Instructions);
 
     let result = emu.run_until_ebreak().expect("Execution failed");
     assert_eq!(result, 15, "Expected 5 + 10 = 15");
@@ -120,13 +119,14 @@ jal zero, -4",
     )
     .unwrap();
 
-    let mut emu = Riscv32Emulator::new(code, vec![0; 1024])
-        .with_max_instructions(100);
+    let mut emu = Riscv32Emulator::new(code, vec![0; 1024]).with_max_instructions(100);
 
     let result = emu.run_until_ebreak();
     assert!(result.is_err(), "Expected instruction limit error");
     match result {
-        Err(riscv32_emulator::EmulatorError::InstructionLimitExceeded { limit, executed, .. }) => {
+        Err(riscv32_emulator::EmulatorError::InstructionLimitExceeded {
+            limit, executed, ..
+        }) => {
             assert_eq!(limit, 100);
             assert_eq!(executed, 100);
         }
@@ -163,4 +163,3 @@ ebreak",
     let result = emu.run_until_ebreak().expect("Execution failed");
     assert_eq!(result, 0x12345000);
 }
-

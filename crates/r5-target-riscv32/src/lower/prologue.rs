@@ -1,15 +1,9 @@
 //! Function prologue generation.
 
+use r5_ir::Function;
 use riscv32_encoder::{Gpr, Inst as RiscvInst};
 
-use crate::{
-    abi::AbiInfo,
-    emit::CodeBuffer,
-    frame::FrameLayout,
-    regalloc::RegisterAllocation,
-};
-
-use r5_ir::Function;
+use crate::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
 
 impl super::Lowerer {
     /// Generate function prologue.
@@ -74,6 +68,9 @@ impl super::Lowerer {
                 // Save return address if we have calls (at offset 0 in setup area)
                 if frame_layout.has_function_calls {
                     // Save RA: sw ra, 0(sp) (or at setup_area_size - 4 if setup area > 0)
+                    // Note: For entry functions, RA is garbage at the start, but we save it anyway
+                    // because calls will set RA, and we need to preserve it across nested calls.
+                    // The epilogue will handle entry functions specially.
                     let ra_offset = if frame_layout.setup_area_size > 0 {
                         frame_layout.setup_area_size as i32 - 4
                     } else {
@@ -141,8 +138,8 @@ mod tests {
 
     use super::super::Lowerer;
     use crate::{
-        abi::Abi, frame::FrameLayout, liveness::compute_liveness,
-        regalloc::allocate_registers, spill_reload::create_spill_reload_plan,
+        abi::Abi, frame::FrameLayout, liveness::compute_liveness, regalloc::allocate_registers,
+        spill_reload::create_spill_reload_plan,
     };
 
     #[test]
@@ -309,4 +306,3 @@ block0:
         }
     }
 }
-

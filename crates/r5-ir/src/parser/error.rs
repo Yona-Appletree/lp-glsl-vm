@@ -22,7 +22,11 @@ impl fmt::Display for ParseError {
 
 impl core::error::Error for ParseError {}
 
-pub(crate) fn parse_error(original_input: &str, remaining_input: &str, message: &str) -> ParseError {
+pub(crate) fn parse_error(
+    original_input: &str,
+    remaining_input: &str,
+    message: &str,
+) -> ParseError {
     ParseError {
         message: alloc::string::ToString::to_string(message),
         position: original_input.len() - remaining_input.len(),

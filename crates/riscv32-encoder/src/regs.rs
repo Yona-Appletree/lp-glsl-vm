@@ -89,7 +89,9 @@ impl Gpr {
     pub const T6: Gpr = Gpr(31);
     // x3: global pointer
     pub const TP: Gpr = Gpr(4);
-    pub const ZERO: Gpr = Gpr(0); // x31: temporary
+    pub const ZERO: Gpr = Gpr(0);
+
+    // x31: temporary
 
     /// Parse a register name string into a Gpr.
     ///
@@ -191,8 +193,9 @@ impl fmt::Display for Gpr {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloc::format;
+
+    use super::*;
 
     #[test]
     fn test_gpr_creation() {

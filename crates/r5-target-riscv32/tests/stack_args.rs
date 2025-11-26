@@ -111,4 +111,3 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
 
     expect_ir_syscall(ir, 0, &[13]); // 1 + 12 = 13
 }
-

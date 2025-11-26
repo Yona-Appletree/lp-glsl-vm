@@ -1,6 +1,7 @@
 //! Memory model for the RISC-V 32 emulator.
 
 use alloc::vec::Vec;
+
 use crate::error::{EmulatorError, MemoryAccessKind};
 
 /// Default RAM start address (0x80000000, matching embive's RAM_OFFSET).
@@ -186,5 +187,3 @@ impl Memory {
         &self.code
     }
 }
-
-

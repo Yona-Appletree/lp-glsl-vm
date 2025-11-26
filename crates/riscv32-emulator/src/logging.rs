@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use core::fmt;
+
 use riscv32_encoder::{disassemble_instruction, Gpr};
 
 /// Logging verbosity level.
@@ -142,31 +143,46 @@ impl InstLog {
     /// Set the cycle count for this log entry.
     pub fn set_cycle(self, cycle: u64) -> Self {
         match self {
-            InstLog::Arithmetic { pc, instruction, rd, rs1_val, rs2_val, rd_old, rd_new, .. } => {
-                InstLog::Arithmetic {
-                    cycle,
-                    pc,
-                    instruction,
-                    rd,
-                    rs1_val,
-                    rs2_val,
-                    rd_old,
-                    rd_new,
-                }
-            }
-            InstLog::Load { pc, instruction, rd, rs1_val, addr, mem_val, rd_old, rd_new, .. } => {
-                InstLog::Load {
-                    cycle,
-                    pc,
-                    instruction,
-                    rd,
-                    rs1_val,
-                    addr,
-                    mem_val,
-                    rd_old,
-                    rd_new,
-                }
-            }
+            InstLog::Arithmetic {
+                pc,
+                instruction,
+                rd,
+                rs1_val,
+                rs2_val,
+                rd_old,
+                rd_new,
+                ..
+            } => InstLog::Arithmetic {
+                cycle,
+                pc,
+                instruction,
+                rd,
+                rs1_val,
+                rs2_val,
+                rd_old,
+                rd_new,
+            },
+            InstLog::Load {
+                pc,
+                instruction,
+                rd,
+                rs1_val,
+                addr,
+                mem_val,
+                rd_old,
+                rd_new,
+                ..
+            } => InstLog::Load {
+                cycle,
+                pc,
+                instruction,
+                rd,
+                rs1_val,
+                addr,
+                mem_val,
+                rd_old,
+                rd_new,
+            },
             InstLog::Store {
                 pc,
                 instruction,
@@ -326,19 +342,14 @@ impl fmt::Display for InstLog {
                 write!(f, "\n    jump: 0x{:08x} -> 0x{:08x}", pc, target_pc)?;
             }
             InstLog::Immediate {
-                rd,
-                rd_old,
-                rd_new,
-                ..
+                rd, rd_old, rd_new, ..
             } => {
                 write!(f, "\n    {}: {} -> {}", rd, rd_old, rd_new)?;
             }
-            InstLog::System { kind, .. } => {
-                match kind {
-                    SystemKind::Ecall => write!(f, "\n    syscall")?,
-                    SystemKind::Ebreak => write!(f, "\n    breakpoint")?,
-                }
-            }
+            InstLog::System { kind, .. } => match kind {
+                SystemKind::Ecall => write!(f, "\n    syscall")?,
+                SystemKind::Ebreak => write!(f, "\n    breakpoint")?,
+            },
         }
 
         Ok(())

@@ -3,7 +3,12 @@
 //! This module provides functions to parse RISC-V assembly text
 //! and convert it to binary instructions.
 
-use alloc::{collections::BTreeMap, format, string::String, string::ToString, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use nom::{
     branch::alt,
@@ -14,8 +19,7 @@ use nom::{
     IResult,
 };
 
-use crate::encode::*;
-use crate::regs::Gpr;
+use crate::{encode::*, regs::Gpr};
 
 /// Parse a register name.
 fn parse_register(input: &str) -> IResult<&str, Gpr> {
@@ -352,10 +356,7 @@ pub fn assemble_instruction(asm: &str) -> Result<u32, String> {
 /// Labels can be defined with `label_name:` on their own line, or provided
 /// in the labels map. Branch/jump instructions can reference labels by name.
 /// If a label is not found, an error is returned.
-pub fn assemble_code(
-    asm: &str,
-    labels: Option<&BTreeMap<String, u32>>,
-) -> Result<Vec<u8>, String> {
+pub fn assemble_code(asm: &str, labels: Option<&BTreeMap<String, u32>>) -> Result<Vec<u8>, String> {
     let mut code = Vec::new();
     let mut current_addr = 0u32;
     let mut label_map: BTreeMap<String, u32> = labels.cloned().unwrap_or_default();
@@ -432,9 +433,7 @@ fn parse_instruction_with_labels(
     let input = input.trim();
 
     // Check instruction type by looking at first word
-    let first_word_end = input
-        .find(char::is_whitespace)
-        .unwrap_or(input.len());
+    let first_word_end = input.find(char::is_whitespace).unwrap_or(input.len());
     let op = &input[..first_word_end];
 
     match op {
@@ -469,11 +468,16 @@ fn parse_branch_with_labels(
         .map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
     let (input, rs1) = terminated(parse_register, opt(char(',')))(input)
         .map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
-    let input = multispace0(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?.0;
+    let input = multispace0(input)
+        .map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?
+        .0;
     let (input, rs2) = terminated(parse_register, opt(char(',')))(input)
         .map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
-    let input = multispace0(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?.0;
-    let (_input, target) = parse_target(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
+    let input = multispace0(input)
+        .map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?
+        .0;
+    let (_input, target) =
+        parse_target(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
 
     let imm = match target {
         Target::Offset(off) => off,
@@ -508,8 +512,11 @@ fn parse_jal_with_labels(
         .map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
     let (input, rd) = terminated(parse_register, opt(char(',')))(input)
         .map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
-    let input = multispace0(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?.0;
-    let (_input, target) = parse_target(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
+    let input = multispace0(input)
+        .map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?
+        .0;
+    let (_input, target) =
+        parse_target(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
 
     let imm = match target {
         Target::Offset(off) => off,
@@ -656,4 +663,3 @@ mod tests {
         assert_eq!(code.len(), 12);
     }
 }
-

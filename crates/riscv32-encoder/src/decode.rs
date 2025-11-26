@@ -3,8 +3,7 @@
 //! This module provides functions to decode RISC-V 32-bit instructions
 //! into their structured representation.
 
-use crate::inst::Inst;
-use crate::regs::Gpr;
+use crate::{inst::Inst, regs::Gpr};
 
 /// Decoded instruction fields.
 ///
@@ -162,7 +161,10 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                     rs1,
                     imm: fields.imm_i,
                 }),
-                _ => Err(format!("Unknown load instruction: funct3=0x{:x}", fields.funct3)),
+                _ => Err(format!(
+                    "Unknown load instruction: funct3=0x{:x}",
+                    fields.funct3
+                )),
             }
         }
         0x23 => {
@@ -173,7 +175,10 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                     rs2,
                     imm: fields.imm_s,
                 }),
-                _ => Err(format!("Unknown store instruction: funct3=0x{:x}", fields.funct3)),
+                _ => Err(format!(
+                    "Unknown store instruction: funct3=0x{:x}",
+                    fields.funct3
+                )),
             }
         }
         0x37 => {
@@ -205,7 +210,10 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                     rs1,
                     imm: fields.imm_i,
                 }),
-                _ => Err(format!("Unknown jalr instruction: funct3=0x{:x}", fields.funct3)),
+                _ => Err(format!(
+                    "Unknown jalr instruction: funct3=0x{:x}",
+                    fields.funct3
+                )),
             }
         }
         0x63 => {
@@ -231,7 +239,10 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                     rs2,
                     imm: fields.imm_b,
                 }),
-                _ => Err(format!("Unknown branch instruction: funct3=0x{:x}", fields.funct3)),
+                _ => Err(format!(
+                    "Unknown branch instruction: funct3=0x{:x}",
+                    fields.funct3
+                )),
             }
         }
         0x73 => {
@@ -247,4 +258,3 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
         _ => Err(format!("Unknown opcode: 0x{:02x}", fields.opcode)),
     }
 }
-

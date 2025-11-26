@@ -53,7 +53,12 @@ fn disassemble_instruction_with_labels(
                     format!("slt {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
                 }
                 (0x3, 0x0) => {
-                    format!("sltu {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+                    format!(
+                        "sltu {}, {}, {}",
+                        gpr_name(rd),
+                        gpr_name(rs1),
+                        gpr_name(rs2)
+                    )
                 }
                 _ => format!("unknown_r_type 0x{:08x}", inst),
             }

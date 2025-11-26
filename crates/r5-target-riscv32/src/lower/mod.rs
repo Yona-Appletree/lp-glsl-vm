@@ -20,16 +20,10 @@ use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
 use r5_ir::Inst;
 use riscv32_encoder::Inst as RiscvInst;
-
-use crate::{
-    abi::AbiInfo,
-    emit::CodeBuffer,
-    frame::FrameLayout,
-    regalloc::RegisterAllocation,
-};
-
 // Re-export public types
 pub use types::{LoweringError, Relocation, RelocationInstType, RelocationTarget};
+
+use crate::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
 
 /// Lower IR to RISC-V 32-bit code.
 ///
@@ -43,6 +37,8 @@ pub struct Lowerer {
     pub(super) relocations: Vec<Relocation>,
     /// Function-internal relocations (block branches, returns) - fixed up per function.
     pub(super) function_relocations: Vec<Relocation>,
+    /// Whether the current function being lowered is an entry function.
+    pub(super) is_entry_function: bool,
 }
 
 impl Lowerer {
@@ -53,7 +49,13 @@ impl Lowerer {
             function_addresses: BTreeMap::new(),
             relocations: Vec::new(),
             function_relocations: Vec::new(),
+            is_entry_function: false,
         }
+    }
+
+    /// Set whether the current function being lowered is an entry function.
+    pub fn set_is_entry_function(&mut self, is_entry: bool) {
+        self.is_entry_function = is_entry;
     }
 
     /// Set the module context for function calls.
@@ -75,6 +77,7 @@ impl Lowerer {
     pub fn clear_relocations(&mut self) {
         self.relocations.clear();
         self.function_relocations.clear();
+        self.is_entry_function = false;
     }
 
     /// Get function-internal relocations (for fixup after epilogue).
@@ -149,7 +152,15 @@ impl Lowerer {
                 args,
                 results,
             } => {
-                self.lower_call(code, callee, args, results, allocation, frame_layout, abi_info)?;
+                self.lower_call(
+                    code,
+                    callee,
+                    args,
+                    results,
+                    allocation,
+                    frame_layout,
+                    abi_info,
+                )?;
             }
             Inst::Jump { .. } => {
                 // Jump is handled differently - it can use block_addresses since
@@ -163,7 +174,14 @@ impl Lowerer {
                 target_true,
                 target_false,
             } => {
-                self.lower_br(code, *condition, *target_true, *target_false, allocation, frame_layout)?;
+                self.lower_br(
+                    code,
+                    *condition,
+                    *target_true,
+                    *target_false,
+                    allocation,
+                    frame_layout,
+                )?;
             }
             Inst::Halt => {
                 code.emit(RiscvInst::Ebreak);
@@ -195,8 +213,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        abi::Abi, frame::FrameLayout, liveness::compute_liveness,
-        regalloc::allocate_registers, spill_reload::create_spill_reload_plan,
+        abi::Abi, frame::FrameLayout, liveness::compute_liveness, regalloc::allocate_registers,
+        spill_reload::create_spill_reload_plan,
     };
 
     #[test]
@@ -343,4 +361,3 @@ block0:
         }
     }
 }
-

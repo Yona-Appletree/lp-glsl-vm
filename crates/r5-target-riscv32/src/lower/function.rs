@@ -2,19 +2,14 @@
 
 use alloc::collections::BTreeMap;
 
+use r5_ir::{Function, Value};
 use riscv32_encoder::Inst as RiscvInst;
 
-use crate::{
-    abi::AbiInfo,
-    emit::CodeBuffer,
-    frame::FrameLayout,
-    liveness::InstPoint,
-    regalloc::RegisterAllocation,
-    spill_reload::SpillReloadPlan,
-};
-
 use super::types::{LoweringError, RelocationInstType, RelocationTarget};
-use r5_ir::{Function, Value};
+use crate::{
+    abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, liveness::InstPoint,
+    regalloc::RegisterAllocation, spill_reload::SpillReloadPlan,
+};
 
 /// Lower a function to RISC-V 32-bit code.
 ///
@@ -134,4 +129,3 @@ pub(super) fn lower_function_impl(
 
     Ok(code)
 }
-

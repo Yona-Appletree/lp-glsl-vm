@@ -42,7 +42,6 @@ pub fn debug_riscv32_ops(ops: &[Inst]) -> Result<Riscv32Emulator, EmulatorError>
     Ok(Riscv32Emulator::new(code, vec![0; 1024 * 1024]).with_log_level(LogLevel::Instructions))
 }
 
-
 /// Format error with disassembly and logs.
 fn format_error(emu: &Riscv32Emulator, error: &EmulatorError, _code: &[u8]) -> String {
     let mut result = String::new();
