@@ -110,20 +110,36 @@ pub fn create_spill_reload_plan(
                     results.iter().copied().collect();
 
                 // Find all live values in caller-saved registers
-                // BUT: Don't spill argument/return registers (a0-a7) that are actually
-                // used as arguments or return values for this call, as they're handled by the ABI.
-                // However, if a value in a0-a7 is NOT an argument/return, it should still be spilled.
+                // BUT: Don't spill return values (they're written to, not read from).
+                // For arguments: we need to spill them if they're used AFTER the call,
+                // because the call will overwrite their register with the return value.
                 let mut to_spill = Vec::new();
                 for (value, reg) in &allocation.value_to_reg {
                     if crate::abi::Abi::is_caller_saved(*reg) {
-                        // Skip a0-a7 only if they're actually arguments or return values for this call
+                        // Skip return values - they're written to by the call, not read from
+                        if call_results.contains(value) {
+                            continue;
+                        }
+
+                        // For arguments in a0-a7: check if they're used after the call
                         let reg_num = reg.num();
-                        if reg_num >= 10 && reg_num <= 17 {
-                            // a0-a7: Only skip if this value is an argument or return value
-                            if call_args.contains(value) || call_results.contains(value) {
+                        if (10..=17).contains(&reg_num) && call_args.contains(value) {
+                            // This is an argument in a0-a7
+                            // Check if it's used after the call
+                            if let Some(live_range) = liveness.live_range(*value) {
+                                // If last_use is exactly at call_point, it's only used as an argument
+                                // If last_use > call_point, it's used after the call and needs spilling
+                                if live_range.last_use <= call_point {
+                                    // Only used as argument, not after - skip spilling
+                                    continue;
+                                }
+                                // Otherwise, fall through to add it to to_spill
+                            } else {
+                                // No live range info - skip to be safe
                                 continue;
                             }
                         }
+
                         // Check if value is live across the call
                         if let Some(live_range) = liveness.live_range(*value) {
                             if live_range.last_use >= call_point {
