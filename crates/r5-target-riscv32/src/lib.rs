@@ -12,11 +12,13 @@ extern crate alloc;
 
 mod elf;
 mod emit;
+mod frame;
 mod lower;
 mod regalloc;
 
 pub use elf::{debug_elf, generate_elf};
 pub use emit::CodeBuffer;
+pub use frame::FrameLayout;
 pub use lower::Lowerer;
 
 /// Compile an IR function to RISC-V 32-bit code.

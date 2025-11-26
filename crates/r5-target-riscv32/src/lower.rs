@@ -5,7 +5,7 @@ use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use r5_ir::{Function, Inst, Module, Value};
 use riscv32_encoder::{self, Gpr};
 
-use crate::{emit::CodeBuffer, regalloc::SimpleRegAllocator};
+use crate::{emit::CodeBuffer, frame::FrameLayout, regalloc::SimpleRegAllocator};
 
 /// A relocation that needs to be fixed up.
 #[derive(Debug, Clone)]
@@ -25,6 +25,8 @@ pub struct Lowerer {
     function_addresses: BTreeMap<String, u32>,
     /// Relocations that need to be fixed up (call sites).
     relocations: Vec<Relocation>,
+    /// Current function's frame layout (set during function lowering).
+    current_frame_layout: Option<FrameLayout>,
 }
 
 impl Lowerer {
@@ -35,6 +37,7 @@ impl Lowerer {
             module: None,
             function_addresses: BTreeMap::new(),
             relocations: Vec::new(),
+            current_frame_layout: None,
         }
     }
 
@@ -120,7 +123,7 @@ impl Lowerer {
             // Handle block parameters
             for param in &block.params {
                 if !temp_regalloc.is_mapped(*param) {
-                    temp_regalloc.allocate(*param);
+                    let _ = temp_regalloc.allocate(*param);
                 }
             }
 
@@ -162,10 +165,188 @@ impl Lowerer {
         block_starts
     }
 
+    /// Analyze function to determine frame layout requirements.
+    fn analyze_function(&mut self, func: &Function) -> (bool, usize) {
+        // Check if function makes calls
+        let has_calls = func.blocks.iter().any(|block| {
+            block
+                .insts
+                .iter()
+                .any(|inst| matches!(inst, Inst::Call { .. }))
+        });
+
+        // Do a first pass to allocate registers and see what's used
+        self.regalloc.clear();
+        if let Some(entry_block) = func.blocks.first() {
+            Self::map_parameters_to_registers(&mut self.regalloc, entry_block);
+        }
+
+        for block in &func.blocks {
+            // Handle block parameters
+            for param in &block.params {
+                if !self.regalloc.is_mapped(*param) {
+                    let _ = self.regalloc.allocate(*param);
+                }
+            }
+
+            // Allocate registers for all instructions
+            for inst in &block.insts {
+                match inst {
+                    Inst::Iadd { result, arg1, arg2 } => {
+                        let _ = self.regalloc.allocate(*arg1);
+                        let _ = self.regalloc.allocate(*arg2);
+                        let _ = self.regalloc.allocate(*result);
+                    }
+                    Inst::Isub { result, arg1, arg2 } => {
+                        let _ = self.regalloc.allocate(*arg1);
+                        let _ = self.regalloc.allocate(*arg2);
+                        let _ = self.regalloc.allocate(*result);
+                    }
+                    Inst::Imul { result, arg1, arg2 } => {
+                        let _ = self.regalloc.allocate(*arg1);
+                        let _ = self.regalloc.allocate(*arg2);
+                        let _ = self.regalloc.allocate(*result);
+                    }
+                    Inst::Iconst { result, .. } => {
+                        let _ = self.regalloc.allocate(*result);
+                    }
+                    Inst::Call { args, results, .. } => {
+                        for arg in args {
+                            let _ = self.regalloc.allocate(*arg);
+                        }
+                        for res in results {
+                            let _ = self.regalloc.allocate(*res);
+                        }
+                    }
+                    Inst::Syscall { args, .. } => {
+                        for arg in args {
+                            let _ = self.regalloc.allocate(*arg);
+                        }
+                    }
+                    Inst::Return { values } => {
+                        for val in values {
+                            let _ = self.regalloc.allocate(*val);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let spill_slots = self.regalloc.spill_slot_count();
+        (has_calls, spill_slots)
+    }
+
+    /// Generate function prologue.
+    fn gen_prologue(&mut self, code: &mut CodeBuffer, frame_layout: &FrameLayout) {
+        let total_size = frame_layout.total_size();
+
+        // If no frame needed, skip prologue
+        if total_size == 0 {
+            return;
+        }
+
+        // Adjust SP once for entire frame
+        // For large sizes, we might need multiple instructions
+        // For now, assume we can use a single addi (up to 12-bit immediate)
+        if total_size <= 2047 {
+            code.emit(riscv32_encoder::addi(
+                Gpr::SP,
+                Gpr::SP,
+                -(total_size as i32),
+            ));
+        } else {
+            // For large frames, use multiple addi instructions or lui+addi
+            // This is a simplification - real implementation would handle this better
+            panic!("Frame size {} too large for single addi", total_size);
+        }
+
+        // Save RA if setup area is needed
+        if frame_layout.setup_area_size > 0 {
+            // Save RA: sw ra, 4(sp)
+            // RA is saved at offset 4 from SP (after frame adjustment)
+            code.emit(riscv32_encoder::sw(Gpr::SP, Gpr::RA, 4));
+            // Save FP (if used - for now we don't use FP, so skip)
+            // sw fp, 0(sp) would go here if FP is used
+        }
+
+        // Save callee-saved registers
+        // They are saved starting at offset setup_area_size from SP
+        let mut offset = frame_layout.setup_area_size as i32;
+        for reg in &frame_layout.clobbered_callee_saves {
+            code.emit(riscv32_encoder::sw(Gpr::SP, *reg, offset));
+            offset += 4;
+        }
+    }
+
+    /// Generate function epilogue.
+    fn gen_epilogue(&mut self, code: &mut CodeBuffer, frame_layout: &FrameLayout) {
+        let total_size = frame_layout.total_size();
+
+        // If no frame needed, skip epilogue
+        if total_size == 0 {
+            return;
+        }
+
+        // Restore callee-saved registers (reverse order of save)
+        // They were saved starting at offset setup_area_size from SP
+        // Last saved register is at offset setup_area_size + (count-1)*4
+        let mut offset = (frame_layout.setup_area_size
+            + (frame_layout.clobbered_callee_saves.len().saturating_sub(1) as u32) * 4)
+            as i32;
+        for reg in frame_layout.clobbered_callee_saves.iter().rev() {
+            code.emit(riscv32_encoder::lw(*reg, Gpr::SP, offset));
+            offset -= 4;
+        }
+
+        // Restore RA if setup area is needed
+        if frame_layout.setup_area_size > 0 {
+            // Restore RA: lw ra, 4(sp)
+            code.emit(riscv32_encoder::lw(Gpr::RA, Gpr::SP, 4));
+            // Restore FP (if used)
+            // lw fp, 0(sp) would go here if FP is used
+        }
+
+        // Restore SP for entire frame (single adjustment)
+        if total_size <= 2047 {
+            code.emit(riscv32_encoder::addi(Gpr::SP, Gpr::SP, total_size as i32));
+        } else {
+            panic!("Frame size {} too large for single addi", total_size);
+        }
+    }
+
     /// Lower a function to RISC-V 32-bit code.
     pub fn lower_function(&mut self, func: &Function) -> CodeBuffer {
         let mut code = CodeBuffer::new();
         self.regalloc.clear();
+
+        // Analyze function to determine frame layout requirements
+        let (has_calls, spill_slots) = self.analyze_function(func);
+
+        // Get used callee-saved registers
+        let used_callee_saved = self.regalloc.get_used_callee_saved();
+
+        // Get incoming/outgoing argument counts
+        let incoming_args = func.signature.params.len();
+        // For outgoing args, we need to check call sites - for now, assume max 8
+        let outgoing_args = 8; // TODO: Analyze actual call sites
+
+        // Compute frame layout
+        let frame_layout = FrameLayout::compute(
+            &used_callee_saved,
+            spill_slots,
+            has_calls,
+            incoming_args,
+            outgoing_args,
+        );
+
+        // Store frame layout for use during instruction lowering
+        self.current_frame_layout = Some(frame_layout.clone());
+
+        // Generate prologue
+        if frame_layout.total_size() > 0 {
+            self.gen_prologue(&mut code, &frame_layout);
+        }
 
         // Two-pass approach: first pass to compute block addresses, second pass to emit code
         // First pass: compute block start addresses
@@ -184,15 +365,24 @@ impl Lowerer {
             // Handle block parameters
             for param in &block.params {
                 if !self.regalloc.is_mapped(*param) {
-                    self.regalloc.allocate(*param);
+                    let _ = self.regalloc.allocate(*param);
                 }
             }
 
             // Lower each instruction
             for inst in &block.insts {
+                // Check if this is a return instruction - if so, generate epilogue before it
+                if matches!(inst, Inst::Return { .. }) {
+                    if frame_layout.total_size() > 0 {
+                        self.gen_epilogue(&mut code, &frame_layout);
+                    }
+                }
                 self.lower_inst(&mut code, func, inst, block_idx, &block_starts);
             }
         }
+
+        // Clear frame layout for next function
+        self.current_frame_layout = None;
 
         code
     }
@@ -245,11 +435,23 @@ impl Lowerer {
         }
     }
 
+    /// Helper to allocate a register, panicking if allocation fails.
+    /// Note: Proper spilling should happen at call sites, not here.
+    fn allocate_or_panic(&mut self, value: Value) -> Gpr {
+        self.regalloc.allocate(value).unwrap_or_else(|| {
+            panic!(
+                "Out of registers for value {:?}. This should not happen if frame layout is \
+                 computed correctly.",
+                value
+            );
+        })
+    }
+
     /// Lower `iadd` instruction: result = arg1 + arg2
     fn lower_iadd(&mut self, code: &mut CodeBuffer, result: Value, arg1: Value, arg2: Value) {
-        let reg1 = self.regalloc.allocate(arg1);
-        let reg2 = self.regalloc.allocate(arg2);
-        let reg_result = self.regalloc.allocate(result);
+        let reg1 = self.allocate_or_panic(arg1);
+        let reg2 = self.allocate_or_panic(arg2);
+        let reg_result = self.allocate_or_panic(result);
 
         // Use add for register-register
         code.emit(riscv32_encoder::add(reg_result, reg1, reg2));
@@ -257,9 +459,9 @@ impl Lowerer {
 
     /// Lower `isub` instruction: result = arg1 - arg2
     fn lower_isub(&mut self, code: &mut CodeBuffer, result: Value, arg1: Value, arg2: Value) {
-        let reg1 = self.regalloc.allocate(arg1);
-        let reg2 = self.regalloc.allocate(arg2);
-        let reg_result = self.regalloc.allocate(result);
+        let reg1 = self.allocate_or_panic(arg1);
+        let reg2 = self.allocate_or_panic(arg2);
+        let reg_result = self.allocate_or_panic(result);
 
         // Use sub for register-register
         code.emit(riscv32_encoder::sub(reg_result, reg1, reg2));
@@ -267,9 +469,9 @@ impl Lowerer {
 
     /// Lower `imul` instruction: result = arg1 * arg2
     fn lower_imul(&mut self, code: &mut CodeBuffer, result: Value, arg1: Value, arg2: Value) {
-        let reg1 = self.regalloc.allocate(arg1);
-        let reg2 = self.regalloc.allocate(arg2);
-        let reg_result = self.regalloc.allocate(result);
+        let reg1 = self.allocate_or_panic(arg1);
+        let reg2 = self.allocate_or_panic(arg2);
+        let reg_result = self.allocate_or_panic(result);
 
         // Use mul for register-register (M extension)
         code.emit(riscv32_encoder::mul(reg_result, reg1, reg2));
@@ -277,7 +479,7 @@ impl Lowerer {
 
     /// Lower `iconst` instruction: result = value
     fn lower_iconst(&mut self, code: &mut CodeBuffer, result: Value, value: i64) {
-        let reg_result = self.regalloc.allocate(result);
+        let reg_result = self.allocate_or_panic(result);
         let imm_i32 = value as i32;
 
         // For small constants, use addi with x0
@@ -304,6 +506,27 @@ impl Lowerer {
         }
     }
 
+    /// Get caller-saved registers that may be clobbered by a call.
+    fn get_clobbered_registers() -> Vec<Gpr> {
+        // Caller-saved: a0-a7 (10-17), t0-t6 (5-7, 28-31), ra (1)
+        let mut clobbers = Vec::new();
+        // a0-a7
+        for i in 10..=17 {
+            clobbers.push(Gpr::new(i));
+        }
+        // t0-t2
+        for i in 5..=7 {
+            clobbers.push(Gpr::new(i));
+        }
+        // t3-t6
+        for i in 28..=31 {
+            clobbers.push(Gpr::new(i));
+        }
+        // ra
+        clobbers.push(Gpr::RA);
+        clobbers
+    }
+
     /// Lower `call` instruction: results = callee(args...)
     fn lower_call(
         &mut self,
@@ -312,10 +535,57 @@ impl Lowerer {
         args: &[Value],
         results: &[Value],
     ) {
-        // Save caller-saved registers if needed (for now, assume we don't need to)
-        // TODO: Implement proper caller-saved register handling
+        let frame_layout = self
+            .current_frame_layout
+            .as_ref()
+            .expect("Frame layout must be set");
+
+        // Get clobbered registers (caller-saved)
+        let clobbers = Self::get_clobbered_registers();
+
+        // Find live values in clobbered registers that need to be spilled
+        // For now, we'll spill all values in caller-saved registers except:
+        // - Arguments that are being passed (they'll be moved anyway)
+        // - Return values (they'll be overwritten)
+        let mappings: Vec<(Value, Gpr)> = self
+            .regalloc
+            .get_all_mappings()
+            .iter()
+            .map(|(v, r)| (*v, *r))
+            .collect();
+        let mut values_to_spill = Vec::new();
+        for (value, reg) in &mappings {
+            if clobbers.contains(reg) {
+                // Check if this value is an argument being passed
+                let is_arg = args.contains(value);
+                // Check if this value is a result (will be overwritten)
+                let is_result = results.contains(value);
+                if !is_arg && !is_result {
+                    values_to_spill.push(*value);
+                }
+            }
+        }
+
+        // Spill live values to stack
+        let mut spilled_slots = Vec::new();
+        for value in &values_to_spill {
+            if let Some(reg) = self.regalloc.get(*value) {
+                let slot = self.regalloc.spill(*value);
+                let offset = frame_layout.spill_slot_offset(slot);
+                code.emit(riscv32_encoder::sw(Gpr::SP, reg, offset));
+                spilled_slots.push((*value, slot));
+            }
+        }
 
         // Set up arguments in a0-a7
+        // First, ensure all arguments are allocated
+        for arg in args.iter().take(8) {
+            if !self.regalloc.is_mapped(*arg) {
+                let _ = self.regalloc.allocate(*arg);
+            }
+        }
+
+        // Now move arguments to argument registers
         for (i, arg) in args.iter().take(8).enumerate() {
             let arg_reg = match i {
                 0 => Gpr::A0,
@@ -330,10 +600,10 @@ impl Lowerer {
             };
 
             // Get the register for the argument value
-            let arg_value_reg = self.regalloc.get(*arg).unwrap_or_else(|| {
-                // If not allocated, allocate it now
-                self.regalloc.allocate(*arg)
-            });
+            let arg_value_reg = self
+                .regalloc
+                .get(*arg)
+                .expect("Argument should be allocated");
 
             // Move argument to the appropriate argument register
             if arg_value_reg.num() != arg_reg.num() {
@@ -369,6 +639,14 @@ impl Lowerer {
             // Map the result value to the return register
             self.regalloc.map_value_to_register(*result, ret_reg);
         }
+
+        // Reload spilled values (reverse order)
+        for (value, slot) in spilled_slots.iter().rev() {
+            if let Some(reg) = self.regalloc.get(*value) {
+                let offset = frame_layout.spill_slot_offset(*slot);
+                code.emit(riscv32_encoder::lw(reg, Gpr::SP, offset));
+            }
+        }
     }
 
     /// Lower `syscall` instruction
@@ -391,7 +669,7 @@ impl Lowerer {
             let arg_value_reg = self
                 .regalloc
                 .get(*arg)
-                .unwrap_or_else(|| self.regalloc.allocate(*arg));
+                .unwrap_or_else(|| self.allocate_or_panic(*arg));
 
             // Move argument to the appropriate register
             if arg_value_reg.num() != arg_reg.num() {
@@ -463,20 +741,32 @@ impl Lowerer {
 
     /// Lower `return` instruction
     fn lower_return(&mut self, code: &mut CodeBuffer, values: &[Value]) {
-        // For now, just return (jalr x0, x1, 0)
-        // TODO: Handle return values properly (move to a0/a1)
-        if !values.is_empty() {
-            // Move first return value to a0
-            let ret_val = values[0];
-            let ret_reg = self.regalloc.get(ret_val).unwrap_or_else(|| {
+        // Move return values to a0-a7 (up to 8 return values)
+        for (i, value) in values.iter().take(8).enumerate() {
+            let ret_reg = match i {
+                0 => Gpr::A0,
+                1 => Gpr::A1,
+                2 => Gpr::A2,
+                3 => Gpr::A3,
+                4 => Gpr::A4,
+                5 => Gpr::A5,
+                6 => Gpr::A6,
+                7 => Gpr::A7,
+                _ => break,
+            };
+
+            // Get the register for the return value
+            let value_reg = self.regalloc.get(*value).unwrap_or_else(|| {
                 // If not allocated, allocate it now
-                self.regalloc.allocate(ret_val)
+                self.allocate_or_panic(*value)
             });
-            if ret_reg.num() != 10 {
-                // Move to a0 if not already there
-                code.emit(riscv32_encoder::add(Gpr::A0, ret_reg, Gpr::ZERO));
+
+            // Move to return register if not already there
+            if value_reg.num() != ret_reg.num() {
+                code.emit(riscv32_encoder::add(ret_reg, value_reg, Gpr::ZERO));
             }
         }
+
         // Return: jalr x0, x1, 0
         code.emit(riscv32_encoder::jalr(Gpr::ZERO, Gpr::RA, 0));
     }
@@ -489,6 +779,7 @@ impl Default for Lowerer {
             module: None,
             function_addresses: BTreeMap::new(),
             relocations: Vec::new(),
+            current_frame_layout: None,
         }
     }
 }
@@ -729,5 +1020,81 @@ mod tests {
         assert_eq!(regalloc.get(p0).unwrap().num(), 10); // a0
         assert_eq!(regalloc.get(p1).unwrap().num(), 11); // a1
         assert_eq!(regalloc.get(p2).unwrap().num(), 12); // a2
+    }
+
+    #[test]
+    fn test_prologue_adjusts_sp_once() {
+        use alloc::vec;
+
+        use riscv32_encoder::Gpr;
+
+        // Create a frame layout that requires prologue
+        let used_callee_saved = vec![Gpr::S0, Gpr::S1];
+        let frame_layout = FrameLayout::compute(&used_callee_saved, 0, true, 0, 0);
+
+        // Generate prologue
+        let mut lowerer = Lowerer::new();
+        let mut code = CodeBuffer::new();
+        lowerer.gen_prologue(&mut code, &frame_layout);
+
+        // Count SP adjustments (addi sp, sp, -N)
+        let bytes = code.as_bytes();
+        let mut sp_adjustments = 0;
+        let mut offset = 0;
+        while offset + 4 <= bytes.len() {
+            let inst_bytes = [
+                bytes[offset],
+                bytes[offset + 1],
+                bytes[offset + 2],
+                bytes[offset + 3],
+            ];
+            let inst = u32::from_le_bytes(inst_bytes);
+            let disasm = riscv32_encoder::disassemble_instruction(inst);
+            if disasm.contains("addi sp, sp,") && disasm.contains('-') {
+                sp_adjustments += 1;
+            }
+            offset += 4;
+        }
+
+        // Should adjust SP exactly once
+        assert_eq!(
+            sp_adjustments,
+            1,
+            "Prologue should adjust SP exactly once, but found {} adjustments. Code: {}",
+            sp_adjustments,
+            riscv32_encoder::disassemble_code(bytes)
+        );
+    }
+
+    #[test]
+    fn test_prologue_saves_callee_saved_registers() {
+        use alloc::vec;
+
+        use riscv32_encoder::Gpr;
+
+        // Create a frame layout with callee-saved registers
+        let used_callee_saved = vec![Gpr::S0, Gpr::S1];
+        let frame_layout = FrameLayout::compute(&used_callee_saved, 0, true, 0, 0);
+
+        // Generate prologue
+        let mut lowerer = Lowerer::new();
+        let mut code = CodeBuffer::new();
+        lowerer.gen_prologue(&mut code, &frame_layout);
+
+        // Verify callee-saved registers are saved
+        let bytes = code.as_bytes();
+        let disasm = riscv32_encoder::disassemble_code(bytes);
+
+        // Should save s0 and s1
+        assert!(
+            disasm.contains("sw s0,"),
+            "Prologue should save s0. Code: {}",
+            disasm
+        );
+        assert!(
+            disasm.contains("sw s1,"),
+            "Prologue should save s1. Code: {}",
+            disasm
+        );
     }
 }
