@@ -10,13 +10,22 @@ fmt-check:
 clippy:
     cargo clippy --all-targets --all-features -- -D warnings
 
-# Build the project
-build:
+# Build host-compatible crates (excludes cross-compile crates)
+build-host:
     cargo build --all-targets --all-features
 
-# Run tests
+# Build cross-compile crates (uses default targets from .cargo/config.toml)
+build-cross:
+    cargo build --package embive-runtime
+    cargo build --package embive-program
+    cargo build --package esp32c3-jit-test
+
+# Build everything (host + cross)
+build: build-host build-cross
+
+# Run tests (only host-compatible crates)
 test:
-    cargo test --all-features
+    cargo test --all-features --no-fail-fast
 
 # Run all checks (formatting + clippy + build + tests)
 check: fmt-check clippy build test
@@ -43,18 +52,17 @@ install-hooks:
     @chmod +x scripts/*.sh
     @echo "✅ Git hooks installed successfully!"
 
-# Build embive-program for riscv32imac-unknown-none-elf target
+# Build embive-program (uses default target from .cargo/config.toml)
 # Cargo automatically handles dependency tracking, so this will rebuild
 # if embive-program or embive-runtime source files change
 embive-program:
-    cargo build --package embive-program --target riscv32imac-unknown-none-elf
+    cargo build --package embive-program
 
 # Inspect ELF binary layout (sections, addresses, sizes)
 # Shows memory layout from linker script
 elf-layout:
     @echo "📋 ELF Section Layout:"
     @rust-objdump -h target/riscv32imac-unknown-none-elf/debug/embive-program 2>/dev/null || \
-     rust-objdump -h target/riscv32imc-unknown-none-elf/debug/embive-program 2>/dev/null || \
      echo "Binary not found. Run 'just embive-program' first."
 
 # Show linker script symbols (stack_start, heap_start, etc.)
@@ -62,20 +70,16 @@ elf-symbols:
     @echo "🔍 Linker Script Symbols:"
     @nm target/riscv32imac-unknown-none-elf/debug/embive-program 2>/dev/null | \
      grep -E "(__stack_start|__heap_start|__heap_end|_end|_bss|__data|__bss)" || \
-     nm target/riscv32imc-unknown-none-elf/debug/embive-program 2>/dev/null | \
-     grep -E "(__stack_start|__heap_start|__heap_end|_end|_bss|__data|__bss)" || \
      echo "Binary not found. Run 'just embive-program' first."
 
 # Show all symbols in the binary
 elf-all-symbols:
     @nm target/riscv32imac-unknown-none-elf/debug/embive-program 2>/dev/null || \
-     nm target/riscv32imc-unknown-none-elf/debug/embive-program 2>/dev/null || \
      echo "Binary not found. Run 'just embive-program' first."
 
 # Disassemble code section
 elf-disasm:
     @rust-objdump -d target/riscv32imac-unknown-none-elf/debug/embive-program 2>/dev/null | head -50 || \
-     rust-objdump -d target/riscv32imc-unknown-none-elf/debug/embive-program 2>/dev/null | head -50 || \
      echo "Binary not found. Run 'just embive-program' first."
 
 # Default recipe (run when just called without arguments)
