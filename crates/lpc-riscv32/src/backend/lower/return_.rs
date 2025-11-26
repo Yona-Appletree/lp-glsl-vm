@@ -28,18 +28,69 @@ impl super::Lowerer {
                 self.load_value_into_reg(code, *value, *return_reg, allocation, frame_layout)?;
             } else if idx >= 8 {
                 // Store to stack (values at index >= 8)
-                // These must be stored ABOVE the callee's frame so they persist after epilogue
-                // Before epilogue: SP points to bottom of frame
-                // After epilogue: SP is restored, so return values should be at SP + (idx-8)*4
-                // So we store at SP + total_size() + (idx-8)*4 before epilogue
+                // Stack returns are stored in the tail-args area, above outgoing args
+                // Before epilogue: SP points to bottom of tail-args area (SP = caller_SP - total_size)
+                // We store at SP + outgoing_args_size + (idx-8)*4
+                // After epilogue: SP is restored to caller_SP, so returns are at:
+                //   caller_SP - total_size + outgoing_args_size + (idx-8)*4
+                // But caller loads from caller_SP + (idx-8)*4, so we need:
+                //   caller_SP - total_size + outgoing_args_size + (idx-8)*4 = caller_SP + (idx-8)*4
+                //   => -total_size + outgoing_args_size = 0
+                //   => total_size = outgoing_args_size (not true!)
+                //
+                // Actually, the tail-args area persists after epilogue because it's part of the caller's frame.
+                // The caller reserves tail_args_size, which includes space for stack returns.
+                // Stack returns should be stored at a location that, after epilogue, is accessible at
+                // caller_SP + (idx-8)*4. Since tail-args is at caller_SP+0 to caller_SP+tail_args_size-1,
+                // and stack returns go above outgoing args, we store at:
+                //   SP + outgoing_args_size + (idx-8)*4 (before epilogue)
+                //   = (caller_SP - total_size) + outgoing_args_size + (idx-8)*4
+                // After epilogue, SP = caller_SP, so we need to load from:
+                //   caller_SP + outgoing_args_size + (idx-8)*4
+                // But the caller expects them at caller_SP + (idx-8)*4.
+                //
+                // Wait, I think the issue is that stack returns should be stored ABOVE the tail-args area,
+                // not within it. But that doesn't match Cranelift.
+                //
+                // Let me re-read Cranelift: they use StackAMode::OutgoingArg(offset + stack_arg_space),
+                // which means the offset already includes stack_arg_space. So for a return at index 8,
+                // offset is 0, and stack_arg_space is outgoing_args_size, so total offset is outgoing_args_size.
+                // They store at SP + outgoing_args_size, and load from SP + outgoing_args_size after epilogue.
+                // But the caller's tail-args area must be large enough to include this space.
+                //
+                // Actually, I think the issue is simpler: stack returns are stored in the caller's tail-args
+                // area, which is reserved by the caller. The callee stores them at SP + outgoing_args_size + offset,
+                // and after epilogue, the caller loads them from SP + outgoing_args_size + offset (where SP is caller_SP).
+                // But the ABI says they should be at SP + offset. So either:
+                // 1. The ABI is wrong, or
+                // 2. We need to store them differently
+                //
+                // Let me check: according to RISC-V ABI, stack returns go at (idx-8)*4 relative to SP.
+                // But Cranelift stores them at outgoing_args_size + (idx-8)*4. This suggests that
+                // the caller's tail-args area layout is: [outgoing args] [stack returns].
+                // So the caller loads from SP + outgoing_args_size + (idx-8)*4, not SP + (idx-8)*4.
+                //
+                // So the fix is: update call lowering to load from SP + outgoing_args_size + offset.
+                // But wait, we already do that! So the issue must be in return lowering.
+                //
+                // Actually, I think the real issue is that we're storing at the wrong location.
+                // We should store at SP + outgoing_args_size + offset, which we do.
+                // But after epilogue, SP is restored, so they're at caller_SP - total_size + outgoing_args_size + offset.
+                // For this to equal caller_SP + outgoing_args_size + offset (where caller loads from),
+                // we need total_size = 0, which is wrong.
+                //
+                // I think the issue is that tail-args area is NOT part of the callee's frame.
+                // It's part of the caller's frame, and the callee just uses it.
+                // So we should store at SP + total_size + outgoing_args_size + offset, so that after epilogue
+                // (when SP is restored by total_size), they're at caller_SP + outgoing_args_size + offset.
                 if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
                     // Load value into temp register
                     let temp_reg = Gpr::T0;
                     self.load_value_into_reg(code, *value, temp_reg, allocation, frame_layout)?;
 
-                    // Store above the frame: SP + total_size() + stack_offset
-                    // After epilogue restores SP, these will be at SP + stack_offset
-                    let storage_offset = frame_layout.total_size() as i32 + *stack_offset;
+                    // Store above the frame: SP + total_size + outgoing_args_size + stack_offset
+                    // After epilogue restores SP by total_size, these will be at caller_SP + outgoing_args_size + stack_offset
+                    let storage_offset = frame_layout.total_size() as i32 + frame_layout.outgoing_args_size as i32 + *stack_offset;
                     code.emit(RiscvInst::Sw {
                         rs1: Gpr::Sp,
                         rs2: temp_reg,
@@ -102,6 +153,8 @@ block0:
             total_spill_slots,
             has_calls,
             func.signature.params.len(),
+            0,
+            func.signature.returns.len(),
             0,
         );
 

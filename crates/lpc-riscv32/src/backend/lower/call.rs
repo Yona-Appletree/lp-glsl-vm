@@ -152,15 +152,15 @@ impl super::Lowerer {
 
         // Step 4: Load stack return values (index >= 8) from stack
         //
-        // Stack return values are stored at positive offsets from SP in the caller's frame.
-        // After the call returns, SP is restored to the caller's frame, so we load from
-        // SP + stack_offset where stack_offset is the same offset used when storing.
+        // Stack return values are stored in the tail-args area, above outgoing args.
+        // The callee stores them at SP + outgoing_args_size + (idx-8)*4 before epilogue.
+        // After epilogue, SP is restored, so they're at caller_SP + outgoing_args_size + (idx-8)*4.
+        // We load from the same location: SP + outgoing_args_size + (idx-8)*4.
         for (idx, result) in results.iter().enumerate() {
             if idx >= 8 {
                 if let Some(stack_offset) = abi_info.return_stack_offsets.get(&idx) {
-                    // After call returns, SP is restored to caller's frame, so we use stack_offset
-                    // directly (positive offset relative to SP).
-                    let actual_offset = *stack_offset;
+                    // Load from tail-args area: SP + outgoing_args_size + stack_offset
+                    let actual_offset = frame_layout.outgoing_args_size as i32 + *stack_offset;
 
                     // Load from stack into temp register
                     let temp_reg = Gpr::T0;
@@ -247,6 +247,8 @@ mod tests {
             has_calls,
             func.signature.params.len(),
             8, // Default max outgoing args for test helper
+            func.signature.returns.len(),
+            8, // Default max callee stack returns for test helper
         );
 
         let abi_info = Abi::compute_abi_info(func, &allocation, 8);
@@ -985,5 +987,108 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
         // Expected: (1*2) + (3*4) + (5*6) + (7*8) + (9*10) + (11*12)
         // = 2 + 12 + 30 + 56 + 90 + 132 = 322
         expect_ir_syscall(ir, 0, &[322]);
+    }
+
+    #[test]
+    fn test_multiple_returns_small() {
+        // Test function returning 2 values (both in registers)
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    call %test() -> v0, v1
+    v2 = iadd v0, v1
+    syscall 0(v2)
+    halt
+}
+
+function %test() -> i32, i32 {
+block0:
+    v0 = iconst 10
+    v1 = iconst 20
+    return v0 v1
+}
+}"#;
+
+        // Expected: 10 + 20 = 30
+        expect_ir_syscall(ir, 0, &[30]);
+    }
+
+    #[test]
+    fn test_multiple_returns_medium() {
+        // Test function returning 8 values (all in registers)
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    call %test() -> v0, v1, v2, v3, v4, v5, v6, v7
+    v8 = iadd v0, v1
+    v9 = iadd v8, v2
+    v10 = iadd v9, v3
+    v11 = iadd v10, v4
+    v12 = iadd v11, v5
+    v13 = iadd v12, v6
+    v14 = iadd v13, v7
+    syscall 0(v14)
+    halt
+}
+
+function %test() -> i32, i32, i32, i32, i32, i32, i32, i32 {
+block0:
+    v0 = iconst 1
+    v1 = iconst 2
+    v2 = iconst 3
+    v3 = iconst 4
+    v4 = iconst 5
+    v5 = iconst 6
+    v6 = iconst 7
+    v7 = iconst 8
+    return v0 v1 v2 v3 v4 v5 v6 v7
+}
+}"#;
+
+        // Expected: 1+2+3+4+5+6+7+8 = 36
+        expect_ir_syscall(ir, 0, &[36]);
+    }
+
+    #[test]
+    fn test_nested_calls_with_multiple_returns() {
+        // Test nested calls where inner function returns multiple values
+        let ir = r#"
+module {
+entry: %bootstrap
+
+function %bootstrap() -> i32 {
+block0:
+    call %outer() -> v0, v1
+    v2 = iadd v0, v1
+    syscall 0(v2)
+    halt
+}
+
+function %inner() -> i32, i32 {
+block0:
+    v0 = iconst 5
+    v1 = iconst 10
+    return v0 v1
+}
+
+function %outer() -> i32, i32 {
+block0:
+    call %inner() -> v0, v1
+    v2 = iconst 100
+    v3 = iadd v0, v2
+    v4 = iconst 200
+    v5 = iadd v1, v4
+    return v3 v5
+}
+}"#;
+
+        // Expected: (5+100) + (10+200) = 105 + 210 = 315
+        expect_ir_syscall(ir, 0, &[315]);
     }
 }

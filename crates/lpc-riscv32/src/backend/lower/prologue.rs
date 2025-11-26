@@ -106,16 +106,16 @@ impl super::Lowerer {
             }
 
             // Save return address if we have calls
-            // RA is saved in the setup area, which is above the outgoing args area
-            // Offset = outgoing_args_size + (setup_area_size - 4)
-            // For RISC-V 32-bit, setup_area_size is 8, so RA is at offset outgoing_args_size + 4
+            // RA is saved in the setup area, which is above the tail-args area
+            // Offset = tail_args_size + (setup_area_size - 4)
+            // For RISC-V 32-bit, setup_area_size is 8, so RA is at offset tail_args_size + 4
             if frame_layout.has_function_calls {
-                // Save RA: sw ra, offset(sp) where offset = outgoing_args_size + (setup_area_size - 4)
+                // Save RA: sw ra, offset(sp) where offset = tail_args_size + (setup_area_size - 4)
                 // Note: For entry functions, RA is garbage at the start, but we save it anyway
                 // because calls will set RA, and we need to preserve it across nested calls.
                 // The epilogue will handle entry functions specially.
                 let ra_offset = if frame_layout.setup_area_size > 0 {
-                    frame_layout.outgoing_args_size as i32 + frame_layout.setup_area_size as i32 - 4
+                    frame_layout.tail_args_size as i32 + frame_layout.setup_area_size as i32 - 4
                 } else {
                     0
                 };
@@ -172,6 +172,8 @@ block0:
             total_spill_slots,
             has_calls,
             func.signature.params.len(),
+            0,
+            func.signature.returns.len(),
             0,
         );
 
@@ -230,6 +232,8 @@ block0:
             total_spill_slots,
             has_calls,
             func.signature.params.len(),
+            0,
+            func.signature.returns.len(),
             0,
         );
 
@@ -290,6 +294,8 @@ block0:
             has_calls,
             func.signature.params.len(),
             8, // Max outgoing args
+            func.signature.returns.len(),
+            8, // Max callee stack returns
         );
 
         let abi_info = Abi::compute_abi_info(&func, &allocation, 8);
@@ -370,6 +376,8 @@ module {
             total_spill_slots,
             has_calls,
             func.signature.params.len(),
+            8,
+            func.signature.returns.len(),
             8,
         );
 

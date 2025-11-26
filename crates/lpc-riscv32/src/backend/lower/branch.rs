@@ -1,10 +1,12 @@
 //! Branch instruction lowering.
 
 use lpc_lpir::Value;
-use crate::{Gpr, Inst as RiscvInst};
 
-use super::types::{LoweringError, Relocation, RelocationInstType, RelocationTarget};
-use super::super::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
+use super::{
+    super::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation},
+    types::{LoweringError, Relocation, RelocationInstType, RelocationTarget},
+};
+use crate::{Gpr, Inst as RiscvInst};
 
 impl super::Lowerer {
     /// Lower branch instruction.
@@ -70,11 +72,13 @@ mod tests {
 
     use lpc_lpir::parse_function;
 
-    use crate::backend::Lowerer;
-    use crate::backend::{
-        Abi, FrameLayout, compute_liveness, allocate_registers, create_spill_reload_plan,
+    use crate::{
+        backend::{
+            allocate_registers, compute_liveness, create_spill_reload_plan, Abi, FrameLayout,
+            Lowerer,
+        },
+        expect_ir_a0,
     };
-    use crate::expect_ir_a0;
 
     #[test]
     fn test_block_address_recording_and_relocation_fixup() {
@@ -107,6 +111,8 @@ block2:
             total_spill_slots,
             has_calls,
             func.signature.params.len(),
+            0,
+            func.signature.returns.len(),
             0,
         );
 
@@ -149,7 +155,10 @@ block2:
         }
 
         // Check that instructions were emitted
-        assert!(code.instruction_count().as_usize() > 0, "No instructions were emitted");
+        assert!(
+            code.instruction_count().as_usize() > 0,
+            "No instructions were emitted"
+        );
     }
 
     #[test]

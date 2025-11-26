@@ -576,6 +576,8 @@ block0:
             has_calls,
             func.signature.params.len(),
             0,
+            func.signature.returns.len(),
+            0,
         );
 
         // Verify that all temporary spill slots are within frame bounds
@@ -662,6 +664,8 @@ block0:
             total_spill_slots,
             has_calls,
             func.signature.params.len(),
+            0,
+            func.signature.returns.len(),
             0,
         );
 

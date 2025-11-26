@@ -1,10 +1,12 @@
 //! Arithmetic instruction lowering.
 
 use lpc_lpir::Value;
-use crate::{Gpr, Inst as RiscvInst};
 
-use super::types::LoweringError;
-use super::super::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
+use super::{
+    super::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation},
+    types::LoweringError,
+};
+use crate::{Gpr, Inst as RiscvInst};
 
 impl super::Lowerer {
     /// Lower iadd instruction.
@@ -178,9 +180,8 @@ mod tests {
 
     use lpc_lpir::parse_function;
 
-    use crate::backend::Lowerer;
     use crate::backend::{
-        Abi, FrameLayout, compute_liveness, allocate_registers, create_spill_reload_plan,
+        allocate_registers, compute_liveness, create_spill_reload_plan, Abi, FrameLayout, Lowerer,
     };
 
     #[test]
@@ -207,6 +208,8 @@ block0:
             total_spill_slots,
             has_calls,
             func.signature.params.len(),
+            0,
+            func.signature.returns.len(),
             0,
         );
 

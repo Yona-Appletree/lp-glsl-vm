@@ -21,11 +21,13 @@ mod types;
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
 use lpc_lpir::Inst;
-use crate::Inst as RiscvInst;
 // Re-export public types
-pub use types::{ByteOffset, InstOffset, LoweringError, Relocation, RelocationInstType, RelocationTarget};
+pub use types::{
+    ByteOffset, InstOffset, LoweringError, Relocation, RelocationInstType, RelocationTarget,
+};
 
 use super::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
+use crate::Inst as RiscvInst;
 
 /// Lower IR to RISC-V 32-bit code.
 ///
@@ -213,10 +215,12 @@ mod tests {
 
     use lpc_lpir::parse_function;
 
-    use super::*;
-    use super::super::{
-        abi::Abi, frame::FrameLayout, liveness::compute_liveness, regalloc::allocate_registers,
-        spill_reload::create_spill_reload_plan,
+    use super::{
+        super::{
+            abi::Abi, frame::FrameLayout, liveness::compute_liveness, regalloc::allocate_registers,
+            spill_reload::create_spill_reload_plan,
+        },
+        *,
     };
 
     #[test]
@@ -248,6 +252,8 @@ block0:
             allocation.spill_slot_count,
             has_calls,
             func.signature.params.len(),
+            0,
+            func.signature.returns.len(),
             0,
         );
 
@@ -301,6 +307,8 @@ block0:
             has_calls,
             func.signature.params.len(),
             0,
+            func.signature.returns.len(),
+            0,
         );
 
         let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
@@ -343,6 +351,8 @@ block0:
             total_spill_slots,
             has_calls,
             func.signature.params.len(),
+            0,
+            func.signature.returns.len(),
             0,
         );
 

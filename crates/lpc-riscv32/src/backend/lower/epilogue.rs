@@ -1,8 +1,7 @@
 //! Function epilogue generation.
 
-use crate::{Gpr, Inst as RiscvInst};
-
 use super::super::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout};
+use crate::{Gpr, Inst as RiscvInst};
 
 impl super::Lowerer {
     /// Generate function epilogue.
@@ -27,13 +26,13 @@ impl super::Lowerer {
             }
 
             // Restore return address if we saved it (before restoring SP)
-            // RA is saved in the setup area, which is above the outgoing args area
-            // Offset = outgoing_args_size + (setup_area_size - 4)
+            // RA is saved in the setup area, which is above the tail-args area
+            // Offset = tail_args_size + (setup_area_size - 4)
             // For entry functions, we saved garbage RA at the start, so don't restore it.
             // The current RA (set by calls) should be used, or we'll emit ebreak.
             if frame_layout.has_function_calls && !self.is_entry_function {
                 let ra_offset = if frame_layout.setup_area_size > 0 {
-                    frame_layout.outgoing_args_size as i32 + frame_layout.setup_area_size as i32 - 4
+                    frame_layout.tail_args_size as i32 + frame_layout.setup_area_size as i32 - 4
                 } else {
                     0
                 };
@@ -92,9 +91,8 @@ mod tests {
 
     use lpc_lpir::parse_function;
 
-    use crate::backend::Lowerer;
     use crate::backend::{
-        Abi, FrameLayout, compute_liveness, allocate_registers, create_spill_reload_plan,
+        allocate_registers, compute_liveness, create_spill_reload_plan, Abi, FrameLayout, Lowerer,
     };
 
     #[test]
@@ -120,6 +118,8 @@ block0:
             has_calls,
             func.signature.params.len(),
             0,
+            func.signature.returns.len(),
+            0,
         );
 
         let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
@@ -142,6 +142,7 @@ block0:
         // Function that uses callee-saved registers and makes calls
         // Verify epilogue order: restore callee-saved → restore RA → adjust SP
         use lpc_lpir::parse_module;
+
         use crate::{Gpr, Inst};
 
         let ir_module = r#"
@@ -193,6 +194,8 @@ module {
             total_spill_slots,
             has_calls,
             func.signature.params.len(),
+            8,
+            func.signature.returns.len(),
             8,
         );
 

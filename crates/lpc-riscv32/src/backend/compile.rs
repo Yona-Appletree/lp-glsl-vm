@@ -1,4 +1,7 @@
-use super::{allocate_registers, compute_liveness, create_spill_reload_plan, lower, Abi, FrameLayout, Lowerer};
+use super::{
+    allocate_registers, compute_liveness, create_spill_reload_plan, lower, Abi, FrameLayout,
+    Lowerer,
+};
 
 /// Compile an IR function to RISC-V 32-bit code.
 ///
@@ -20,8 +23,9 @@ pub fn compile_function(func: &lpc_lpir::Function) -> alloc::vec::Vec<u8> {
             .any(|inst| matches!(inst, lpc_lpir::Inst::Call { .. }))
     });
 
-    // For deprecated function, use default max outgoing args
+    // For deprecated function, use default max outgoing args and max callee stack returns
     let max_outgoing_args = 8;
+    let max_callee_stack_returns = 8;
     // Include temporary spill slots needed for caller-saved register preservation
     let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
     let frame_layout = FrameLayout::compute(
@@ -30,6 +34,8 @@ pub fn compile_function(func: &lpc_lpir::Function) -> alloc::vec::Vec<u8> {
         has_calls,
         func.signature.params.len(),
         max_outgoing_args,
+        func.signature.returns.len(),
+        max_callee_stack_returns,
     );
 
     let abi_info = Abi::compute_abi_info(func, &allocation, max_outgoing_args);
@@ -65,6 +71,23 @@ fn compute_max_outgoing_args(func: &lpc_lpir::Function, module: &lpc_lpir::Modul
         }
     }
     max_args
+}
+
+/// Compute the maximum number of stack return values needed by any callee.
+/// This is used to reserve tail-args space for stack returns.
+fn compute_max_callee_stack_returns(func: &lpc_lpir::Function, module: &lpc_lpir::Module) -> usize {
+    let mut max_returns = 0;
+    for block in &func.blocks {
+        for inst in &block.insts {
+            if let lpc_lpir::Inst::Call { callee, .. } = inst {
+                // Look up callee signature in module
+                if let Some(callee_func) = module.functions.get(callee) {
+                    max_returns = max_returns.max(callee_func.signature.returns.len());
+                }
+            }
+        }
+    }
+    max_returns
 }
 
 /// A compiled module containing structured instructions and metadata.
@@ -400,7 +423,11 @@ pub fn compile_module_to_insts(
     module: &lpc_lpir::Module,
 ) -> Result<CompiledModule, alloc::string::String> {
     use alloc::{collections::BTreeMap, vec::Vec};
-    use super::{allocate_registers, compute_liveness, create_spill_reload_plan, lower, Abi, FrameLayout, Lowerer};
+
+    use super::{
+        allocate_registers, compute_liveness, create_spill_reload_plan, lower, Abi, FrameLayout,
+        Lowerer,
+    };
 
     let mut lowerer = Lowerer::new();
     lowerer.set_module(module.clone());
@@ -431,6 +458,7 @@ pub fn compile_module_to_insts(
             });
 
             let max_outgoing_args = compute_max_outgoing_args(func, module);
+            let max_callee_stack_returns = compute_max_callee_stack_returns(func, module);
             // Include temporary spill slots needed for caller-saved register preservation
             let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
             let frame_layout = FrameLayout::compute(
@@ -439,6 +467,8 @@ pub fn compile_module_to_insts(
                 has_calls,
                 func.signature.params.len(),
                 max_outgoing_args,
+                func.signature.returns.len(),
+                max_callee_stack_returns,
             );
 
             let abi_info = Abi::compute_abi_info(func, &allocation, max_outgoing_args);
@@ -493,7 +523,9 @@ pub fn compile_module_to_insts(
             // reloc.offset is already an instruction index within the function's code
             for reloc in &mut relocations {
                 // Add the bootstrap size and current offset to get final instruction index
-                reloc.offset = lower::InstOffset::from(current_inst_idx + bootstrap_size + reloc.offset.as_usize());
+                reloc.offset = lower::InstOffset::from(
+                    current_inst_idx + bootstrap_size + reloc.offset.as_usize(),
+                );
             }
 
             let code_inst_count = code.instruction_count();
@@ -534,6 +566,7 @@ pub fn compile_module_to_insts(
         });
 
         let max_outgoing_args = compute_max_outgoing_args(func, module);
+        let max_callee_stack_returns = compute_max_callee_stack_returns(func, module);
         // Include temporary spill slots needed for caller-saved register preservation
         let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
         let frame_layout = FrameLayout::compute(
@@ -542,6 +575,8 @@ pub fn compile_module_to_insts(
             has_calls,
             func.signature.params.len(),
             max_outgoing_args,
+            func.signature.returns.len(),
+            max_callee_stack_returns,
         );
 
         let abi_info = Abi::compute_abi_info(func, &allocation, max_outgoing_args);
@@ -643,7 +678,8 @@ pub fn compile_module_to_insts(
         // jal is PC-relative: target = PC + offset
         // When jal executes, PC points to the jal instruction
         // offset = target - PC = (target_inst_idx * 4) - (inst_idx * 4)
-        let target_byte_offset: lower::ByteOffset = lower::InstOffset::from(*target_inst_idx).into();
+        let target_byte_offset: lower::ByteOffset =
+            lower::InstOffset::from(*target_inst_idx).into();
         let jal_pc_byte_offset: lower::ByteOffset = reloc.offset.into();
         let offset = target_byte_offset.as_i32() - jal_pc_byte_offset.as_i32();
 
@@ -692,6 +728,7 @@ mod tests {
     use alloc::{collections::BTreeMap, string::String, vec};
 
     use lpc_lpir::{Block, Function, Module, Signature, Type, Value};
+
     use super::{align_to_4_bytes, compile_module, compute_max_outgoing_args};
 
     #[test]
@@ -705,8 +742,7 @@ mod tests {
 
     #[test]
     fn test_fixup_relocations() {
-        use super::lower::Relocation;
-        use super::fixup_relocations;
+        use super::{fixup_relocations, lower::Relocation};
 
         // Create mock code with a placeholder jal instruction
         let mut code = vec![0u8; 20];
@@ -721,9 +757,7 @@ mod tests {
         let relocations = vec![Relocation {
             offset: super::lower::InstOffset::from(2),
             target: super::lower::RelocationTarget::Function(String::from("target_func")),
-            inst_type: super::lower::RelocationInstType::Jal {
-                rd: crate::Gpr::Ra,
-            },
+            inst_type: super::lower::RelocationInstType::Jal { rd: crate::Gpr::Ra },
         }];
 
         // Create function addresses
@@ -749,17 +783,14 @@ mod tests {
 
     #[test]
     fn test_fixup_relocations_out_of_bounds() {
-        use super::lower::Relocation;
-        use super::fixup_relocations;
+        use super::{fixup_relocations, lower::Relocation};
 
         // Test with valid offset first
         let mut code = vec![0u8; 20];
         let relocations = vec![Relocation {
             offset: super::lower::InstOffset::from(2), // 2 instructions = 8 bytes, valid (8 + 4 = 12 <= 20)
             target: super::lower::RelocationTarget::Function(String::from("target_func")),
-            inst_type: super::lower::RelocationInstType::Jal {
-                rd: crate::Gpr::Ra,
-            },
+            inst_type: super::lower::RelocationInstType::Jal { rd: crate::Gpr::Ra },
         }];
 
         let mut function_addresses = BTreeMap::new();
@@ -773,9 +804,7 @@ mod tests {
         let relocations2 = vec![Relocation {
             offset: super::lower::InstOffset::from(2), // 2 instructions = 8 bytes, out of bounds (8 + 4 = 12 > 10)
             target: super::lower::RelocationTarget::Function(String::from("target_func")),
-            inst_type: super::lower::RelocationInstType::Jal {
-                rd: crate::Gpr::Ra,
-            },
+            inst_type: super::lower::RelocationInstType::Jal { rd: crate::Gpr::Ra },
         }];
 
         let result = fixup_relocations(&mut code2, &relocations2, &function_addresses, 0);
@@ -784,16 +813,13 @@ mod tests {
 
     #[test]
     fn test_fixup_relocations_missing_function() {
-        use super::lower::Relocation;
-        use super::fixup_relocations;
+        use super::{fixup_relocations, lower::Relocation};
 
         let mut code = vec![0u8; 20];
         let relocations = vec![Relocation {
             offset: super::lower::InstOffset::from(2), // 2 instructions = 8 bytes
             target: super::lower::RelocationTarget::Function(String::from("nonexistent_func")),
-            inst_type: super::lower::RelocationInstType::Jal {
-                rd: crate::Gpr::Ra,
-            },
+            inst_type: super::lower::RelocationInstType::Jal { rd: crate::Gpr::Ra },
         }];
 
         let function_addresses = BTreeMap::new();
