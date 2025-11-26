@@ -7,6 +7,8 @@ mod arithmetic;
 mod branch;
 mod call;
 mod comparisons;
+#[cfg(feature = "debug-lowering")]
+mod debug;
 mod epilogue;
 mod function;
 mod helpers;
@@ -21,7 +23,7 @@ use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use r5_ir::Inst;
 use riscv32_encoder::Inst as RiscvInst;
 // Re-export public types
-pub use types::{LoweringError, Relocation, RelocationInstType, RelocationTarget};
+pub use types::{ByteOffset, InstOffset, LoweringError, Relocation, RelocationInstType, RelocationTarget};
 
 use crate::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
 

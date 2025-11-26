@@ -3,6 +3,7 @@
 use alloc::vec::Vec;
 
 use riscv32_encoder::Inst;
+use crate::lower::InstOffset;
 
 /// A code buffer that accumulates RISC-V 32-bit instructions.
 ///
@@ -36,8 +37,8 @@ impl CodeBuffer {
     }
 
     /// Get the current instruction count.
-    pub fn instruction_count(&self) -> usize {
-        self.instructions.len()
+    pub fn instruction_count(&self) -> InstOffset {
+        InstOffset(self.instructions.len())
     }
 
     /// Set an instruction at a specific index (for fixup).
@@ -45,14 +46,15 @@ impl CodeBuffer {
     /// # Panics
     ///
     /// Panics if `index >= instructions.len()`.
-    pub fn set_instruction(&mut self, index: usize, inst: Inst) {
+    pub fn set_instruction(&mut self, index: InstOffset, inst: Inst) {
+        let idx = index.as_usize();
         assert!(
-            index < self.instructions.len(),
+            idx < self.instructions.len(),
             "Instruction index {} is out of bounds (instruction count: {})",
-            index,
+            idx,
             self.instructions.len()
         );
-        self.instructions[index] = inst;
+        self.instructions[idx] = inst;
     }
 
     /// Get the code as a byte slice.
@@ -96,7 +98,7 @@ mod tests {
     fn test_code_buffer() {
         let mut buf = CodeBuffer::new();
         assert_eq!(buf.len(), 0);
-        assert_eq!(buf.instruction_count(), 0);
+        assert_eq!(buf.instruction_count().as_usize(), 0);
 
         // Emit an instruction
         let inst = Inst::Addi {
@@ -106,12 +108,12 @@ mod tests {
         };
         buf.emit(inst.clone());
         assert_eq!(buf.len(), 4);
-        assert_eq!(buf.instruction_count(), 1);
+        assert_eq!(buf.instruction_count().as_usize(), 1);
 
         // Emit another instruction
         buf.emit(inst.clone());
         assert_eq!(buf.len(), 8);
-        assert_eq!(buf.instruction_count(), 2);
+        assert_eq!(buf.instruction_count().as_usize(), 2);
 
         // Check bytes
         let bytes = buf.as_bytes();

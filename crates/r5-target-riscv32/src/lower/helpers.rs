@@ -23,7 +23,7 @@ impl super::Lowerer {
                 code.emit(RiscvInst::Sw {
                     rs1: Gpr::SP,
                     rs2: *reg,
-                    imm: offset,
+                    imm: offset.as_i32(),
                 });
             }
             SpillReloadOp::Reload { reg, slot, .. } => {
@@ -31,7 +31,7 @@ impl super::Lowerer {
                 code.emit(RiscvInst::Lw {
                     rd: *reg,
                     rs1: Gpr::SP,
-                    imm: offset,
+                    imm: offset.as_i32(),
                 });
             }
         }
@@ -66,6 +66,13 @@ impl super::Lowerer {
     ) -> Result<(), LoweringError> {
         if let Some(reg) = self.get_register(value, allocation) {
             // Value is in a register - move it if needed
+            #[cfg(feature = "debug-lowering")]
+            crate::debug_lowering!(
+                "load_value_into_reg: {:?} -> {:?} (from register {:?})",
+                value,
+                target_reg,
+                reg
+            );
             if reg != target_reg {
                 code.emit(RiscvInst::Addi {
                     rd: target_reg,
@@ -77,10 +84,18 @@ impl super::Lowerer {
         } else if let Some(slot) = self.get_spill_slot(value, allocation) {
             // Value is spilled - reload it
             let offset = frame_layout.spill_slot_offset(slot);
+            #[cfg(feature = "debug-lowering")]
+            crate::debug_lowering!(
+                "load_value_into_reg: {:?} -> {:?} (from spill slot {}, offset={})",
+                value,
+                target_reg,
+                slot,
+                offset.as_i32()
+            );
             code.emit(RiscvInst::Lw {
                 rd: target_reg,
                 rs1: Gpr::SP,
-                imm: offset,
+                imm: offset.as_i32(),
             });
             Ok(())
         } else {

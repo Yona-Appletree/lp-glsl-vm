@@ -219,7 +219,7 @@ block0:
             .expect("Failed to lower function");
 
         // Should have generated some code
-        assert!(code.instruction_count() > 0);
+        assert!(code.instruction_count().as_usize() > 0);
 
         // Should have prologue, instructions, and epilogue
         let instructions = code.instructions();

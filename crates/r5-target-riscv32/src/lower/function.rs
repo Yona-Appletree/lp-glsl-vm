@@ -38,7 +38,7 @@ pub(super) fn lower_function_impl(
     // will use relocations that get fixed up in Phase 2
     for (block_idx, block) in func.blocks.iter().enumerate() {
         // Record block address (instruction index)
-        let block_start_addr = code.instruction_count() as u32;
+        let block_start_addr = code.instruction_count();
         block_addresses.insert(block_idx, block_start_addr);
 
         // Lower block parameters (if any) - these are already in registers from entry
@@ -69,7 +69,7 @@ pub(super) fn lower_function_impl(
     }
 
     // 4. Generate epilogue
-    let epilogue_inst_idx = code.instruction_count() as u32;
+    let epilogue_inst_idx = code.instruction_count();
     lowerer.gen_epilogue(&mut code, frame_layout, abi_info);
 
     // 5. Phase 2: Fix up function-internal relocations
@@ -99,9 +99,9 @@ pub(super) fn lower_function_impl(
         // Calculate PC-relative offset in bytes
         // When the instruction executes, PC points to the instruction
         // offset = target - PC = (target_inst_idx * 4) - (reloc.offset * 4)
-        let target_byte_addr = (target_inst_idx * 4) as i32;
-        let inst_byte_addr = (reloc.offset * 4) as i32;
-        let offset = target_byte_addr - inst_byte_addr;
+        let target_byte_offset: crate::lower::ByteOffset = target_inst_idx.into();
+        let inst_byte_offset: crate::lower::ByteOffset = reloc.offset.into();
+        let offset = target_byte_offset.as_i32() - inst_byte_offset.as_i32();
 
         // Update instruction in-place
         match &reloc.inst_type {

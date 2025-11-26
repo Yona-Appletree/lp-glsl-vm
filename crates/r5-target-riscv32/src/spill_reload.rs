@@ -113,7 +113,16 @@ pub fn create_spill_reload_plan(
                 // BUT: Don't spill return values (they're written to, not read from).
                 // For arguments: we need to spill them if they're used AFTER the call,
                 // because the call will overwrite their register with the return value.
+                // However, skip stack arguments (index >= 8) - they're handled by call lowering.
                 let mut to_spill = Vec::new();
+
+                // Build a map of argument values to their indices
+                let arg_index_map: alloc::collections::BTreeMap<_, _> = args
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, val)| (*val, idx))
+                    .collect();
+
                 for (value, reg) in &allocation.value_to_reg {
                     if crate::abi::Abi::is_caller_saved(*reg) {
                         // Skip return values - they're written to by the call, not read from
@@ -121,10 +130,19 @@ pub fn create_spill_reload_plan(
                             continue;
                         }
 
+                        // Skip stack arguments (index >= 8) - they're handled by call lowering code
+                        if let Some(&arg_idx) = arg_index_map.get(value) {
+                            if arg_idx >= 8 {
+                                // This is a stack argument - don't spill it here
+                                // The call lowering code will handle loading it and storing to stack
+                                continue;
+                            }
+                        }
+
                         // For arguments in a0-a7: check if they're used after the call
                         let reg_num = reg.num();
                         if (10..=17).contains(&reg_num) && call_args.contains(value) {
-                            // This is an argument in a0-a7
+                            // This is a register argument (index < 8) in a0-a7
                             // Check if it's used after the call
                             if let Some(live_range) = liveness.live_range(*value) {
                                 // If last_use is exactly at call_point, it's only used as an argument
@@ -573,11 +591,14 @@ block0:
 
             // The offset should be negative and within the frame bounds
             // Frame starts at -frame_size (after SP adjustment)
-            assert!(max_offset < 0, "Spill slot offset should be negative");
             assert!(
-                max_offset.abs() as u32 <= frame_size,
+                max_offset.as_i32() < 0,
+                "Spill slot offset should be negative"
+            );
+            assert!(
+                max_offset.as_i32().abs() as u32 <= frame_size,
                 "Spill slot offset {} should be within frame size {}",
-                max_offset.abs(),
+                max_offset.as_i32().abs(),
                 frame_size
             );
         }
@@ -653,7 +674,7 @@ block0:
             let frame_size = frame_layout.total_size();
 
             assert!(
-                max_offset.abs() as u32 <= frame_size,
+                max_offset.as_i32().abs() as u32 <= frame_size,
                 "All spill slots should be within frame bounds"
             );
         }

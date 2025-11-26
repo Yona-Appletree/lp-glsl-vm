@@ -1,12 +1,10 @@
 //! Tests for caller-saved register handling.
 
-use r5_builder::FunctionBuilder;
-use r5_ir::{parse_module, Module, Signature, Type};
+use r5_ir::parse_module;
 use r5_target_riscv32::{
-    allocate_registers, compile_module, compute_liveness, create_spill_reload_plan,
-    expect_ir_syscall, generate_elf, Abi, CodeBuffer, FrameLayout, Lowerer,
+    allocate_registers, compute_liveness, create_spill_reload_plan, expect_ir_syscall, Abi,
+    CodeBuffer, FrameLayout, Lowerer,
 };
-use r5_test_util::VmRunner;
 use riscv32_encoder::{disassemble_code, Gpr, Inst};
 
 mod test_module_instruction_sequence;
@@ -40,81 +38,6 @@ fn lower_function(func: &r5_ir::Function) -> CodeBuffer {
     lowerer
         .lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
         .expect("Failed to lower function")
-}
-
-/// Helper to test a module with multiple functions
-fn test_module(module: &Module, entry_func_name: &str, args: &[i32], expected: i32) {
-    let mut test_module = module.clone();
-
-    // Create bootstrap wrapper
-    let sig = Signature::new(Vec::new(), vec![Type::I32]);
-    let mut builder = FunctionBuilder::new(sig);
-    let block = builder.create_block();
-
-    // Create argument values
-    let mut arg_values = Vec::new();
-    for &arg in args.iter().take(8) {
-        let arg_val = builder.new_value();
-        {
-            let mut bb = builder.block_builder(block);
-            bb.iconst(arg_val, arg as i64);
-        }
-        arg_values.push(arg_val);
-    }
-
-    // Call main function
-    let result_val = builder.new_value();
-    {
-        let mut bb = builder.block_builder(block);
-        bb.call(entry_func_name.to_string(), arg_values, vec![result_val]);
-    }
-
-    // Call syscall 0 with result
-    {
-        let mut bb = builder.block_builder(block);
-        bb.syscall(0, vec![result_val]);
-    }
-
-    // Halt
-    {
-        let mut bb = builder.block_builder(block);
-        bb.halt();
-    }
-
-    let bootstrap = builder.finish();
-    test_module.add_function("bootstrap".to_string(), bootstrap);
-    test_module.set_entry_function("bootstrap".to_string());
-
-    // Compile and run
-    let code = compile_module(&test_module).expect("Compilation failed");
-    let elf = generate_elf(&code);
-    let mut runner = VmRunner::new(4 * 1024 * 1024);
-
-    // Print debug info
-    eprintln!("\n=== Module ===");
-    eprintln!("{}", test_module);
-    eprintln!("\n=== Compiled Code ===");
-    eprintln!("{}", disassemble_code(&code));
-
-    let result = runner.run(&elf, args);
-    match result {
-        Ok(r) => {
-            eprintln!("\n=== Result ===");
-            eprintln!("Return value: {:?}", r.return_value);
-            assert_eq!(
-                r.return_value,
-                Some(expected),
-                "Expected return value {} but got {:?}",
-                expected,
-                r.return_value
-            );
-        }
-        Err(e) => {
-            eprintln!("\n=== Error ===");
-            eprintln!("{}", e);
-            panic!("Test failed: {}", e);
-        }
-    }
 }
 
 #[test]
@@ -295,7 +218,7 @@ fn count_sp_adjustments_in_prologue(code_buffer: &CodeBuffer, function_start: us
         .iter()
         .skip(function_start / 4) // Convert byte offset to instruction index
         .filter(|inst| {
-            matches!(inst, Inst::Addi { rd, rs1, imm } 
+            matches!(inst, Inst::Addi { rd, rs1, imm }
                 if rd == &Gpr::SP && rs1 == &Gpr::SP && imm < &0)
         })
         .count()
@@ -316,17 +239,6 @@ fn get_prologue_instructions(
         .take(max_instructions)
         .map(|inst| format!("{:?}", inst))
         .collect()
-}
-
-/// Helper to verify epilogue order
-fn verify_epilogue_order(
-    code_buffer: &CodeBuffer,
-    function_end: usize,
-    max_instructions: usize,
-) -> Vec<String> {
-    // Get last max_instructions instructions before function end
-    let start_offset = function_end.saturating_sub(max_instructions * 4);
-    get_prologue_instructions(code_buffer, start_offset, max_instructions)
 }
 
 #[test]
@@ -466,11 +378,11 @@ module {
     let instructions = &func_code.instructions()[start_idx..];
 
     let ra_restore_pos = instructions.iter().position(|inst| {
-        matches!(inst, Inst::Lw { rd, rs1, .. } 
+        matches!(inst, Inst::Lw { rd, rs1, .. }
                 if rd == &Gpr::RA && rs1 == &Gpr::SP)
     });
     let sp_adjust_pos = instructions.iter().position(|inst| {
-        matches!(inst, Inst::Addi { rd, rs1, imm } 
+        matches!(inst, Inst::Addi { rd, rs1, imm }
                 if rd == &Gpr::SP && rs1 == &Gpr::SP && imm > &0)
     });
 

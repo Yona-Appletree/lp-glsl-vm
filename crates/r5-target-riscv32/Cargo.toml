@@ -7,6 +7,10 @@ description = "RISC-V 32-bit target implementation"
 
 [lib]
 
+[features]
+# Enable debug logging for instruction lowering (for development and testing)
+debug-lowering = []
+
 [dependencies]
 r5-ir = { path = "../r5-ir" }
 riscv32-encoder = { path = "../riscv32-encoder" }

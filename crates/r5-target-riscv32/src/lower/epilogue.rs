@@ -21,7 +21,7 @@ impl super::Lowerer {
                     code.emit(RiscvInst::Lw {
                         rd: *reg,
                         rs1: Gpr::SP,
-                        imm: offset,
+                        imm: offset.as_i32(),
                     });
                 }
             }

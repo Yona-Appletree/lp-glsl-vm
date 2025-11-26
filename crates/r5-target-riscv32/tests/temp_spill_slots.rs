@@ -66,11 +66,14 @@ block0:
 
         // The offset should be negative and within the frame bounds
         // Frame starts at -frame_size (after SP adjustment)
-        assert!(max_offset < 0, "Spill slot offset should be negative");
         assert!(
-            max_offset.abs() as u32 <= frame_size,
+            max_offset.as_i32() < 0,
+            "Spill slot offset should be negative"
+        );
+        assert!(
+            max_offset.as_i32().abs() as u32 <= frame_size,
             "Spill slot offset {} should be within frame size {}",
-            max_offset.abs(),
+            max_offset.as_i32().abs(),
             frame_size
         );
     }
@@ -142,11 +145,11 @@ block0:
         let frame_size = frame_layout.total_size();
 
         assert!(
-            max_offset.abs() as u32 <= frame_size,
+            max_offset.as_i32().abs() as u32 <= frame_size,
             "All spill slots should be within frame bounds. Max slot: {}, Max offset: {}, Frame \
              size: {}",
             max_slot,
-            max_offset.abs(),
+            max_offset.as_i32().abs(),
             frame_size
         );
     }

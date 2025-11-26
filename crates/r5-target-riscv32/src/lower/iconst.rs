@@ -108,6 +108,6 @@ block0:
             .lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info)
             .expect("Failed to lower function");
 
-        assert!(code.instruction_count() > 0);
+        assert!(code.instruction_count().as_usize() > 0);
     }
 }

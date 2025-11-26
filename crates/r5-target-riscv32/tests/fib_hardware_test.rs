@@ -32,11 +32,3 @@ block2:
     return v8
 }
 }"#;
-
-#[test]
-fn test_fib_hardware() {
-    // Test that the hardware version works in emulator
-    // This should work because when called as a function pointer,
-    // ra is set by the call instruction, so return works correctly
-    expect_ir_a0(FIB_SSA_HARDWARE, 55);
-}

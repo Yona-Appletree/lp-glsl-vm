@@ -149,7 +149,7 @@ block2:
         }
 
         // Check that instructions were emitted
-        assert!(code.instruction_count() > 0, "No instructions were emitted");
+        assert!(code.instruction_count().as_usize() > 0, "No instructions were emitted");
     }
 
     #[test]

@@ -363,11 +363,15 @@ fn fixup_relocations(
             }
         }
 
+        // Convert instruction offset to byte offset
+        let byte_offset: lower::ByteOffset = reloc.offset.into();
+        let byte_offset_usize = byte_offset.as_i32() as usize;
+
         // Validate offset is within bounds
-        if reloc.offset + 4 > code.len() {
+        if byte_offset_usize + 4 > code.len() {
             return Err(alloc::format!(
                 "Relocation offset {} is out of bounds (code size: {})",
-                reloc.offset,
+                byte_offset_usize,
                 code.len()
             ));
         }
@@ -387,7 +391,7 @@ fn fixup_relocations(
         // When jal executes, PC points to the jal instruction
         // offset = target - PC = target - (current_offset + reloc.offset)
         let jal_pc = current_offset
-            .checked_add(reloc.offset as u32)
+            .checked_add(byte_offset.as_i32() as u32)
             .ok_or_else(|| alloc::string::String::from("Relocation offset overflow"))?;
         let offset = (*target_addr as i32)
             .checked_sub(jal_pc as i32)
@@ -400,15 +404,14 @@ fn fixup_relocations(
             lower::RelocationInstType::Jal { rd } => {
                 let jal_inst = riscv32_encoder::jal(*rd, offset);
                 let jal_bytes = jal_inst.to_le_bytes();
-                let inst_offset = reloc.offset;
-                code[inst_offset..inst_offset + 4].copy_from_slice(&jal_bytes);
+                code[byte_offset_usize..byte_offset_usize + 4].copy_from_slice(&jal_bytes);
             }
             lower::RelocationInstType::Beq { .. } => {
                 // beq relocations are function-internal and should be fixed up per-function
                 // This should not happen at module level
                 return Err(alloc::format!(
                     "Unexpected Beq relocation at module level (offset: {})",
-                    reloc.offset
+                    reloc.offset.as_usize()
                 ));
             }
         }
@@ -523,7 +526,7 @@ pub fn compile_module_to_insts(
             // reloc.offset is already an instruction index within the function's code
             for reloc in &mut relocations {
                 // Add the bootstrap size and current offset to get final instruction index
-                reloc.offset = current_inst_idx + bootstrap_size + reloc.offset;
+                reloc.offset = lower::InstOffset::from(current_inst_idx + bootstrap_size + reloc.offset.as_usize());
             }
 
             let code_inst_count = code.instruction_count();
@@ -533,7 +536,7 @@ pub fn compile_module_to_insts(
             lowerer.set_function_address(entry_name.clone(), function_inst_idx as u32 * 4);
 
             // Update current_inst_idx (bootstrap + function code)
-            current_inst_idx += bootstrap_size + code_inst_count;
+            current_inst_idx += bootstrap_size + code_inst_count.as_usize();
         }
     }
 
@@ -586,7 +589,7 @@ pub fn compile_module_to_insts(
         for reloc in &mut relocations {
             // reloc.offset is already an instruction index within the function's code
             // Add current offset to get final instruction index
-            reloc.offset = current_inst_idx + reloc.offset;
+            reloc.offset = lower::InstOffset::from(current_inst_idx + reloc.offset.as_usize());
         }
 
         function_code_buffers.insert(name.clone(), (Vec::new(), code));
@@ -594,7 +597,7 @@ pub fn compile_module_to_insts(
         function_relocations.insert(name.clone(), relocations);
         lowerer.set_function_address(name.clone(), current_inst_idx as u32 * 4);
 
-        current_inst_idx += code_inst_count;
+        current_inst_idx += code_inst_count.as_usize();
     }
 
     // Second pass: concatenate all instructions in the order they were processed
@@ -650,7 +653,7 @@ pub fn compile_module_to_insts(
             }
         }
 
-        let inst_idx = reloc.offset;
+        let inst_idx = reloc.offset.as_usize();
         if inst_idx >= all_instructions.len() {
             return Err(alloc::format!(
                 "Relocation offset {} is out of bounds (instruction count: {})",
@@ -673,9 +676,9 @@ pub fn compile_module_to_insts(
         // jal is PC-relative: target = PC + offset
         // When jal executes, PC points to the jal instruction
         // offset = target - PC = (target_inst_idx * 4) - (inst_idx * 4)
-        let target_byte_offset = (*target_inst_idx * 4) as i32;
-        let jal_pc = (inst_idx * 4) as i32;
-        let offset = target_byte_offset - jal_pc;
+        let target_byte_offset: lower::ByteOffset = lower::InstOffset::from(*target_inst_idx).into();
+        let jal_pc_byte_offset: lower::ByteOffset = reloc.offset.into();
+        let offset = target_byte_offset.as_i32() - jal_pc_byte_offset.as_i32();
 
         // Update the jal instruction in-place based on inst_type
         match &reloc.inst_type {
@@ -749,7 +752,7 @@ mod tests {
 
         // Create relocations
         let relocations = vec![Relocation {
-            offset: jal_offset,
+            offset: lower::InstOffset::from(jal_offset),
             target: lower::RelocationTarget::Function(String::from("target_func")),
             inst_type: lower::RelocationInstType::Jal {
                 rd: riscv32_encoder::Gpr::RA,
@@ -784,7 +787,7 @@ mod tests {
         // Test with valid offset first
         let mut code = vec![0u8; 20];
         let relocations = vec![Relocation {
-            offset: 8, // This is valid (8 + 4 = 12 <= 20)
+            offset: lower::InstOffset::from(8), // This is valid (8 + 4 = 12 <= 20)
             target: lower::RelocationTarget::Function(String::from("target_func")),
             inst_type: lower::RelocationInstType::Jal {
                 rd: riscv32_encoder::Gpr::RA,
@@ -800,7 +803,7 @@ mod tests {
         // Now test with out-of-bounds offset
         let mut code2 = vec![0u8; 10];
         let relocations2 = vec![Relocation {
-            offset: 8, // This is out of bounds (8 + 4 = 12 > 10)
+            offset: lower::InstOffset::from(8), // This is out of bounds (8 + 4 = 12 > 10)
             target: lower::RelocationTarget::Function(String::from("target_func")),
             inst_type: lower::RelocationInstType::Jal {
                 rd: riscv32_encoder::Gpr::RA,
@@ -817,7 +820,7 @@ mod tests {
 
         let mut code = vec![0u8; 20];
         let relocations = vec![Relocation {
-            offset: 8,
+            offset: lower::InstOffset::from(8),
             target: lower::RelocationTarget::Function(String::from("nonexistent_func")),
             inst_type: lower::RelocationInstType::Jal {
                 rd: riscv32_encoder::Gpr::RA,

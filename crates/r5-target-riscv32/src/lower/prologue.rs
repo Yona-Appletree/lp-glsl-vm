@@ -18,18 +18,21 @@ impl super::Lowerer {
         let frame_size = frame_layout.total_size();
 
         // Step 1: Load incoming stack arguments (before SP adjustment)
-        // Stack args are at positive offsets from SP before prologue
+        // According to RISC-V convention, stack args are at positive offsets from SP
+        // The caller stores them at positive offsets, and we read them at the same offsets
         if let Some(entry_block) = func.blocks.first() {
             let mut stack_args_to_spill = alloc::vec::Vec::new();
             for (idx, param) in entry_block.params.iter().enumerate() {
                 if let Some(stack_offset) = abi_info.param_stack_offsets.get(&idx) {
                     // This parameter is on the stack
+                    // Stack offset from ABI is already computed as (idx - 8) * 4
+                    // This is the positive offset from SP where the caller stored it
                     if let Some(allocated_reg) = allocation.value_to_reg.get(param) {
                         // Load directly into allocated register
                         code.emit(RiscvInst::Lw {
                             rd: *allocated_reg,
                             rs1: Gpr::SP,
-                            imm: *stack_offset, // Positive offset
+                            imm: *stack_offset, // Positive offset from SP
                         });
                     } else {
                         // Will be spilled - load into temp register, store after SP adjustment
@@ -37,7 +40,7 @@ impl super::Lowerer {
                         code.emit(RiscvInst::Lw {
                             rd: temp_reg,
                             rs1: Gpr::SP,
-                            imm: *stack_offset, // Positive offset
+                            imm: *stack_offset, // Positive offset from SP
                         });
                         // Store temp_reg and param for later
                         if let Some(slot) = allocation.value_to_slot.get(param) {
@@ -61,7 +64,7 @@ impl super::Lowerer {
                     code.emit(RiscvInst::Sw {
                         rs1: Gpr::SP,
                         rs2: temp_reg,
-                        imm: offset,
+                        imm: offset.as_i32(),
                     });
                 }
 
@@ -89,7 +92,7 @@ impl super::Lowerer {
                         code.emit(RiscvInst::Sw {
                             rs1: Gpr::SP,
                             rs2: *reg,
-                            imm: offset,
+                            imm: offset.as_i32(),
                         });
                     }
                 }
@@ -122,7 +125,7 @@ impl super::Lowerer {
                     code.emit(RiscvInst::Sw {
                         rs1: Gpr::SP,
                         rs2: *reg,
-                        imm: offset,
+                        imm: offset.as_i32(),
                     });
                 }
             }

@@ -6,6 +6,25 @@
 use alloc::vec::Vec;
 
 use riscv32_encoder::Gpr;
+use crate::lower::ByteOffset;
+
+/// Storage location for a value in the frame.
+///
+/// This enum represents where a value is stored, centralizing the decision
+/// logic that was previously scattered across multiple files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageLocation {
+    /// Value is in a register.
+    Register(Gpr),
+    /// Value is in a spill slot.
+    SpillSlot { slot: u32, offset: ByteOffset },
+    /// Value is an incoming stack argument (index >= 8).
+    IncomingStackArg { index: usize, offset: ByteOffset },
+    /// Value is an outgoing stack argument (index >= 8).
+    OutgoingStackArg { index: usize, offset: ByteOffset },
+    /// Value is a callee-saved register that was saved to the frame.
+    CalleeSaved { reg: Gpr, offset: ByteOffset },
+}
 
 /// Frame layout for a RISC-V 32-bit function.
 ///
@@ -74,6 +93,15 @@ impl FrameLayout {
         incoming_args: usize,
         outgoing_args: usize,
     ) -> Self {
+        #[cfg(feature = "debug-lowering")]
+        crate::debug_lowering!(
+            "FrameLayout::compute: used_callee_saved={}, spill_slots={}, has_calls={}, incoming_args={}, outgoing_args={}",
+            used_callee_saved.len(),
+            spill_slots,
+            has_calls,
+            incoming_args,
+            outgoing_args
+        );
         // Determine if setup area needed
         // Setup area is needed if we have calls, use callee-saved regs, or need spill slots
         let setup_area_size = if has_calls || !used_callee_saved.is_empty() || spill_slots > 0 {
@@ -104,7 +132,7 @@ impl FrameLayout {
             0
         };
 
-        FrameLayout {
+        let layout = FrameLayout {
             word_bytes: 4,
             incoming_args_size,
             setup_area_size,
@@ -113,7 +141,18 @@ impl FrameLayout {
             outgoing_args_size,
             clobbered_callee_saves: used_callee_saved.to_vec(),
             has_function_calls: has_calls,
-        }
+        };
+
+        #[cfg(feature = "debug-lowering")]
+        crate::debug_lowering!(
+            "FrameLayout::compute result: setup_area={}, clobber={}, spills={}, total={}",
+            layout.setup_area_size,
+            layout.clobber_size,
+            layout.fixed_frame_storage_size,
+            layout.total_size()
+        );
+
+        layout
     }
 
     /// Get the total frame size in bytes.
@@ -127,57 +166,120 @@ impl FrameLayout {
     /// Get the stack offset for a callee-saved register.
     ///
     /// Returns the offset from SP where the register is saved.
-    pub fn callee_saved_offset(&self, reg: Gpr) -> Option<i32> {
+    pub fn callee_saved_offset(&self, reg: Gpr) -> Option<ByteOffset> {
         self.clobbered_callee_saves
             .iter()
             .position(|&r| r.num() == reg.num())
             .map(|idx| {
                 let offset = self.setup_area_size + (idx as u32 * 4);
-                -(offset as i32)
+                ByteOffset(-(offset as i32))
             })
     }
 
     /// Get the stack offset for a spill slot.
     ///
     /// Returns the offset from SP where the spill slot is located.
-    pub fn spill_slot_offset(&self, slot: u32) -> i32 {
+    pub fn spill_slot_offset(&self, slot: u32) -> ByteOffset {
         let base_offset = self.setup_area_size + self.clobber_size;
-        -((base_offset + slot * 4) as i32)
+        let offset = ByteOffset(-((base_offset + slot * 4) as i32));
+        #[cfg(feature = "debug-lowering")]
+        crate::debug_lowering!(
+            "spill_slot_offset(slot={}): base={}, offset={}",
+            slot,
+            base_offset,
+            offset.as_i32()
+        );
+        offset
     }
 
     /// Get stack offset for incoming argument (index >= 8)
     ///
     /// Returns offset relative to SP **before** prologue (positive offset).
     /// After prologue, the actual offset is: total_size() + offset
-    pub fn incoming_arg_offset(&self, arg_index: usize) -> Option<i32> {
+    pub fn incoming_arg_offset(&self, arg_index: usize) -> Option<ByteOffset> {
         if arg_index < 8 {
             return None; // In register
         }
         let stack_index = arg_index - 8;
-        Some((stack_index * 4) as i32)
+        Some(ByteOffset((stack_index * 4) as i32))
     }
 
     /// Get stack offset for outgoing argument (index >= 8)
     ///
-    /// Returns offset relative to SP (negative, like other frame slots)
-    pub fn outgoing_arg_offset(&self, arg_index: usize) -> Option<i32> {
+    /// Returns offset relative to SP (positive offset, per RISC-V convention).
+    /// Stack arguments are stored at positive offsets from SP.
+    /// The caller stores them, and the callee reads them at the same positive offsets.
+    pub fn outgoing_arg_offset(&self, arg_index: usize) -> Option<ByteOffset> {
         if arg_index < 8 {
             return None; // In register
         }
-        let stack_index = (arg_index - 8) as u32;
-        let base = self.setup_area_size + self.clobber_size + self.fixed_frame_storage_size;
-        Some(-((base + stack_index * 4) as i32))
+        let stack_index = arg_index - 8;
+        // Stack arguments start at SP + 0, each is 4 bytes
+        Some(ByteOffset((stack_index * 4) as i32))
     }
 
     /// Get stack offset for return value (index >= 8)
     ///
     /// Similar to incoming args, but caller allocates space
-    pub fn return_value_offset(&self, ret_index: usize) -> Option<i32> {
+    pub fn return_value_offset(&self, ret_index: usize) -> Option<ByteOffset> {
         if ret_index < 8 {
             return None; // In register
         }
         let stack_index = ret_index - 8;
-        Some((stack_index * 4) as i32)
+        Some(ByteOffset((stack_index * 4) as i32))
+    }
+
+    /// Get the storage location for storing a value.
+    ///
+    /// This centralizes the decision logic for where to store a value,
+    /// checking register allocation and returning the appropriate storage location.
+    pub fn store_value_location(
+        &self,
+        value: r5_ir::Value,
+        allocation: &crate::regalloc::RegisterAllocation,
+    ) -> Option<StorageLocation> {
+        // Check if value is in a register
+        if let Some(reg) = allocation.value_to_reg.get(&value) {
+            return Some(StorageLocation::Register(*reg));
+        }
+
+        // Check if value is in a spill slot
+        if let Some(slot) = allocation.value_to_slot.get(&value) {
+            let offset = self.spill_slot_offset(*slot);
+            return Some(StorageLocation::SpillSlot {
+                slot: *slot,
+                offset,
+            });
+        }
+
+        None
+    }
+
+    /// Get the storage location for loading a value.
+    ///
+    /// Similar to `store_value_location`, but used when loading a value.
+    /// This centralizes the decision logic for where to load a value from.
+    pub fn load_value_location(
+        &self,
+        value: r5_ir::Value,
+        allocation: &crate::regalloc::RegisterAllocation,
+    ) -> Option<StorageLocation> {
+        self.store_value_location(value, allocation)
+    }
+
+    /// Get the incoming argument offset after prologue.
+    ///
+    /// This computes the actual offset accounting for SP adjustment after prologue.
+    /// Incoming stack arguments are at positive offsets from SP before prologue,
+    /// but after prologue, SP is adjusted, so the offset becomes: total_size() + original_offset.
+    pub fn incoming_arg_offset_after_prologue(&self, arg_index: usize) -> Option<ByteOffset> {
+        if arg_index < 8 {
+            return None; // In register
+        }
+        let stack_index = arg_index - 8;
+        // After prologue, SP is adjusted by total_size(), so we add that to the original offset
+        let original_offset = (stack_index * 4) as i32;
+        Some(ByteOffset(original_offset + self.total_size() as i32))
     }
 }
 
@@ -230,11 +332,11 @@ mod tests {
 
         // S0 should be at offset -8 (after setup area)
         let offset_s0 = layout.callee_saved_offset(Gpr::S0).unwrap();
-        assert_eq!(offset_s0, -8);
+        assert_eq!(offset_s0.as_i32(), -8);
 
         // S1 should be at offset -12 (after S0)
         let offset_s1 = layout.callee_saved_offset(Gpr::S1).unwrap();
-        assert_eq!(offset_s1, -12);
+        assert_eq!(offset_s1.as_i32(), -12);
     }
 
     #[test]
@@ -243,11 +345,11 @@ mod tests {
 
         // First spill slot should be after setup area (8 bytes)
         let offset_slot0 = layout.spill_slot_offset(0);
-        assert_eq!(offset_slot0, -8);
+        assert_eq!(offset_slot0.as_i32(), -8);
 
         // Second spill slot should be 4 bytes after first
         let offset_slot1 = layout.spill_slot_offset(1);
-        assert_eq!(offset_slot1, -12);
+        assert_eq!(offset_slot1.as_i32(), -12);
     }
 
     #[test]
@@ -274,9 +376,9 @@ mod tests {
         }
 
         // Stack args should have positive offsets (relative to SP before prologue)
-        assert_eq!(layout.incoming_arg_offset(8), Some(0));
-        assert_eq!(layout.incoming_arg_offset(9), Some(4));
-        assert_eq!(layout.incoming_arg_offset(10), Some(8));
+        assert_eq!(layout.incoming_arg_offset(8), Some(ByteOffset(0)));
+        assert_eq!(layout.incoming_arg_offset(9), Some(ByteOffset(4)));
+        assert_eq!(layout.incoming_arg_offset(10), Some(ByteOffset(8)));
     }
 
     #[test]
@@ -288,12 +390,11 @@ mod tests {
             assert_eq!(layout.outgoing_arg_offset(i), None);
         }
 
-        // Stack args should have negative offsets (relative to SP after prologue)
-        // Base = setup_area_size (8) + clobber_size (0) + fixed_frame_storage_size (0) = 8
-        let base = 8;
-        assert_eq!(layout.outgoing_arg_offset(8), Some(-(base as i32)));
-        assert_eq!(layout.outgoing_arg_offset(9), Some(-((base + 4) as i32)));
-        assert_eq!(layout.outgoing_arg_offset(10), Some(-((base + 8) as i32)));
+        // Stack args should have positive offsets (per RISC-V convention)
+        // Stack arguments start at SP + 0, each is 4 bytes
+        assert_eq!(layout.outgoing_arg_offset(8), Some(ByteOffset(0)));
+        assert_eq!(layout.outgoing_arg_offset(9), Some(ByteOffset(4)));
+        assert_eq!(layout.outgoing_arg_offset(10), Some(ByteOffset(8)));
     }
 
     #[test]
@@ -306,8 +407,8 @@ mod tests {
         }
 
         // Stack returns should have positive offsets (relative to SP before prologue)
-        assert_eq!(layout.return_value_offset(8), Some(0));
-        assert_eq!(layout.return_value_offset(9), Some(4));
-        assert_eq!(layout.return_value_offset(10), Some(8));
+        assert_eq!(layout.return_value_offset(8), Some(ByteOffset(0)));
+        assert_eq!(layout.return_value_offset(9), Some(ByteOffset(4)));
+        assert_eq!(layout.return_value_offset(10), Some(ByteOffset(8)));
     }
 }
