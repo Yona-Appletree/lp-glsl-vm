@@ -119,7 +119,7 @@ block0:
 
     let emu = expect_ir_ok(ir);
     // Verify SP is initialized (not zero)
-    let sp = emu.get_register(Gpr::SP);
+    let sp = emu.get_register(Gpr::Sp);
     assert_ne!(sp, 0, "SP should be initialized to non-zero value");
     // SP should be in valid memory region (cast to u32 for comparison)
     let sp_u32 = sp as u32;

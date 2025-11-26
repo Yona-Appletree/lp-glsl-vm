@@ -21,7 +21,7 @@ impl super::Lowerer {
             SpillReloadOp::Spill { reg, slot, .. } => {
                 let offset = frame_layout.spill_slot_offset(*slot);
                 code.emit(RiscvInst::Sw {
-                    rs1: Gpr::SP,
+                    rs1: Gpr::Sp,
                     rs2: *reg,
                     imm: offset.as_i32(),
                 });
@@ -30,7 +30,7 @@ impl super::Lowerer {
                 let offset = frame_layout.spill_slot_offset(*slot);
                 code.emit(RiscvInst::Lw {
                     rd: *reg,
-                    rs1: Gpr::SP,
+                    rs1: Gpr::Sp,
                     imm: offset.as_i32(),
                 });
             }
@@ -94,7 +94,7 @@ impl super::Lowerer {
             );
             code.emit(RiscvInst::Lw {
                 rd: target_reg,
-                rs1: Gpr::SP,
+                rs1: Gpr::Sp,
                 imm: offset.as_i32(),
             });
             Ok(())

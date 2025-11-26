@@ -61,7 +61,7 @@ impl super::Lowerer {
         });
         code.emit(RiscvInst::Sltu {
             rd: result_reg,
-            rs1: Gpr::ZERO,
+            rs1: Gpr::Zero,
             rs2: temp,
         });
         Ok(())

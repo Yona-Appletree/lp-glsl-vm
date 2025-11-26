@@ -395,8 +395,8 @@ mod tests {
         use alloc::{collections::BTreeMap, string::ToString, vec::Vec};
 
         let mut code = Vec::new();
-        code.extend_from_slice(&addi(Gpr::A0, Gpr::ZERO, 5).to_le_bytes());
-        code.extend_from_slice(&addi(Gpr::A1, Gpr::ZERO, 10).to_le_bytes());
+        code.extend_from_slice(&addi(Gpr::A0, Gpr::Zero, 5).to_le_bytes());
+        code.extend_from_slice(&addi(Gpr::A1, Gpr::Zero, 10).to_le_bytes());
         code.extend_from_slice(&beq(Gpr::A0, Gpr::A1, 8).to_le_bytes());
         code.extend_from_slice(&addi(Gpr::A0, Gpr::A0, 1).to_le_bytes());
 
@@ -412,8 +412,8 @@ mod tests {
         use alloc::vec::Vec;
 
         let mut code = Vec::new();
-        code.extend_from_slice(&addi(Gpr::A0, Gpr::ZERO, 5).to_le_bytes());
-        code.extend_from_slice(&jal(Gpr::RA, 8).to_le_bytes());
+        code.extend_from_slice(&addi(Gpr::A0, Gpr::Zero, 5).to_le_bytes());
+        code.extend_from_slice(&jal(Gpr::Ra, 8).to_le_bytes());
         code.extend_from_slice(&addi(Gpr::A0, Gpr::A0, 1).to_le_bytes());
 
         let disasm = disassemble_code_with_labels(&code, None);

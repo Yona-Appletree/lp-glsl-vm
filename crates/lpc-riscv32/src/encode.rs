@@ -279,7 +279,7 @@ mod tests {
     fn test_jalr() {
         // jalr zero, ra, 0
         // Expected: 0x00008067
-        let inst = jalr(Gpr::ZERO, Gpr::RA, 0);
+        let inst = jalr(Gpr::Zero, Gpr::Ra, 0);
         assert_eq!(inst, 0x00008067);
     }
 

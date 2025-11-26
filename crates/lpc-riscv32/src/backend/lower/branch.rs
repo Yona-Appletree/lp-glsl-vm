@@ -32,7 +32,7 @@ impl super::Lowerer {
         let beq_inst_idx = code.instruction_count();
         code.emit(RiscvInst::Beq {
             rs1: cond_reg,
-            rs2: Gpr::ZERO,
+            rs2: Gpr::Zero,
             imm: 0, // Placeholder
         });
 
@@ -42,14 +42,14 @@ impl super::Lowerer {
             target: RelocationTarget::Block(target_false as usize),
             inst_type: RelocationInstType::Beq {
                 rs1: cond_reg,
-                rs2: Gpr::ZERO,
+                rs2: Gpr::Zero,
             },
         });
 
         // Emit placeholder jal instruction (offset 0, will be fixed up)
         let jal_inst_idx = code.instruction_count();
         code.emit(RiscvInst::Jal {
-            rd: Gpr::ZERO,
+            rd: Gpr::Zero,
             imm: 0, // Placeholder
         });
 
@@ -57,7 +57,7 @@ impl super::Lowerer {
         self.function_relocations.push(Relocation {
             offset: jal_inst_idx,
             target: RelocationTarget::Block(target_true as usize),
-            inst_type: RelocationInstType::Jal { rd: Gpr::ZERO },
+            inst_type: RelocationInstType::Jal { rd: Gpr::Zero },
         });
 
         Ok(())

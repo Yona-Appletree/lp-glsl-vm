@@ -31,7 +31,7 @@ impl super::Lowerer {
                         // Load directly into allocated register
                         code.emit(RiscvInst::Lw {
                             rd: *allocated_reg,
-                            rs1: Gpr::SP,
+                            rs1: Gpr::Sp,
                             imm: *stack_offset, // Positive offset from SP
                         });
                     } else {
@@ -39,7 +39,7 @@ impl super::Lowerer {
                         let temp_reg = Gpr::T0;
                         code.emit(RiscvInst::Lw {
                             rd: temp_reg,
-                            rs1: Gpr::SP,
+                            rs1: Gpr::Sp,
                             imm: *stack_offset, // Positive offset from SP
                         });
                         // Store temp_reg and param for later
@@ -53,8 +53,8 @@ impl super::Lowerer {
             // Step 2: Adjust SP for entire frame
             if frame_size > 0 {
                 code.emit(RiscvInst::Addi {
-                    rd: Gpr::SP,
-                    rs1: Gpr::SP,
+                    rd: Gpr::Sp,
+                    rs1: Gpr::Sp,
                     imm: -(frame_size as i32),
                 });
 
@@ -62,7 +62,7 @@ impl super::Lowerer {
                 for (temp_reg, slot) in stack_args_to_spill {
                     let offset = frame_layout.spill_slot_offset(slot);
                     code.emit(RiscvInst::Sw {
-                        rs1: Gpr::SP,
+                        rs1: Gpr::Sp,
                         rs2: temp_reg,
                         imm: offset.as_i32(),
                     });
@@ -80,8 +80,8 @@ impl super::Lowerer {
                         0
                     };
                     code.emit(RiscvInst::Sw {
-                        rs1: Gpr::SP,
-                        rs2: Gpr::RA,
+                        rs1: Gpr::Sp,
+                        rs2: Gpr::Ra,
                         imm: ra_offset,
                     });
                 }
@@ -90,7 +90,7 @@ impl super::Lowerer {
                 for (_idx, reg) in abi_info.used_callee_saved.iter().enumerate() {
                     if let Some(offset) = frame_layout.callee_saved_offset(*reg) {
                         code.emit(RiscvInst::Sw {
-                            rs1: Gpr::SP,
+                            rs1: Gpr::Sp,
                             rs2: *reg,
                             imm: offset.as_i32(),
                         });
@@ -100,8 +100,8 @@ impl super::Lowerer {
         } else if frame_size > 0 {
             // No entry block, but still need to adjust SP
             code.emit(RiscvInst::Addi {
-                rd: Gpr::SP,
-                rs1: Gpr::SP,
+                rd: Gpr::Sp,
+                rs1: Gpr::Sp,
                 imm: -(frame_size as i32),
             });
 
@@ -113,8 +113,8 @@ impl super::Lowerer {
                     0
                 };
                 code.emit(RiscvInst::Sw {
-                    rs1: Gpr::SP,
-                    rs2: Gpr::RA,
+                    rs1: Gpr::Sp,
+                    rs2: Gpr::Ra,
                     imm: ra_offset,
                 });
             }
@@ -123,7 +123,7 @@ impl super::Lowerer {
             for (_idx, reg) in abi_info.used_callee_saved.iter().enumerate() {
                 if let Some(offset) = frame_layout.callee_saved_offset(*reg) {
                     code.emit(RiscvInst::Sw {
-                        rs1: Gpr::SP,
+                        rs1: Gpr::Sp,
                         rs2: *reg,
                         imm: offset.as_i32(),
                     });
@@ -379,7 +379,7 @@ module {
             .iter()
             .filter(|inst| {
                 matches!(inst, Inst::Addi { rd, rs1, imm }
-                    if rd == &Gpr::SP && rs1 == &Gpr::SP && imm < &0)
+                    if rd == &Gpr::Sp && rs1 == &Gpr::Sp && imm < &0)
             })
             .count();
 
@@ -547,7 +547,7 @@ block0:
         let emu = expect_ir_syscall(ir, 0, &[42]);
         // Verify SP is initialized (not zero)
         // After syscall, SP may have been adjusted by frame, so check it's reasonable
-        let sp = emu.get_register(Gpr::SP);
+        let sp = emu.get_register(Gpr::Sp);
         assert_ne!(sp, 0, "SP should be initialized to non-zero value");
         // SP should be in valid memory region
         // After frame adjustments, SP may be less than initial value, but should still be in valid range

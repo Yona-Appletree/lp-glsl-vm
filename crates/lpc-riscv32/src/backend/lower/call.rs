@@ -81,7 +81,7 @@ impl super::Lowerer {
                     // Since caller's SP (after prologue) = callee's SP (before prologue),
                     // we store at: offset (which is (idx - 8) * 4)
                     code.emit(RiscvInst::Sw {
-                        rs1: Gpr::SP,
+                        rs1: Gpr::Sp,
                         rs2: temp_reg,
                         imm: offset.as_i32(),
                     });
@@ -96,7 +96,7 @@ impl super::Lowerer {
         // Emit placeholder jal (will be fixed up later)
         let jal_inst_idx = code.instruction_count();
         code.emit(RiscvInst::Jal {
-            rd: Gpr::RA,
+            rd: Gpr::Ra,
             imm: 0, // Placeholder
         });
 
@@ -104,7 +104,7 @@ impl super::Lowerer {
         self.relocations.push(Relocation {
             offset: jal_inst_idx,
             target: RelocationTarget::Function(alloc::string::String::from(callee)),
-            inst_type: RelocationInstType::Jal { rd: Gpr::RA },
+            inst_type: RelocationInstType::Jal { rd: Gpr::Ra },
         });
 
         // Step 3: Move results from return registers (first 8)
@@ -123,7 +123,7 @@ impl super::Lowerer {
                     if let Some(slot) = self.get_spill_slot(*result, allocation) {
                         let offset = frame_layout.spill_slot_offset(slot);
                         code.emit(RiscvInst::Sw {
-                            rs1: Gpr::SP,
+                            rs1: Gpr::Sp,
                             rs2: *return_reg,
                             imm: offset.as_i32(),
                         });
@@ -147,7 +147,7 @@ impl super::Lowerer {
                     let temp_reg = Gpr::T0;
                     code.emit(RiscvInst::Lw {
                         rd: temp_reg,
-                        rs1: Gpr::SP,
+                        rs1: Gpr::Sp,
                         imm: actual_offset,
                     });
 
@@ -161,7 +161,7 @@ impl super::Lowerer {
                     } else if let Some(slot) = self.get_spill_slot(*result, allocation) {
                         let offset = frame_layout.spill_slot_offset(slot);
                         code.emit(RiscvInst::Sw {
-                            rs1: Gpr::SP,
+                            rs1: Gpr::Sp,
                             rs2: temp_reg,
                             imm: offset.as_i32(),
                         });
@@ -182,7 +182,7 @@ impl super::Lowerer {
             } else if let Some(slot) = self.get_spill_slot(arg_value, allocation) {
                 let offset = frame_layout.spill_slot_offset(slot);
                 code.emit(RiscvInst::Sw {
-                    rs1: Gpr::SP,
+                    rs1: Gpr::Sp,
                     rs2: temp_reg,
                     imm: offset.as_i32(),
                 });

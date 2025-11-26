@@ -79,7 +79,7 @@ impl Abi {
             Gpr::T5,
             Gpr::T6,
             // Return address
-            Gpr::RA,
+            Gpr::Ra,
         ]
     }
 
@@ -208,7 +208,7 @@ mod tests {
         let regs = Abi::caller_saved_regs();
         assert!(regs.contains(&Gpr::A0));
         assert!(regs.contains(&Gpr::T0));
-        assert!(regs.contains(&Gpr::RA));
+        assert!(regs.contains(&Gpr::Ra));
     }
 
     #[test]

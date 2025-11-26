@@ -31,7 +31,7 @@ impl super::Lowerer {
             // Small immediate: addi a7, zero, number
             code.emit(RiscvInst::Addi {
                 rd: Gpr::A7,
-                rs1: Gpr::ZERO,
+                rs1: Gpr::Zero,
                 imm: number,
             });
         } else {

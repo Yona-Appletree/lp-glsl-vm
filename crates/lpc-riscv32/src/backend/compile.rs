@@ -470,14 +470,14 @@ pub fn compile_module_to_insts(
             // The lui instruction expects the full 32-bit value; it extracts bits [31:12]
             // sp_hi_value already has lower 12 bits cleared, so we pass it as-is
             bootstrap_insts.push(Inst::Lui {
-                rd: Gpr::SP,
+                rd: Gpr::Sp,
                 imm: sp_hi_value,
             });
             // addi sp, sp, sp_lo_signed
             if sp_lo_signed != 0 {
                 bootstrap_insts.push(Inst::Addi {
-                    rd: Gpr::SP,
-                    rs1: Gpr::SP,
+                    rd: Gpr::Sp,
+                    rs1: Gpr::Sp,
                     imm: sp_lo_signed,
                 });
             }
@@ -712,7 +712,7 @@ mod tests {
         let mut code = vec![0u8; 20];
         let jal_offset = 8;
         // Place a placeholder jal at offset 8
-        let placeholder_jal = crate::jal(crate::Gpr::RA, 0);
+        let placeholder_jal = crate::jal(crate::Gpr::Ra, 0);
         let placeholder_bytes = placeholder_jal.to_le_bytes();
         code[jal_offset..jal_offset + 4].copy_from_slice(&placeholder_bytes);
 
@@ -722,7 +722,7 @@ mod tests {
             offset: super::lower::InstOffset::from(2),
             target: super::lower::RelocationTarget::Function(String::from("target_func")),
             inst_type: super::lower::RelocationInstType::Jal {
-                rd: crate::Gpr::RA,
+                rd: crate::Gpr::Ra,
             },
         }];
 
@@ -743,7 +743,7 @@ mod tests {
             fixed_jal_bytes[3],
         ]);
         // The offset should be 100 - 8 = 92
-        let expected_jal = crate::jal(crate::Gpr::RA, 92);
+        let expected_jal = crate::jal(crate::Gpr::Ra, 92);
         assert_eq!(fixed_jal, expected_jal);
     }
 
@@ -758,7 +758,7 @@ mod tests {
             offset: super::lower::InstOffset::from(2), // 2 instructions = 8 bytes, valid (8 + 4 = 12 <= 20)
             target: super::lower::RelocationTarget::Function(String::from("target_func")),
             inst_type: super::lower::RelocationInstType::Jal {
-                rd: crate::Gpr::RA,
+                rd: crate::Gpr::Ra,
             },
         }];
 
@@ -774,7 +774,7 @@ mod tests {
             offset: super::lower::InstOffset::from(2), // 2 instructions = 8 bytes, out of bounds (8 + 4 = 12 > 10)
             target: super::lower::RelocationTarget::Function(String::from("target_func")),
             inst_type: super::lower::RelocationInstType::Jal {
-                rd: crate::Gpr::RA,
+                rd: crate::Gpr::Ra,
             },
         }];
 
@@ -792,7 +792,7 @@ mod tests {
             offset: super::lower::InstOffset::from(2), // 2 instructions = 8 bytes
             target: super::lower::RelocationTarget::Function(String::from("nonexistent_func")),
             inst_type: super::lower::RelocationInstType::Jal {
-                rd: crate::Gpr::RA,
+                rd: crate::Gpr::Ra,
             },
         }];
 

@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn test_inst_encode_jal() {
         let inst = Inst::Jal {
-            rd: Gpr::RA,
+            rd: Gpr::Ra,
             imm: 0,
         };
         // jal ra, 0: opcode=0x6f, rd=1 (ra), imm=0
@@ -162,8 +162,8 @@ mod tests {
     #[test]
     fn test_inst_encode_jalr() {
         let inst = Inst::Jalr {
-            rd: Gpr::ZERO,
-            rs1: Gpr::RA,
+            rd: Gpr::Zero,
+            rs1: Gpr::Ra,
             imm: 0,
         };
         assert_eq!(inst.encode(), 0x00008067);

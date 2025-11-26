@@ -36,7 +36,7 @@ impl super::Lowerer {
 
                     // Store to stack (offset relative to SP before epilogue)
                     code.emit(RiscvInst::Sw {
-                        rs1: Gpr::SP,
+                        rs1: Gpr::Sp,
                         rs2: temp_reg,
                         imm: *stack_offset, // Positive offset
                     });
@@ -47,7 +47,7 @@ impl super::Lowerer {
         // Emit placeholder jal instruction (offset 0, will be fixed up)
         let jal_inst_idx = code.instruction_count();
         code.emit(RiscvInst::Jal {
-            rd: Gpr::ZERO,
+            rd: Gpr::Zero,
             imm: 0, // Placeholder
         });
 
@@ -55,7 +55,7 @@ impl super::Lowerer {
         self.function_relocations.push(Relocation {
             offset: jal_inst_idx,
             target: RelocationTarget::Epilogue,
-            inst_type: RelocationInstType::Jal { rd: Gpr::ZERO },
+            inst_type: RelocationInstType::Jal { rd: Gpr::Zero },
         });
 
         Ok(())
@@ -127,7 +127,7 @@ block0:
             crate::backend::lower::RelocationInstType::Jal { rd } => {
                 assert_eq!(
                     rd,
-                    &crate::Gpr::ZERO,
+                    &crate::Gpr::Zero,
                     "Return jal should have rd=ZERO"
                 );
             }
@@ -153,7 +153,7 @@ block0:
         for inst in instructions.iter().take(reloc.offset.as_usize()) {
             match inst {
                 crate::Inst::Addi { rd, rs1, imm } if *rd == crate::Gpr::A0 => {
-                    if *rs1 == crate::Gpr::ZERO {
+                    if *rs1 == crate::Gpr::Zero {
                         // Value created directly in a0 (addi a0, x0, imm)
                         found_a0_usage = true;
                         break;

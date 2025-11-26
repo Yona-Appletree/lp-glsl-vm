@@ -35,7 +35,7 @@ impl super::Lowerer {
             // Small constant: addi rd, x0, imm
             code.emit(RiscvInst::Addi {
                 rd: result_reg,
-                rs1: Gpr::ZERO,
+                rs1: Gpr::Zero,
                 imm: value as i32,
             });
         } else {

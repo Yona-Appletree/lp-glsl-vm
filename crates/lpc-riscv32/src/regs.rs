@@ -5,8 +5,74 @@ extern crate alloc;
 use core::fmt;
 
 /// RISC-V 32-bit general-purpose register.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Gpr(u8);
+pub enum Gpr {
+    // x0: zero register
+    Zero = 0,
+    // x1: return address
+    Ra = 1,
+    // x2: stack pointer
+    Sp = 2,
+    // x3: global pointer
+    Gp = 3,
+    // x4: thread pointer
+    Tp = 4,
+    // x5: temporary
+    T0 = 5,
+    // x6: temporary
+    T1 = 6,
+    // x7: temporary
+    T2 = 7,
+    // x8: saved register / frame pointer
+    S0 = 8,
+    // x9: saved register
+    S1 = 9,
+    // x10: argument / return value
+    A0 = 10,
+    // x11: argument / return value
+    A1 = 11,
+    // x12: argument
+    A2 = 12,
+    // x13: argument
+    A3 = 13,
+    // x14: argument
+    A4 = 14,
+    // x15: argument
+    A5 = 15,
+    // x16: argument
+    A6 = 16,
+    // x17: argument
+    A7 = 17,
+    // x18: saved register
+    S2 = 18,
+    // x19: saved register
+    S3 = 19,
+    // x20: saved register
+    S4 = 20,
+    // x21: saved register
+    S5 = 21,
+    // x22: saved register
+    S6 = 22,
+    // x23: saved register
+    S7 = 23,
+    // x24: saved register
+    S8 = 24,
+    // x25: saved register
+    S9 = 25,
+    // x26: saved register
+    S10 = 26,
+    // x27: saved register
+    S11 = 27,
+    // x28: temporary
+    T3 = 28,
+    // x29: temporary
+    T4 = 29,
+    // x30: temporary
+    T5 = 30,
+    // x31: temporary
+    T6 = 31,
+}
 
 impl Gpr {
     /// Create a new GPR from register number (0-31).
@@ -16,82 +82,14 @@ impl Gpr {
     /// Panics if the register number is >= 32.
     pub fn new(num: u8) -> Self {
         assert!(num < 32, "Register number must be < 32");
-        Self(num)
+        // Safety: We've checked that num < 32, so this is safe
+        unsafe { core::mem::transmute(num) }
     }
 
     /// Get the register number (0-31).
     pub fn num(&self) -> u8 {
-        self.0
+        *self as u8
     }
-}
-
-// Named registers
-impl Gpr {
-    // x9: saved register
-    pub const A0: Gpr = Gpr(10);
-    // x10: argument / return value
-    pub const A1: Gpr = Gpr(11);
-    // x11: argument / return value
-    pub const A2: Gpr = Gpr(12);
-    // x12: argument
-    pub const A3: Gpr = Gpr(13);
-    // x13: argument
-    pub const A4: Gpr = Gpr(14);
-    // x14: argument
-    pub const A5: Gpr = Gpr(15);
-    // x15: argument
-    pub const A6: Gpr = Gpr(16);
-    // x16: argument
-    pub const A7: Gpr = Gpr(17);
-    // x2: stack pointer
-    pub const GP: Gpr = Gpr(3);
-    // x0: zero register
-    pub const RA: Gpr = Gpr(1);
-    // x7: temporary
-    pub const S0: Gpr = Gpr(8);
-    // x8: saved register / frame pointer
-    pub const S1: Gpr = Gpr(9);
-    // x25: saved register
-    pub const S10: Gpr = Gpr(26);
-    // x26: saved register
-    pub const S11: Gpr = Gpr(27);
-    // x17: argument
-    pub const S2: Gpr = Gpr(18);
-    // x18: saved register
-    pub const S3: Gpr = Gpr(19);
-    // x19: saved register
-    pub const S4: Gpr = Gpr(20);
-    // x20: saved register
-    pub const S5: Gpr = Gpr(21);
-    // x21: saved register
-    pub const S6: Gpr = Gpr(22);
-    // x22: saved register
-    pub const S7: Gpr = Gpr(23);
-    // x23: saved register
-    pub const S8: Gpr = Gpr(24);
-    // x24: saved register
-    pub const S9: Gpr = Gpr(25);
-    // x1: return address
-    pub const SP: Gpr = Gpr(2);
-    // x4: thread pointer
-    pub const T0: Gpr = Gpr(5);
-    // x5: temporary
-    pub const T1: Gpr = Gpr(6);
-    // x6: temporary
-    pub const T2: Gpr = Gpr(7);
-    // x27: saved register
-    pub const T3: Gpr = Gpr(28);
-    // x28: temporary
-    pub const T4: Gpr = Gpr(29);
-    // x29: temporary
-    pub const T5: Gpr = Gpr(30);
-    // x30: temporary
-    pub const T6: Gpr = Gpr(31);
-    // x3: global pointer
-    pub const TP: Gpr = Gpr(4);
-    pub const ZERO: Gpr = Gpr(0);
-
-    // x31: temporary
 
     /// Parse a register name string into a Gpr.
     ///
@@ -103,11 +101,11 @@ impl Gpr {
     /// Returns an error string if the register name is invalid.
     pub fn from_name(name: &str) -> Result<Self, alloc::string::String> {
         match name {
-            "zero" | "x0" => Ok(Gpr::ZERO),
-            "ra" | "x1" => Ok(Gpr::RA),
-            "sp" | "x2" => Ok(Gpr::SP),
-            "gp" | "x3" => Ok(Gpr::GP),
-            "tp" | "x4" => Ok(Gpr::TP),
+            "zero" | "x0" => Ok(Gpr::Zero),
+            "ra" | "x1" => Ok(Gpr::Ra),
+            "sp" | "x2" => Ok(Gpr::Sp),
+            "gp" | "x3" => Ok(Gpr::Gp),
+            "tp" | "x4" => Ok(Gpr::Tp),
             "t0" | "x5" => Ok(Gpr::T0),
             "t1" | "x6" => Ok(Gpr::T1),
             "t2" | "x7" => Ok(Gpr::T2),
@@ -152,40 +150,39 @@ impl Gpr {
 
 impl fmt::Display for Gpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = match self.0 {
-            0 => "zero",
-            1 => "ra",
-            2 => "sp",
-            3 => "gp",
-            4 => "tp",
-            5 => "t0",
-            6 => "t1",
-            7 => "t2",
-            8 => "s0",
-            9 => "s1",
-            10 => "a0",
-            11 => "a1",
-            12 => "a2",
-            13 => "a3",
-            14 => "a4",
-            15 => "a5",
-            16 => "a6",
-            17 => "a7",
-            18 => "s2",
-            19 => "s3",
-            20 => "s4",
-            21 => "s5",
-            22 => "s6",
-            23 => "s7",
-            24 => "s8",
-            25 => "s9",
-            26 => "s10",
-            27 => "s11",
-            28 => "t3",
-            29 => "t4",
-            30 => "t5",
-            31 => "t6",
-            _ => unreachable!(),
+        let name = match *self {
+            Gpr::Zero => "zero",
+            Gpr::Ra => "ra",
+            Gpr::Sp => "sp",
+            Gpr::Gp => "gp",
+            Gpr::Tp => "tp",
+            Gpr::T0 => "t0",
+            Gpr::T1 => "t1",
+            Gpr::T2 => "t2",
+            Gpr::S0 => "s0",
+            Gpr::S1 => "s1",
+            Gpr::A0 => "a0",
+            Gpr::A1 => "a1",
+            Gpr::A2 => "a2",
+            Gpr::A3 => "a3",
+            Gpr::A4 => "a4",
+            Gpr::A5 => "a5",
+            Gpr::A6 => "a6",
+            Gpr::A7 => "a7",
+            Gpr::S2 => "s2",
+            Gpr::S3 => "s3",
+            Gpr::S4 => "s4",
+            Gpr::S5 => "s5",
+            Gpr::S6 => "s6",
+            Gpr::S7 => "s7",
+            Gpr::S8 => "s8",
+            Gpr::S9 => "s9",
+            Gpr::S10 => "s10",
+            Gpr::S11 => "s11",
+            Gpr::T3 => "t3",
+            Gpr::T4 => "t4",
+            Gpr::T5 => "t5",
+            Gpr::T6 => "t6",
         };
         write!(f, "{}", name)
     }
@@ -211,24 +208,31 @@ mod tests {
 
     #[test]
     fn test_named_registers() {
-        assert_eq!(Gpr::ZERO.num(), 0);
-        assert_eq!(Gpr::RA.num(), 1);
-        assert_eq!(Gpr::SP.num(), 2);
+        assert_eq!(Gpr::Zero.num(), 0);
+        assert_eq!(Gpr::Ra.num(), 1);
+        assert_eq!(Gpr::Sp.num(), 2);
         assert_eq!(Gpr::A0.num(), 10);
         assert_eq!(Gpr::A1.num(), 11);
+        // Test backward compatibility constants
+        assert_eq!(Gpr::Zero.num(), 0);
+        assert_eq!(Gpr::Ra.num(), 1);
+        assert_eq!(Gpr::Sp.num(), 2);
     }
 
     #[test]
     fn test_display() {
-        assert_eq!(format!("{}", Gpr::ZERO), "zero");
-        assert_eq!(format!("{}", Gpr::RA), "ra");
-        assert_eq!(format!("{}", Gpr::SP), "sp");
-        assert_eq!(format!("{}", Gpr::GP), "gp");
-        assert_eq!(format!("{}", Gpr::TP), "tp");
+        assert_eq!(format!("{}", Gpr::Zero), "zero");
+        assert_eq!(format!("{}", Gpr::Ra), "ra");
+        assert_eq!(format!("{}", Gpr::Sp), "sp");
+        assert_eq!(format!("{}", Gpr::Gp), "gp");
+        assert_eq!(format!("{}", Gpr::Tp), "tp");
         assert_eq!(format!("{}", Gpr::T0), "t0");
         assert_eq!(format!("{}", Gpr::S0), "s0");
         assert_eq!(format!("{}", Gpr::A0), "a0");
         assert_eq!(format!("{}", Gpr::A1), "a1");
         assert_eq!(format!("{}", Gpr::T6), "t6");
+        // Test backward compatibility constants
+        assert_eq!(format!("{}", Gpr::Zero), "zero");
+        assert_eq!(format!("{}", Gpr::Ra), "ra");
     }
 }

@@ -89,7 +89,7 @@ ebreak",
     let mut emu = Riscv32Emulator::new(code, vec![0; 1024]);
     let result = emu.run_until_ebreak().expect("Execution failed");
     assert_eq!(result, 42);
-    assert_eq!(emu.get_register(Gpr::RA), 4); // PC + 4 of jal instruction
+    assert_eq!(emu.get_register(Gpr::Ra), 4); // PC + 4 of jal instruction
 }
 
 #[test]
@@ -147,7 +147,7 @@ ebreak",
     let mut emu = Riscv32Emulator::new(code, vec![0; 1024]);
     let result = emu.run_until_ebreak().expect("Execution failed");
     assert_eq!(result, 100);
-    assert_eq!(emu.get_register(Gpr::ZERO), 0);
+    assert_eq!(emu.get_register(Gpr::Zero), 0);
 }
 
 #[test]

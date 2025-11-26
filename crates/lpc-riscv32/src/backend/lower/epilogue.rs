@@ -20,7 +20,7 @@ impl super::Lowerer {
                 if let Some(offset) = frame_layout.callee_saved_offset(*reg) {
                     code.emit(RiscvInst::Lw {
                         rd: *reg,
-                        rs1: Gpr::SP,
+                        rs1: Gpr::Sp,
                         imm: offset.as_i32(),
                     });
                 }
@@ -36,16 +36,16 @@ impl super::Lowerer {
                     0
                 };
                 code.emit(RiscvInst::Lw {
-                    rd: Gpr::RA,
-                    rs1: Gpr::SP,
+                    rd: Gpr::Ra,
+                    rs1: Gpr::Sp,
                     imm: ra_offset,
                 });
             }
 
             // Restore stack pointer: addi sp, sp, frame_size
             code.emit(RiscvInst::Addi {
-                rd: Gpr::SP,
-                rs1: Gpr::SP,
+                rd: Gpr::Sp,
+                rs1: Gpr::Sp,
                 imm: frame_size as i32,
             });
         }
@@ -58,8 +58,8 @@ impl super::Lowerer {
             if frame_layout.has_function_calls {
                 // Entry function that made calls: RA is valid (set by calls), use it
                 code.emit(RiscvInst::Jalr {
-                    rd: Gpr::ZERO,
-                    rs1: Gpr::RA,
+                    rd: Gpr::Zero,
+                    rs1: Gpr::Ra,
                     imm: 0,
                 });
             } else {
@@ -69,15 +69,15 @@ impl super::Lowerer {
         } else if frame_layout.has_function_calls {
             // RA was saved and restored, so we can return normally
             code.emit(RiscvInst::Jalr {
-                rd: Gpr::ZERO,
-                rs1: Gpr::RA,
+                rd: Gpr::Zero,
+                rs1: Gpr::Ra,
                 imm: 0,
             });
         } else {
             // Leaf function: RA is valid (set by caller), so we can return normally
             code.emit(RiscvInst::Jalr {
-                rd: Gpr::ZERO,
-                rs1: Gpr::RA,
+                rd: Gpr::Zero,
+                rs1: Gpr::Ra,
                 imm: 0,
             });
         }
@@ -209,11 +209,11 @@ module {
 
         let ra_restore_pos = instructions.iter().position(|inst| {
             matches!(inst, Inst::Lw { rd, rs1, .. }
-                    if rd == &Gpr::RA && rs1 == &Gpr::SP)
+                    if rd == &Gpr::Ra && rs1 == &Gpr::Sp)
         });
         let sp_adjust_pos = instructions.iter().position(|inst| {
             matches!(inst, Inst::Addi { rd, rs1, imm }
-                    if rd == &Gpr::SP && rs1 == &Gpr::SP && imm > &0)
+                    if rd == &Gpr::Sp && rs1 == &Gpr::Sp && imm > &0)
         });
 
         // RA should be restored before SP is adjusted

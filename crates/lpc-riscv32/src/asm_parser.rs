@@ -546,13 +546,13 @@ mod tests {
     #[test]
     fn test_assemble_addi() {
         let inst = assemble_instruction("addi a0, zero, 5").unwrap();
-        assert_eq!(inst, addi(Gpr::A0, Gpr::ZERO, 5));
+        assert_eq!(inst, addi(Gpr::A0, Gpr::Zero, 5));
     }
 
     #[test]
     fn test_assemble_addi_negative() {
         let inst = assemble_instruction("addi a0, zero, -5").unwrap();
-        assert_eq!(inst, addi(Gpr::A0, Gpr::ZERO, -5));
+        assert_eq!(inst, addi(Gpr::A0, Gpr::Zero, -5));
     }
 
     #[test]
@@ -576,7 +576,7 @@ mod tests {
     #[test]
     fn test_assemble_jal() {
         let inst = assemble_instruction("jal ra, 16").unwrap();
-        assert_eq!(inst, jal(Gpr::RA, 16));
+        assert_eq!(inst, jal(Gpr::Ra, 16));
     }
 
     #[test]
@@ -641,7 +641,7 @@ mod tests {
     #[test]
     fn test_assemble_jalr() {
         let inst = assemble_instruction("jalr ra, 0(a0)").unwrap();
-        assert_eq!(inst, jalr(Gpr::RA, Gpr::A0, 0));
+        assert_eq!(inst, jalr(Gpr::Ra, Gpr::A0, 0));
     }
 
     #[test]
@@ -653,7 +653,7 @@ mod tests {
     #[test]
     fn test_assemble_hex_immediate() {
         let inst = assemble_instruction("addi a0, zero, 0x10").unwrap();
-        assert_eq!(inst, addi(Gpr::A0, Gpr::ZERO, 16));
+        assert_eq!(inst, addi(Gpr::A0, Gpr::Zero, 16));
     }
 
     #[test]

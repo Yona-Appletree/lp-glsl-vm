@@ -266,11 +266,11 @@ impl Riscv32Emulator {
 
         // Named registers first
         let named_regs = [
-            (Gpr::ZERO, "zero"),
-            (Gpr::RA, "ra"),
-            (Gpr::SP, "sp"),
-            (Gpr::GP, "gp"),
-            (Gpr::TP, "tp"),
+            (Gpr::Zero, "zero"),
+            (Gpr::Ra, "ra"),
+            (Gpr::Sp, "sp"),
+            (Gpr::Gp, "gp"),
+            (Gpr::Tp, "tp"),
             (Gpr::T0, "t0"),
             (Gpr::T1, "t1"),
             (Gpr::T2, "t2"),
@@ -288,7 +288,7 @@ impl Riscv32Emulator {
 
         for (reg, name) in &named_regs {
             let value = self.get_register(*reg);
-            if value != 0 || *reg == Gpr::ZERO {
+            if value != 0 || *reg == Gpr::Zero {
                 result.push_str(&format!(
                     "  {} (x{}) = 0x{:08x} ({})\n",
                     name,
