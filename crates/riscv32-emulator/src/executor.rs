@@ -3,11 +3,11 @@
 extern crate alloc;
 
 use alloc::string::String;
-use crate::decoder::DecodedInstruction;
+
 use crate::error::EmulatorError;
 use crate::logging::InstructionLog;
 use crate::memory::Memory;
-use riscv32_encoder::Gpr;
+use riscv32_encoder::{Gpr, Inst};
 
 /// Result of executing a single instruction.
 #[derive(Debug, Clone)]
@@ -42,7 +42,7 @@ fn write_reg(regs: &mut [i32; 32], log: &mut InstructionLog, reg: Gpr, value: i3
 
 /// Execute a decoded instruction.
 pub fn execute_instruction(
-    inst: DecodedInstruction,
+    inst: Inst,
     pc: u32,
     regs: &mut [i32; 32],
     memory: &mut Memory,
@@ -54,7 +54,7 @@ pub fn execute_instruction(
     let mut syscall = false;
 
     match inst {
-        DecodedInstruction::Add { rd, rs1, rs2 } => {
+        Inst::Add { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             log.regs_read.push((rs1, val1));
@@ -62,7 +62,7 @@ pub fn execute_instruction(
             let result = val1.wrapping_add(val2);
             write_reg(regs, &mut log, rd, result);
         }
-        DecodedInstruction::Sub { rd, rs1, rs2 } => {
+        Inst::Sub { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             log.regs_read.push((rs1, val1));
@@ -70,7 +70,7 @@ pub fn execute_instruction(
             let result = val1.wrapping_sub(val2);
             write_reg(regs, &mut log, rd, result);
         }
-        DecodedInstruction::Mul { rd, rs1, rs2 } => {
+        Inst::Mul { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             log.regs_read.push((rs1, val1));
@@ -78,13 +78,13 @@ pub fn execute_instruction(
             let result = val1.wrapping_mul(val2);
             write_reg(regs, &mut log, rd, result);
         }
-        DecodedInstruction::Addi { rd, rs1, imm } => {
+        Inst::Addi { rd, rs1, imm } => {
             let val1 = read_reg(regs, rs1);
             log.regs_read.push((rs1, val1));
             let result = val1.wrapping_add(imm);
             write_reg(regs, &mut log, rd, result);
         }
-        DecodedInstruction::Lw { rd, rs1, imm } => {
+        Inst::Lw { rd, rs1, imm } => {
             let base = read_reg(regs, rs1);
             log.regs_read.push((rs1, base));
             let address = base.wrapping_add(imm) as u32;
@@ -109,7 +109,7 @@ pub fn execute_instruction(
             log.memory_reads.push((address, value));
             write_reg(regs, &mut log, rd, value);
         }
-        DecodedInstruction::Sw { rs1, rs2, imm } => {
+        Inst::Sw { rs1, rs2, imm } => {
             let base = read_reg(regs, rs1);
             let value = read_reg(regs, rs2);
             log.regs_read.push((rs1, base));
@@ -139,14 +139,14 @@ pub fn execute_instruction(
 
             log.memory_writes.push((address, old_value, value));
         }
-        DecodedInstruction::Jal { rd, imm } => {
+        Inst::Jal { rd, imm } => {
             let next_pc = pc.wrapping_add(4);
             write_reg(regs, &mut log, rd, next_pc as i32);
             let target = pc.wrapping_add(imm as u32);
             new_pc = Some(target);
             log.pc_change = Some((pc, target));
         }
-        DecodedInstruction::Jalr { rd, rs1, imm } => {
+        Inst::Jalr { rd, rs1, imm } => {
             let base = read_reg(regs, rs1);
             log.regs_read.push((rs1, base));
             let next_pc = pc.wrapping_add(4);
@@ -155,7 +155,7 @@ pub fn execute_instruction(
             new_pc = Some(target);
             log.pc_change = Some((pc, target));
         }
-        DecodedInstruction::Beq { rs1, rs2, imm } => {
+        Inst::Beq { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             log.regs_read.push((rs1, val1));
@@ -166,7 +166,7 @@ pub fn execute_instruction(
                 log.pc_change = Some((pc, target));
             }
         }
-        DecodedInstruction::Bne { rs1, rs2, imm } => {
+        Inst::Bne { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             log.regs_read.push((rs1, val1));
@@ -177,7 +177,7 @@ pub fn execute_instruction(
                 log.pc_change = Some((pc, target));
             }
         }
-        DecodedInstruction::Blt { rs1, rs2, imm } => {
+        Inst::Blt { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             log.regs_read.push((rs1, val1));
@@ -188,7 +188,7 @@ pub fn execute_instruction(
                 log.pc_change = Some((pc, target));
             }
         }
-        DecodedInstruction::Bge { rs1, rs2, imm } => {
+        Inst::Bge { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             log.regs_read.push((rs1, val1));
@@ -199,18 +199,18 @@ pub fn execute_instruction(
                 log.pc_change = Some((pc, target));
             }
         }
-        DecodedInstruction::Lui { rd, imm } => {
+        Inst::Lui { rd, imm } => {
             let value = (imm << 12) as i32;
             write_reg(regs, &mut log, rd, value);
         }
-        DecodedInstruction::Auipc { rd, imm } => {
+        Inst::Auipc { rd, imm } => {
             let value = (pc.wrapping_add(imm << 12)) as i32;
             write_reg(regs, &mut log, rd, value);
         }
-        DecodedInstruction::Ecall => {
+        Inst::Ecall => {
             syscall = true;
         }
-        DecodedInstruction::Ebreak => {
+        Inst::Ebreak => {
             should_halt = true;
         }
     }

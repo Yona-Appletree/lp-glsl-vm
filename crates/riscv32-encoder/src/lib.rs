@@ -8,12 +8,14 @@
 extern crate alloc;
 
 mod asm;
+mod decode;
 mod disasm;
 mod encode;
 mod inst;
 mod regs;
 
 pub use asm::{assemble_code, assemble_instruction};
+pub use decode::{decode_instruction, DecodedFields};
 pub use disasm::{disassemble_code, disassemble_code_with_labels, disassemble_instruction};
 pub use encode::*;
 pub use inst::Inst;

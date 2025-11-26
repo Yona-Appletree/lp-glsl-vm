@@ -29,6 +29,7 @@ fn parse_register(input: &str) -> IResult<&str, Gpr> {
 fn parse_immediate(input: &str) -> IResult<&str, i32> {
     alt((
         // Hex: 0x123 or -0x123
+        // Try hex first to avoid matching "0" as decimal when followed by "x"
         map_res(
             recognize(pair(
                 opt(char('-')),
@@ -40,7 +41,16 @@ fn parse_immediate(input: &str) -> IResult<&str, i32> {
                 } else {
                     (1, &s[2..])
                 };
-                i32::from_str_radix(hex_part, 16).map(|v| sign * v)
+                // Parse as u32 first to handle large values, then convert to i32
+                u32::from_str_radix(hex_part, 16)
+                    .map(|v| {
+                        let signed = v as i32;
+                        sign * signed
+                    })
+                    .or_else(|_| {
+                        // If it doesn't fit in i32, try parsing as u32 and then casting
+                        u32::from_str_radix(hex_part, 16).map(|v| v as i32)
+                    })
             },
         ),
         // Decimal: 123 or -123
@@ -174,14 +184,8 @@ fn parse_u_type(input: &str) -> IResult<&str, u32> {
 
     // For lui/auipc, the immediate is the upper 20 bits
     // We accept either the full 32-bit value or the upper 20 bits
-    let imm_u = if imm < 0 {
-        return Err(nom::Err::Error(nom::error::Error::new(
-            input,
-            nom::error::ErrorKind::Verify,
-        )));
-    } else {
-        imm as u32
-    };
+    // Cast i32 to u32 (bitwise cast, handles negative values correctly)
+    let imm_u = imm as u32;
 
     let inst = match op {
         "lui" => lui(rd, imm_u),
@@ -469,7 +473,7 @@ fn parse_branch_with_labels(
     let (input, rs2) = terminated(parse_register, opt(char(',')))(input)
         .map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
     let input = multispace0(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?.0;
-    let (input, target) = parse_target(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
+    let (_input, target) = parse_target(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
 
     let imm = match target {
         Target::Offset(off) => off,
@@ -505,7 +509,7 @@ fn parse_jal_with_labels(
     let (input, rd) = terminated(parse_register, opt(char(',')))(input)
         .map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
     let input = multispace0(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?.0;
-    let (input, target) = parse_target(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
+    let (_input, target) = parse_target(input).map_err(|e: nom::Err<nom::error::Error<&str>>| format!("{:?}", e))?;
 
     let imm = match target {
         Target::Offset(off) => off,
@@ -525,8 +529,6 @@ fn parse_jal_with_labels(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::collections::BTreeMap;
-    use alloc::vec::Vec;
 
     #[test]
     fn test_assemble_add() {
