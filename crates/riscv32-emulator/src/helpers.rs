@@ -105,7 +105,7 @@ fn format_error(emu: &Riscv32Emulator, error: &EmulatorError, code: &[u8]) -> St
         result.push_str("\nLast execution logs:\n");
         let start = logs.len().saturating_sub(10);
         for log in &logs[start..] {
-            result.push_str(log);
+            result.push_str(&format!("{}\n", log));
         }
     }
 
@@ -276,7 +276,8 @@ ebreak",
             "
 addi a0, zero, 42
 ebreak
-        ");
+        ",
+        );
         assert_eq!(emu.get_register(Gpr::A0), 42);
     }
 }

@@ -427,9 +427,8 @@ pub fn compile_module_to_insts(
             // Prepend SP initialization to entry function
             use riscv32_encoder::{Gpr, Inst};
             const RAM_OFFSET: u32 = 0x80000000;
-            const STACK_SIZE: u32 = 64 * 1024; // 64KB
-            const DEFAULT_RAM_SIZE: u32 = 4 * 1024 * 1024; // 4MB
-            let sp_value = RAM_OFFSET + DEFAULT_RAM_SIZE - STACK_SIZE;
+            const SP_OFFSET: u32 = 0x1000; // SP at 0x1000 above RAM boundary
+            let sp_value = RAM_OFFSET + SP_OFFSET;
             let sp_value = sp_value & !0xF; // Align to 16 bytes
 
             let sp_hi_value = sp_value & !0xFFF; // Clear lower 12 bits for lui

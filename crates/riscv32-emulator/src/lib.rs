@@ -17,7 +17,7 @@ mod helpers;
 
 pub use emulator::{Riscv32Emulator, StepResult, SyscallInfo};
 pub use error::{EmulatorError, MemoryAccessKind};
-pub use logging::LogLevel;
+pub use logging::{InstLog, LogLevel};
 pub use helpers::{
     debug_riscv32_asm, debug_riscv32_asm_with_ram, debug_riscv32_bytes, debug_riscv32_ops,
     expect_a0, expect_error, expect_error_with_ram, expect_memory_error,

@@ -3,12 +3,12 @@
 extern crate alloc;
 
 use alloc::{format, string::String, vec::Vec};
-use riscv32_encoder::{disassemble_instruction, Gpr};
+use riscv32_encoder::Gpr;
 
 use crate::decoder::decode_instruction;
 use crate::error::EmulatorError;
 use crate::executor::execute_instruction;
-use crate::logging::{InstructionLog, LogLevel};
+use crate::logging::{InstLog, LogLevel};
 use crate::memory::Memory;
 
 /// Result of a single step.
@@ -39,7 +39,7 @@ pub struct Riscv32Emulator {
     instruction_count: u64,
     max_instructions: u64,
     log_level: LogLevel,
-    log_buffer: Vec<String>,
+    log_buffer: Vec<InstLog>,
 }
 
 impl Riscv32Emulator {
@@ -111,27 +111,18 @@ impl Riscv32Emulator {
             }
         })?;
 
-        // Get disassembly
-        let disassembly = disassemble_instruction(inst_word);
+        // Increment instruction count before execution (for cycle counting)
+        self.instruction_count += 1;
 
         // Execute instruction
-        let exec_result = execute_instruction(decoded, self.pc, &mut self.regs, &mut self.memory, disassembly.clone())?;
+        let exec_result = execute_instruction(decoded, self.pc, &mut self.regs, &mut self.memory)?;
 
         // Update PC
-        let old_pc = self.pc;
         self.pc = exec_result.new_pc.unwrap_or(self.pc.wrapping_add(4));
 
-        // Log instruction
-        let mut log = exec_result.log;
-        log.instruction = inst_word;
-        if log.pc_change.is_none() && old_pc != self.pc {
-            log.pc_change = Some((old_pc, self.pc));
-        }
-
-        self.log_instruction(&log);
-
-        // Increment instruction count
-        self.instruction_count += 1;
+        // Log instruction with cycle count
+        let log_with_cycle = exec_result.log.set_cycle(self.instruction_count);
+        self.log_instruction(log_with_cycle);
 
         // Handle special cases
         if exec_result.should_halt {
@@ -234,9 +225,18 @@ impl Riscv32Emulator {
         self.instruction_count
     }
 
-    /// Get captured log messages.
-    pub fn get_logs(&self) -> &[String] {
+    /// Get captured log entries.
+    pub fn get_logs(&self) -> &[InstLog] {
         &self.log_buffer
+    }
+
+    /// Format all captured logs as a string.
+    pub fn format_logs(&self) -> String {
+        let mut result = String::new();
+        for log in &self.log_buffer {
+            result.push_str(&format!("{}\n", log));
+        }
+        result
     }
 
     /// Clear captured log messages.
@@ -293,19 +293,18 @@ impl Riscv32Emulator {
     }
 
     /// Log an instruction based on the current log level.
-    fn log_instruction(&mut self, log: &InstructionLog) {
+    fn log_instruction(&mut self, log: InstLog) {
         match self.log_level {
             LogLevel::None => {}
             LogLevel::Errors => {
                 // Only log on errors (handled elsewhere)
             }
-            LogLevel::Instructions => {
-                let msg = log.format(false);
-                self.log_buffer.push(msg);
-            }
-            LogLevel::Verbose => {
-                let msg = log.format(true);
-                self.log_buffer.push(msg);
+            LogLevel::Instructions | LogLevel::Verbose => {
+                // Implement rolling buffer: if buffer reaches 100, remove oldest
+                if self.log_buffer.len() >= 100 {
+                    self.log_buffer.remove(0);
+                }
+                self.log_buffer.push(log);
             }
         }
     }

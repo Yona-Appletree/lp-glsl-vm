@@ -14,4 +14,5 @@ riscv32-encoder = { path = "../riscv32-encoder" }
 [dev-dependencies]
 r5-builder = { path = "../r5-builder" }
 r5-test-util = { path = "../r5-test-util" }
+riscv32-emulator = { path = "../riscv32-emulator" }
 

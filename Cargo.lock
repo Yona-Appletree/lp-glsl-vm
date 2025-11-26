@@ -124,6 +124,7 @@ dependencies = [
  "r5-builder",
  "r5-ir",
  "r5-test-util",
+ "riscv32-emulator",
  "riscv32-encoder",
 ]
 

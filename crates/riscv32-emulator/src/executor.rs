@@ -1,11 +1,7 @@
 //! Instruction executor for RISC-V 32-bit instructions.
 
-extern crate alloc;
-
-use alloc::string::String;
-
 use crate::error::EmulatorError;
-use crate::logging::InstructionLog;
+use crate::logging::{InstLog, SystemKind};
 use crate::memory::Memory;
 use riscv32_encoder::{Gpr, Inst};
 
@@ -19,7 +15,7 @@ pub struct ExecutionResult {
     /// Whether a syscall was encountered (ECALL)
     pub syscall: bool,
     /// Log entry for this instruction
-    pub log: InstructionLog,
+    pub log: InstLog,
 }
 
 /// Helper to read register (x0 always returns 0)
@@ -31,62 +27,96 @@ fn read_reg(regs: &[i32; 32], reg: Gpr) -> i32 {
     }
 }
 
-/// Helper to write register (x0 writes are ignored)
-fn write_reg(regs: &mut [i32; 32], log: &mut InstructionLog, reg: Gpr, value: i32) {
-    if reg.num() != 0 {
-        let old_value = regs[reg.num() as usize];
-        regs[reg.num() as usize] = value;
-        log.regs_written.push((reg, old_value, value));
-    }
-}
-
 /// Execute a decoded instruction.
 pub fn execute_instruction(
     inst: Inst,
     pc: u32,
     regs: &mut [i32; 32],
     memory: &mut Memory,
-    disassembly: String,
 ) -> Result<ExecutionResult, EmulatorError> {
-    let mut log = InstructionLog::new(pc, 0, disassembly);
     let mut new_pc: Option<u32> = None;
     let mut should_halt = false;
     let mut syscall = false;
+    let instruction_word = inst.encode();
 
-    match inst {
+    let log = match inst {
         Inst::Add { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            log.regs_read.push((rs1, val1));
-            log.regs_read.push((rs2, val2));
+            let rd_old = read_reg(regs, rd);
             let result = val1.wrapping_add(val2);
-            write_reg(regs, &mut log, rd, result);
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
         }
         Inst::Sub { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            log.regs_read.push((rs1, val1));
-            log.regs_read.push((rs2, val2));
+            let rd_old = read_reg(regs, rd);
             let result = val1.wrapping_sub(val2);
-            write_reg(regs, &mut log, rd, result);
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
         }
         Inst::Mul { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            log.regs_read.push((rs1, val1));
-            log.regs_read.push((rs2, val2));
+            let rd_old = read_reg(regs, rd);
             let result = val1.wrapping_mul(val2);
-            write_reg(regs, &mut log, rd, result);
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
         }
         Inst::Addi { rd, rs1, imm } => {
             let val1 = read_reg(regs, rs1);
-            log.regs_read.push((rs1, val1));
+            let rd_old = read_reg(regs, rd);
             let result = val1.wrapping_add(imm);
-            write_reg(regs, &mut log, rd, result);
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: None,
+                rd_old,
+                rd_new: result,
+            }
         }
         Inst::Lw { rd, rs1, imm } => {
             let base = read_reg(regs, rs1);
-            log.regs_read.push((rs1, base));
             let address = base.wrapping_add(imm) as u32;
 
             // Save register state for error context
@@ -106,19 +136,30 @@ pub fn execute_instruction(
                 e
             })?;
 
-            log.memory_reads.push((address, value));
-            write_reg(regs, &mut log, rd, value);
+            let rd_old = read_reg(regs, rd);
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = value;
+            }
+
+            InstLog::Load {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: base,
+                addr: address,
+                mem_val: value,
+                rd_old,
+                rd_new: value,
+            }
         }
         Inst::Sw { rs1, rs2, imm } => {
             let base = read_reg(regs, rs1);
             let value = read_reg(regs, rs2);
-            log.regs_read.push((rs1, base));
-            log.regs_read.push((rs2, value));
             let address = base.wrapping_add(imm) as u32;
 
             // Read old value before write
             let old_value = memory.read_word(address).unwrap_or(0);
-            log.memory_reads.push((address, old_value));
 
             // Save register state for error context
             let error_regs = *regs;
@@ -137,83 +178,193 @@ pub fn execute_instruction(
                 e
             })?;
 
-            log.memory_writes.push((address, old_value, value));
+            InstLog::Store {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rs1_val: base,
+                rs2_val: value,
+                addr: address,
+                mem_old: old_value,
+                mem_new: value,
+            }
         }
         Inst::Jal { rd, imm } => {
             let next_pc = pc.wrapping_add(4);
-            write_reg(regs, &mut log, rd, next_pc as i32);
+            let rd_old = read_reg(regs, rd);
             let target = pc.wrapping_add(imm as u32);
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = next_pc as i32;
+            }
             new_pc = Some(target);
-            log.pc_change = Some((pc, target));
+
+            InstLog::Jump {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rd_old,
+                rd_new: if rd.num() == 0 { None } else { Some(next_pc as i32) },
+                target_pc: target,
+            }
         }
         Inst::Jalr { rd, rs1, imm } => {
             let base = read_reg(regs, rs1);
-            log.regs_read.push((rs1, base));
             let next_pc = pc.wrapping_add(4);
-            write_reg(regs, &mut log, rd, next_pc as i32);
+            let rd_old = read_reg(regs, rd);
             let target = (base.wrapping_add(imm) as u32) & !1; // Clear LSB
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = next_pc as i32;
+            }
             new_pc = Some(target);
-            log.pc_change = Some((pc, target));
+
+            InstLog::Jump {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rd_old,
+                rd_new: if rd.num() == 0 { None } else { Some(next_pc as i32) },
+                target_pc: target,
+            }
         }
         Inst::Beq { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            log.regs_read.push((rs1, val1));
-            log.regs_read.push((rs2, val2));
-            if val1 == val2 {
+            let taken = val1 == val2;
+            let target_pc = if taken {
                 let target = pc.wrapping_add(imm as u32);
                 new_pc = Some(target);
-                log.pc_change = Some((pc, target));
+                Some(target)
+            } else {
+                None
+            };
+
+            InstLog::Branch {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rs1_val: val1,
+                rs2_val: val2,
+                taken,
+                target_pc,
             }
         }
         Inst::Bne { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            log.regs_read.push((rs1, val1));
-            log.regs_read.push((rs2, val2));
-            if val1 != val2 {
+            let taken = val1 != val2;
+            let target_pc = if taken {
                 let target = pc.wrapping_add(imm as u32);
                 new_pc = Some(target);
-                log.pc_change = Some((pc, target));
+                Some(target)
+            } else {
+                None
+            };
+
+            InstLog::Branch {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rs1_val: val1,
+                rs2_val: val2,
+                taken,
+                target_pc,
             }
         }
         Inst::Blt { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            log.regs_read.push((rs1, val1));
-            log.regs_read.push((rs2, val2));
-            if val1 < val2 {
+            let taken = val1 < val2;
+            let target_pc = if taken {
                 let target = pc.wrapping_add(imm as u32);
                 new_pc = Some(target);
-                log.pc_change = Some((pc, target));
+                Some(target)
+            } else {
+                None
+            };
+
+            InstLog::Branch {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rs1_val: val1,
+                rs2_val: val2,
+                taken,
+                target_pc,
             }
         }
         Inst::Bge { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            log.regs_read.push((rs1, val1));
-            log.regs_read.push((rs2, val2));
-            if val1 >= val2 {
+            let taken = val1 >= val2;
+            let target_pc = if taken {
                 let target = pc.wrapping_add(imm as u32);
                 new_pc = Some(target);
-                log.pc_change = Some((pc, target));
+                Some(target)
+            } else {
+                None
+            };
+
+            InstLog::Branch {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rs1_val: val1,
+                rs2_val: val2,
+                taken,
+                target_pc,
             }
         }
         Inst::Lui { rd, imm } => {
             let value = (imm << 12) as i32;
-            write_reg(regs, &mut log, rd, value);
+            let rd_old = read_reg(regs, rd);
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = value;
+            }
+
+            InstLog::Immediate {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rd,
+                rd_old,
+                rd_new: value,
+            }
         }
         Inst::Auipc { rd, imm } => {
             let value = (pc.wrapping_add(imm << 12)) as i32;
-            write_reg(regs, &mut log, rd, value);
+            let rd_old = read_reg(regs, rd);
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = value;
+            }
+
+            InstLog::Immediate {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                rd,
+                rd_old,
+                rd_new: value,
+            }
         }
         Inst::Ecall => {
             syscall = true;
+            InstLog::System {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                kind: SystemKind::Ecall,
+            }
         }
         Inst::Ebreak => {
             should_halt = true;
+            InstLog::System {
+                cycle: 0, // Will be set by emulator
+                pc,
+                instruction: instruction_word,
+                kind: SystemKind::Ebreak,
+            }
         }
-    }
+    };
 
     Ok(ExecutionResult {
         new_pc,
