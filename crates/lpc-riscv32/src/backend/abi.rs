@@ -4,8 +4,9 @@
 
 use alloc::{vec, vec::Vec};
 
-use super::{regalloc::RegisterAllocation, register_role::RegisterRole};
+use super::regalloc::RegisterAllocation;
 use crate::Gpr;
+use crate::register_role::RegisterRole;
 
 /// ABI information for a function.
 #[derive(Debug, Clone)]

@@ -10,9 +10,9 @@ use lpc_lpir::{Function, Inst, Value};
 use super::{
     liveness::{InstPoint, LivenessInfo},
     regalloc::RegisterAllocation,
-    register_role::RegisterRole,
 };
 use crate::Gpr;
+use crate::register_role::RegisterRole;
 
 /// Spill or reload operation.
 #[derive(Clone, Debug, PartialEq, Eq)]

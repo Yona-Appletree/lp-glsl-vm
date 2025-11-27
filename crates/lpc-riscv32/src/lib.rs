@@ -16,6 +16,8 @@ pub mod emu;
 pub mod encode;
 pub mod inst;
 pub mod regs;
+mod register_role;
+mod elf;
 
 pub use asm_parser::{assemble_code, assemble_instruction};
 // Re-export backend items for convenience

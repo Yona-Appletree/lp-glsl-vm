@@ -6,11 +6,9 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 
 use lpc_lpir::Value;
 
-use super::{
-    liveness::{InstPoint, LiveRange, LivenessInfo},
-    register_role::RegisterRole,
-};
+use super::liveness::{InstPoint, LiveRange, LivenessInfo};
 use crate::Gpr;
+use crate::register_role::RegisterRole;
 
 /// Register allocation result.
 #[derive(Debug, Clone)]
