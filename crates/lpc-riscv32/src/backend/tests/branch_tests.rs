@@ -16,13 +16,13 @@ block0(v0: i32):
     v1 = iconst 42
     v2 = iconst 0
     v3 = iconst 1
-    brif v3, block1, block2
+    brif v3, block1(v1), block2(v2)
 
-block1:
-    return v1
+block1(v4: i32):
+    return v4
 
-block2:
-    return v2
+block2(v5: i32):
+    return v5
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR function");

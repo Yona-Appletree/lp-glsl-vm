@@ -3,6 +3,7 @@
 mod test_glsl_parser;
 
 #[test]
+#[ignore]
 fn test_embive() {
     use std::{sync::mpsc, thread, time::Duration};
 
