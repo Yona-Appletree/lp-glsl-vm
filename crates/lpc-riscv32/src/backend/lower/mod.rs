@@ -8,15 +8,16 @@ pub mod helpers;
 pub mod iconst;
 pub mod return_;
 
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use lpc_lpir::{Block, Function, Inst as IrInst, Value};
 
-use alloc::collections::BTreeMap;
-
 use crate::{
     backend::{
-        abi::Abi, frame::FrameLayout, liveness::{InstPoint, LivenessInfo}, regalloc::RegisterAllocation,
+        abi::{Abi, ArgLoc},
+        frame::FrameLayout,
+        liveness::{InstPoint, LivenessInfo},
+        regalloc::RegisterAllocation,
         spill_reload::SpillReloadPlan,
     },
     inst_buffer::InstBuffer,
@@ -48,6 +49,19 @@ pub(crate) enum BranchType {
     BranchFalse,
 }
 
+/// Represents a function call relocation that needs to be fixed up.
+///
+/// A function call relocation records where a JAL instruction is and what function it calls.
+/// After all functions are compiled, we fix up these relocations with the correct
+/// PC-relative offsets.
+#[derive(Clone)]
+pub(crate) struct CallRelocation {
+    /// Instruction index in the buffer where the call is
+    pub(crate) inst_idx: usize,
+    /// Name of the function being called
+    pub(crate) callee_name: alloc::string::String,
+}
+
 /// Maps (predecessor_block_idx, target_block_idx, param_idx) -> source_value
 /// This represents which value from a predecessor block feeds into which parameter
 /// of a target block (phi node source).
@@ -75,6 +89,9 @@ pub struct Lowerer {
     /// Relocations that need to be fixed up
     #[cfg_attr(test, allow(dead_code))]
     relocations: Vec<Relocation>,
+    /// Function call relocations that need to be fixed up
+    #[cfg_attr(test, allow(dead_code))]
+    call_relocations: Vec<CallRelocation>,
     /// Phi source mapping: (pred_block, target_block, param_idx) -> source_value
     phi_sources: PhiSourceMap,
     /// Liveness info (needed for phi source inference and copy decisions)
@@ -103,6 +120,7 @@ impl Lowerer {
             inst_buffer: InstBuffer::new(),
             block_addresses: Vec::new(),
             relocations: Vec::new(),
+            call_relocations: Vec::new(),
             phi_sources,
             liveness,
             current_block_idx: 0,
@@ -110,12 +128,19 @@ impl Lowerer {
     }
 
     /// Lower the entire function to RISC-V instructions.
-    pub fn lower_function(mut self) -> InstBuffer {
+    /// Returns both the instruction buffer and call relocations.
+    pub fn lower_function(mut self) -> (InstBuffer, Vec<CallRelocation>) {
         // Initialize block addresses vector
         self.block_addresses.resize(self.function.blocks.len(), 0);
 
         // Generate prologue
         crate::backend::abi::gen_prologue_frame_setup(&mut self.inst_buffer, &self.frame_layout);
+
+        // Load function parameters from argument registers/stack
+        // This must happen after frame setup (FP is set) but before clobber save
+        // so we can access stack args via FP
+        self.load_function_parameters();
+
         crate::backend::abi::gen_clobber_save(&mut self.inst_buffer, &self.frame_layout);
 
         // Phase 1: Lower all blocks (records relocations)
@@ -130,11 +155,12 @@ impl Lowerer {
         // Phase 2: Fix up relocations
         self.fixup_relocations();
 
-        // Generate epilogue
-        crate::backend::abi::gen_clobber_restore(&mut self.inst_buffer, &self.frame_layout);
-        crate::backend::abi::gen_epilogue_frame_restore(&mut self.inst_buffer, &self.frame_layout);
+        // Note: Epilogue is generated at each return site (in lower_return),
+        // following Cranelift's approach. We don't generate a single epilogue
+        // at the end because return instructions can appear in any block.
 
-        self.inst_buffer
+        let call_relocs = self.call_relocations.clone();
+        (self.inst_buffer, call_relocs)
     }
 
     /// Lower a single basic block.
@@ -268,7 +294,14 @@ impl Lowerer {
                 target_false,
                 args_false,
             } => {
-                branch::lower_br(self, *condition, *target_true, args_true, *target_false, args_false);
+                branch::lower_br(
+                    self,
+                    *condition,
+                    *target_true,
+                    args_true,
+                    *target_false,
+                    args_false,
+                );
             }
             IrInst::Call {
                 callee,
@@ -327,6 +360,78 @@ impl Lowerer {
         &self.abi
     }
 
+    /// Load function parameters from argument registers and stack.
+    ///
+    /// This loads parameters from their ABI locations (a0-a7 or stack)
+    /// into their allocated registers or spill slots.
+    fn load_function_parameters(&mut self) {
+        // Extract entry block info first to avoid borrow conflicts
+        let entry_block_params = self.function.blocks[0].params.clone();
+        let num_params = entry_block_params.len();
+
+        if num_params == 0 {
+            return;
+        }
+
+        // Compute argument locations
+        let has_return_area = self.abi.uses_return_area;
+        let arg_locs = Abi::compute_arg_locs(num_params, has_return_area);
+
+        // If multi-return, save return area pointer (passed in a0) to s1
+        // We'll need it later for storing excess returns
+        if has_return_area {
+            // Save a0 (return area pointer) to s1 (callee-saved)
+            // Note: s1 will be saved in clobber_save if it's used
+            self.inst_buffer_mut().push_add(Gpr::S1, Gpr::A0, Gpr::Zero);
+        }
+
+        // Load each parameter
+        // Collect parameter info first to avoid borrow conflicts
+        let param_info: Vec<(usize, Value, ArgLoc)> = entry_block_params
+            .iter()
+            .enumerate()
+            .map(|(idx, val)| (idx, *val, arg_locs[idx]))
+            .collect();
+
+        for (param_idx, param_value, arg_loc) in param_info {
+            // Get where this parameter should be stored (from register allocation)
+            if let Some(&target_reg) = self.allocation.value_to_reg.get(&param_value) {
+                // Parameter goes to a register
+                match arg_loc {
+                    ArgLoc::Register(src_reg) => {
+                        // Copy from argument register to allocated register
+                        if src_reg != target_reg {
+                            self.inst_buffer_mut()
+                                .push_add(target_reg, src_reg, Gpr::Zero);
+                        }
+                    }
+                    ArgLoc::Stack { offset } => {
+                        // Load from stack (caller's frame)
+                        // Stack args are at positive offsets from caller's SP
+                        // After prologue_frame_setup, our SP is 8 bytes lower than caller's SP
+                        // So stack args are at SP + 8 + offset
+                        // But we can also use FP which points to our frame base
+                        // Actually, FP points to setup area, so stack args are at FP + 8 + offset
+                        // But simpler: use SP + (setup_area_size + offset)
+                        let actual_offset = self.frame_layout.setup_area_size as i32 + offset;
+                        self.inst_buffer_mut()
+                            .push_lw(target_reg, Gpr::Sp, actual_offset);
+                    }
+                }
+            } else if let Some(_slot) = self.allocation.value_to_slot.get(&param_value) {
+                // Parameter is spilled - this is complex because we need to store after clobber_save
+                // For now, we'll handle this by loading to a temp and storing after clobber_save
+                // TODO: Implement proper handling of spilled parameters
+                // For now, panic to catch this case during development
+                panic!(
+                    "Spilled function parameters not yet fully implemented (param {} spilled to \
+                     slot {})",
+                    param_idx, _slot
+                );
+            }
+        }
+    }
+
     /// Get a register for a value from pre-computed allocation.
     pub(crate) fn get_reg_for_value(&mut self, value: Value) -> Gpr {
         // Look up from pre-computed allocation
@@ -359,6 +464,23 @@ impl Lowerer {
     /// Record a relocation that needs to be fixed up.
     pub(crate) fn record_relocation(&mut self, reloc: Relocation) {
         self.relocations.push(reloc);
+    }
+
+    /// Record a function call relocation that needs to be fixed up.
+    pub(crate) fn record_call_relocation(
+        &mut self,
+        inst_idx: usize,
+        callee_name: alloc::string::String,
+    ) {
+        self.call_relocations.push(CallRelocation {
+            inst_idx,
+            callee_name,
+        });
+    }
+
+    /// Get function call relocations (for module compilation)
+    pub(crate) fn call_relocations(&self) -> &[CallRelocation] {
+        &self.call_relocations
     }
 
     #[cfg(test)]
@@ -458,11 +580,7 @@ impl Lowerer {
 
     /// Copy explicit args to target block's parameters.
     /// This is called before branching to the target block.
-    pub(crate) fn copy_args_to_params(
-        &mut self,
-        args: &[lpc_lpir::Value],
-        target_block: usize,
-    ) {
+    pub(crate) fn copy_args_to_params(&mut self, args: &[lpc_lpir::Value], target_block: usize) {
         // Bounds check - target block must exist
         if target_block >= self.function.blocks.len() {
             return;
@@ -490,21 +608,25 @@ impl Lowerer {
             // Get the corresponding arg value
             if let Some(&source_value) = args.get(param_idx) {
                 // Handle source (may be spilled)
-                let source_reg = if let Some(reg) = self.allocation.value_to_reg.get(&source_value) {
+                let source_reg = if let Some(reg) = self.allocation.value_to_reg.get(&source_value)
+                {
                     // Source is in a register
                     *reg
                 } else {
                     // Source is spilled - reload to a temporary register
-                    let slot = self.allocation.value_to_slot.get(&source_value)
+                    let slot = self
+                        .allocation
+                        .value_to_slot
+                        .get(&source_value)
                         .expect("Spilled value must have a slot");
-                    
+
                     // Reload to a temporary register
                     // Use a caller-saved register as temp (t0-t6)
                     let temp_reg = self.find_temp_register(&copies, &[]);
-                    
+
                     // Record reload to emit later (after we're done borrowing)
                     reloads_needed.push((*slot, temp_reg));
-                    
+
                     temp_reg
                 };
 
@@ -516,7 +638,10 @@ impl Lowerer {
                     }
                 } else {
                     // Target is spilled - store directly to slot
-                    let slot = self.allocation.value_to_slot.get(param_value)
+                    let slot = self
+                        .allocation
+                        .value_to_slot
+                        .get(param_value)
                         .expect("Spilled parameter must have a slot");
                     direct_stores.push((source_reg, *slot));
                 }
@@ -528,7 +653,8 @@ impl Lowerer {
         for (slot, temp_reg) in reloads_needed {
             let slot_offset = (slot * 4) as i32;
             let total_offset = base_offset + slot_offset;
-            self.inst_buffer_mut().push_lw(temp_reg, Gpr::Sp, total_offset);
+            self.inst_buffer_mut()
+                .push_lw(temp_reg, Gpr::Sp, total_offset);
         }
 
         // Emit parallel copy for register-to-register copies
@@ -540,7 +666,8 @@ impl Lowerer {
         for (source_reg, target_slot) in direct_stores {
             let slot_offset = (target_slot * 4) as i32;
             let total_offset = base_offset + slot_offset;
-            self.inst_buffer_mut().push_sw(Gpr::Sp, source_reg, total_offset);
+            self.inst_buffer_mut()
+                .push_sw(Gpr::Sp, source_reg, total_offset);
         }
     }
 
@@ -553,9 +680,9 @@ impl Lowerer {
             // Target block doesn't exist yet (shouldn't happen, but be defensive)
             return;
         }
-        
+
         let target_block = &self.function.blocks[to_block];
-        
+
         // If target has no parameters, nothing to copy
         if target_block.params.is_empty() {
             return;
@@ -612,7 +739,6 @@ impl Lowerer {
 
     /// Emit a parallel copy, handling cycles correctly.
     /// Copies are performed atomically - all source registers are read before any target is written.
-    #[cfg(test)]
     pub(crate) fn emit_parallel_copy(&mut self, mut copies: Vec<(Gpr, Gpr)>) {
         if copies.is_empty() {
             return;
@@ -652,11 +778,11 @@ impl Lowerer {
             if !found_non_cycle {
                 // All remaining copies form cycles - break first one with temp register
                 let (src, dst) = remaining.remove(0);
-                
+
                 // Use a caller-saved temporary register (t0-t6)
                 // Pick one that's not involved in any copy
                 let temp = self.find_temp_register(&remaining, &emitted);
-                
+
                 // Break cycle: src -> temp -> dst
                 self.inst_buffer_mut().push_add(temp, src, Gpr::Zero);
                 self.inst_buffer_mut().push_add(dst, temp, Gpr::Zero);
@@ -669,7 +795,13 @@ impl Lowerer {
     fn find_temp_register(&self, remaining: &[(Gpr, Gpr)], emitted: &[(Gpr, Gpr)]) -> Gpr {
         // List of caller-saved temporary registers (t0-t6)
         let temp_regs = [
-            Gpr::T0, Gpr::T1, Gpr::T2, Gpr::T3, Gpr::T4, Gpr::T5, Gpr::T6,
+            Gpr::T0,
+            Gpr::T1,
+            Gpr::T2,
+            Gpr::T3,
+            Gpr::T4,
+            Gpr::T5,
+            Gpr::T6,
         ];
 
         // Collect all registers used in copies (use Vec since Gpr doesn't implement Ord)
@@ -709,7 +841,9 @@ pub(crate) fn find_predecessors(func: &Function, target_block: usize) -> Vec<usi
                     target_false,
                     ..
                 } => {
-                    if *target_true as usize == target_block || *target_false as usize == target_block {
+                    if *target_true as usize == target_block
+                        || *target_false as usize == target_block
+                    {
                         predecessors.push(pred_idx);
                     }
                 }
@@ -722,7 +856,7 @@ pub(crate) fn find_predecessors(func: &Function, target_block: usize) -> Vec<usi
 }
 
 /// Compute phi sources by reading explicit arguments from Jump/Br instructions.
-/// 
+///
 /// With explicit SSA, values passed to block parameters are explicitly specified
 /// in Jump/Br instruction arguments, so we can directly read them instead of inferring.
 pub(crate) fn compute_phi_sources(func: &Function, _liveness: &LivenessInfo) -> PhiSourceMap {
@@ -738,7 +872,7 @@ pub(crate) fn compute_phi_sources(func: &Function, _liveness: &LivenessInfo) -> 
 
         for &pred_idx in &predecessors {
             let pred_block = &func.blocks[pred_idx];
-            
+
             // Find the instruction that branches to target_block
             // It should be the last instruction in the predecessor block
             if let Some(last_inst) = pred_block.insts.last() {
@@ -770,7 +904,8 @@ pub(crate) fn compute_phi_sources(func: &Function, _liveness: &LivenessInfo) -> 
                     for (param_idx, param_value) in target_block.params.iter().enumerate() {
                         if param_idx < passed_args.len() {
                             // Direct mapping: arg[param_idx] -> param[param_idx]
-                            phi_sources.insert((pred_idx, target_idx, param_idx), passed_args[param_idx]);
+                            phi_sources
+                                .insert((pred_idx, target_idx, param_idx), passed_args[param_idx]);
                         } else {
                             // Not enough arguments passed - this shouldn't happen in valid IR
                             // but handle gracefully by using the parameter itself

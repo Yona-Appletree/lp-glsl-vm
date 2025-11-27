@@ -56,7 +56,7 @@ block0:
             liveness,
             phi_sources,
         );
-        let code = lowerer.lower_function();
+        let code = lowerer.lower_function().0; // Return just the instruction buffer
 
         assert!(code.instruction_count() > 0);
     }

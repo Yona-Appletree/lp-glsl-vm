@@ -62,7 +62,7 @@ mod tests {
             liveness,
             phi_sources,
         );
-        lowerer.lower_function()
+        lowerer.lower_function().0 // Return just the instruction buffer
     }
 
     #[test]

@@ -7,6 +7,24 @@ extern crate alloc;
 
 use crate::{backend::frame::FrameLayout, inst_buffer::InstBuffer, Gpr};
 
+/// Location of a function argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArgLoc {
+    /// Argument passed in a register (a0-a7).
+    Register(Gpr),
+    /// Argument passed on the stack at given offset from caller's SP.
+    Stack { offset: i32 },
+}
+
+/// Location of a return value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetLoc {
+    /// Return value in a register (a0-a1).
+    Register(Gpr),
+    /// Return value in return area at given offset.
+    ReturnArea { offset: i32 },
+}
+
 /// ABI information for a function.
 ///
 /// This tracks how arguments and return values are passed according to
@@ -97,6 +115,89 @@ impl Abi {
             stack_rets_size,
             uses_return_area,
         }
+    }
+
+    /// Compute argument locations for a function signature.
+    ///
+    /// # Parameters
+    ///
+    /// - `num_args`: Number of function arguments (including return area pointer if has_return_area)
+    /// - `has_return_area`: Whether multi-return is enabled
+    ///   - If true, the first argument (index 0) is the return area pointer in a0
+    ///   - Real arguments start at index 1 and go to a1, a2, etc.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `ArgLoc`, one per argument, describing where each argument is passed.
+    pub fn compute_arg_locs(num_args: usize, has_return_area: bool) -> alloc::vec::Vec<ArgLoc> {
+        let mut locs = alloc::vec::Vec::new();
+
+        for i in 0..num_args {
+            if has_return_area && i == 0 {
+                // First argument is always the return area pointer in a0
+                locs.push(ArgLoc::Register(Gpr::A0));
+            } else {
+                // Real arguments: if has_return_area, they start at a1 (index 1 -> a1, index 2 -> a2, etc.)
+                // Otherwise they start at a0 (index 0 -> a0, index 1 -> a1, etc.)
+                let reg_idx = if has_return_area {
+                    // Index 1 -> a1, index 2 -> a2, etc.
+                    i
+                } else {
+                    // Index 0 -> a0, index 1 -> a1, etc.
+                    i
+                };
+                
+                if reg_idx < 8 {
+                    // In register: a0-a7
+                    let reg = match reg_idx {
+                        0 => Gpr::A0,
+                        1 => Gpr::A1,
+                        2 => Gpr::A2,
+                        3 => Gpr::A3,
+                        4 => Gpr::A4,
+                        5 => Gpr::A5,
+                        6 => Gpr::A6,
+                        7 => Gpr::A7,
+                        _ => unreachable!(),
+                    };
+                    locs.push(ArgLoc::Register(reg));
+                } else {
+                    // On stack: offset from caller's SP
+                    let stack_idx = reg_idx - 8;
+                    let offset = (stack_idx * 4) as i32; // Each arg is 4 bytes
+                    locs.push(ArgLoc::Stack { offset });
+                }
+            }
+        }
+
+        locs
+    }
+
+    /// Compute return value locations for a function signature.
+    ///
+    /// # Parameters
+    ///
+    /// - `num_rets`: Number of return values
+    ///
+    /// # Returns
+    ///
+    /// A vector of `RetLoc`, one per return value, describing where each return is passed.
+    pub fn compute_ret_locs(num_rets: usize) -> alloc::vec::Vec<RetLoc> {
+        let mut locs = alloc::vec::Vec::new();
+
+        for i in 0..num_rets {
+            if i < 2 {
+                // First 2 returns in registers a0-a1
+                let reg = if i == 0 { Gpr::A0 } else { Gpr::A1 };
+                locs.push(RetLoc::Register(reg));
+            } else {
+                // Excess returns in return area
+                let offset = ((i - 2) * 4) as i32; // Each ret is 4 bytes
+                locs.push(RetLoc::ReturnArea { offset });
+            }
+        }
+
+        locs
     }
 }
 
@@ -397,5 +498,93 @@ mod tests {
         let mut buf = InstBuffer::new();
         gen_sp_reg_adjust(&mut buf, 0);
         assert_eq!(buf.instruction_count(), 0);
+    }
+
+    #[test]
+    fn test_compute_arg_locs_simple() {
+        let locs = Abi::compute_arg_locs(3, false);
+        assert_eq!(locs.len(), 3);
+        assert_eq!(locs[0], ArgLoc::Register(Gpr::A0));
+        assert_eq!(locs[1], ArgLoc::Register(Gpr::A1));
+        assert_eq!(locs[2], ArgLoc::Register(Gpr::A2));
+    }
+
+    #[test]
+    fn test_compute_arg_locs_with_stack() {
+        let locs = Abi::compute_arg_locs(10, false);
+        assert_eq!(locs.len(), 10);
+        assert_eq!(locs[0], ArgLoc::Register(Gpr::A0));
+        assert_eq!(locs[1], ArgLoc::Register(Gpr::A1));
+        assert_eq!(locs[2], ArgLoc::Register(Gpr::A2));
+        assert_eq!(locs[3], ArgLoc::Register(Gpr::A3));
+        assert_eq!(locs[4], ArgLoc::Register(Gpr::A4));
+        assert_eq!(locs[5], ArgLoc::Register(Gpr::A5));
+        assert_eq!(locs[6], ArgLoc::Register(Gpr::A6));
+        assert_eq!(locs[7], ArgLoc::Register(Gpr::A7));
+        assert_eq!(locs[8], ArgLoc::Stack { offset: 0 });
+        assert_eq!(locs[9], ArgLoc::Stack { offset: 4 });
+    }
+
+    #[test]
+    fn test_compute_arg_locs_with_return_area() {
+        // Multi-return: first arg is return area pointer in a0
+        // Real args start at a1
+        let locs = Abi::compute_arg_locs(3, true);
+        assert_eq!(locs.len(), 3);
+        assert_eq!(locs[0], ArgLoc::Register(Gpr::A0)); // Return area pointer
+        assert_eq!(locs[1], ArgLoc::Register(Gpr::A1)); // First real arg
+        assert_eq!(locs[2], ArgLoc::Register(Gpr::A2)); // Second real arg
+    }
+
+    #[test]
+    fn test_compute_arg_locs_return_area_with_stack() {
+        // Multi-return with stack args
+        // When has_return_area=true: index 0 is return area pointer in A0
+        // Real args start at index 1: A1-A7 (7 registers) for indices 1-7
+        // Index 8+ go on stack
+        let locs = Abi::compute_arg_locs(10, true);
+        assert_eq!(locs.len(), 10);
+        assert_eq!(locs[0], ArgLoc::Register(Gpr::A0)); // Return area pointer
+        assert_eq!(locs[1], ArgLoc::Register(Gpr::A1)); // First real arg
+        assert_eq!(locs[2], ArgLoc::Register(Gpr::A2)); // Second real arg
+        assert_eq!(locs[3], ArgLoc::Register(Gpr::A3)); // Third real arg
+        assert_eq!(locs[4], ArgLoc::Register(Gpr::A4)); // Fourth real arg
+        assert_eq!(locs[5], ArgLoc::Register(Gpr::A5)); // Fifth real arg
+        assert_eq!(locs[6], ArgLoc::Register(Gpr::A6)); // Sixth real arg
+        assert_eq!(locs[7], ArgLoc::Register(Gpr::A7)); // Seventh real arg (last register)
+        assert_eq!(locs[8], ArgLoc::Stack { offset: 0 }); // Eighth real arg (first stack)
+        assert_eq!(locs[9], ArgLoc::Stack { offset: 4 }); // Ninth real arg (second stack)
+    }
+
+    #[test]
+    fn test_compute_ret_locs_simple() {
+        let locs = Abi::compute_ret_locs(1);
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0], RetLoc::Register(Gpr::A0));
+    }
+
+    #[test]
+    fn test_compute_ret_locs_two_regs() {
+        let locs = Abi::compute_ret_locs(2);
+        assert_eq!(locs.len(), 2);
+        assert_eq!(locs[0], RetLoc::Register(Gpr::A0));
+        assert_eq!(locs[1], RetLoc::Register(Gpr::A1));
+    }
+
+    #[test]
+    fn test_compute_ret_locs_multi_return() {
+        let locs = Abi::compute_ret_locs(5);
+        assert_eq!(locs.len(), 5);
+        assert_eq!(locs[0], RetLoc::Register(Gpr::A0));
+        assert_eq!(locs[1], RetLoc::Register(Gpr::A1));
+        assert_eq!(locs[2], RetLoc::ReturnArea { offset: 0 });
+        assert_eq!(locs[3], RetLoc::ReturnArea { offset: 4 });
+        assert_eq!(locs[4], RetLoc::ReturnArea { offset: 8 });
+    }
+
+    #[test]
+    fn test_compute_ret_locs_zero() {
+        let locs = Abi::compute_ret_locs(0);
+        assert_eq!(locs.len(), 0);
     }
 }
