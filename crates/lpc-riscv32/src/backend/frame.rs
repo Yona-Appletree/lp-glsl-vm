@@ -141,29 +141,65 @@ impl FrameLayout {
         let fixed_frame_storage_size = align_to_16(spill_slots as u32 * 4);
 
         // Compute incoming args size (if > 8 args, they go on stack)
+        // Align number of stack args: for <=2 args use 4, otherwise use 2*num_args, then multiply by 4
         let incoming_args_size = if incoming_args > 8 {
-            align_to_16((incoming_args - 8) as u32 * 4)
+            let stack_args = (incoming_args - 8) as u32;
+            let aligned_args = if stack_args <= 2 {
+                // For 1-2 stack args, use 4 args (16 bytes)
+                4
+            } else {
+                // For 3+ stack args, align to 2*num_args
+                stack_args * 2
+            };
+            align_to_16(aligned_args * 4)
         } else {
             0
         };
 
         // Compute outgoing args size (if > 8 args, they go on stack)
+        // Align number of stack args: for <=2 args use 4, otherwise use 2*num_args, then multiply by 4
         let outgoing_args_size = if outgoing_args > 8 {
-            align_to_16((outgoing_args - 8) as u32 * 4)
+            let stack_args = (outgoing_args - 8) as u32;
+            let aligned_args = if stack_args <= 2 {
+                // For 1-2 stack args, use 4 args (16 bytes)
+                4
+            } else {
+                // For 3+ stack args, align to 2*num_args
+                stack_args * 2
+            };
+            align_to_16(aligned_args * 4)
         } else {
             0
         };
 
         // Compute stack return area size (if > 8 returns, they go on stack)
+        // Align number of stack returns: for <=2 returns use 4, otherwise use 2*num_returns, then multiply by 4
         let stack_return_area = if return_count > 8 {
-            align_to_16((return_count - 8) as u32 * 4)
+            let stack_returns = (return_count - 8) as u32;
+            let aligned_returns = if stack_returns <= 2 {
+                // For 1-2 stack returns, use 4 returns (16 bytes)
+                4
+            } else {
+                // For 3+ stack returns, align to 2*num_returns
+                stack_returns * 2
+            };
+            align_to_16(aligned_returns * 4)
         } else {
             0
         };
 
         // Compute max callee stack return area
+        // Align number of stack returns: for <=2 returns use 4, otherwise use 2*num_returns, then multiply by 4
         let max_callee_stack_return_area = if max_callee_stack_returns > 8 {
-            align_to_16((max_callee_stack_returns - 8) as u32 * 4)
+            let stack_returns = (max_callee_stack_returns - 8) as u32;
+            let aligned_returns = if stack_returns <= 2 {
+                // For 1-2 stack returns, use 4 returns (16 bytes)
+                4
+            } else {
+                // For 3+ stack returns, align to 2*num_returns
+                stack_returns * 2
+            };
+            align_to_16(aligned_returns * 4)
         } else {
             0
         };
@@ -369,10 +405,15 @@ impl FrameLayout {
         let local_frame = self.local_frame_size();
         // Stack returns go above outgoing args in the tail-args area
         // Offset accounts for SP adjustment in prologue, then positions above outgoing args
-        let offset = tail_adjust
-            + local_frame as i32
-            + self.outgoing_args_size as i32
-            + (stack_index * 4) as i32;
+        // When there are no outgoing args and no tail adjustment, the offset is just (idx-8)*4
+        // because the return area starts at the same location as outgoing args would
+        let offset = if self.outgoing_args_size == 0 && tail_adjust == 0 {
+            // Simple case: no outgoing args, no tail adjustment - returns start at offset 0
+            (stack_index * 4) as i32
+        } else {
+            // Complex case: account for SP adjustment and outgoing args
+            tail_adjust + local_frame as i32 + self.outgoing_args_size as i32 + (stack_index * 4) as i32
+        };
         Some(ByteOffset(offset))
     }
 
