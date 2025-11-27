@@ -76,9 +76,16 @@ pub fn compute_liveness(func: &Function) -> LivenessInfo {
                 inst: inst_idx + 1, // +1 because 0 is reserved for block entry
             };
 
-            // Record definitions
-            for result in inst.results() {
-                defs.insert(point, result);
+            // Record definitions (skip Return instructions - they don't produce results)
+            match inst {
+                Inst::Return { .. } => {
+                    // Return instructions don't define values, they only use them
+                }
+                _ => {
+                    for result in inst.results() {
+                        defs.insert(point, result);
+                    }
+                }
             }
 
             // Record uses
@@ -130,6 +137,7 @@ pub fn compute_liveness(func: &Function) -> LivenessInfo {
     for (def_point, value) in &defs {
         let last_use = last_uses.get(value).copied().unwrap_or(*def_point);
         let uses_list = all_uses.get(value).cloned().unwrap_or_default();
+
         live_ranges.insert(
             *value,
             LiveRange {
@@ -390,5 +398,361 @@ block0(v0: i32):
         // v2 should be live until v4 is computed
         let v2_range = liveness.live_ranges.get(&Value::new(2)).unwrap();
         assert_eq!(v2_range.def.block, 0);
+    }
+
+    #[test]
+    fn test_liveness_branch_condition() {
+        // Test value used in branch condition
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 1
+    brif v0, block1, block2
+
+block1:
+    return v1
+
+block2:
+    return v1
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+        let v0 = Value::new(0);
+
+        // v0 should be used in the branch condition
+        let v0_range = liveness.live_ranges.get(&v0).unwrap();
+        assert_eq!(v0_range.def.block, 0);
+        assert_eq!(v0_range.def.inst, 0); // Parameter
+                                          // v0 should be used at the brif instruction
+        assert!(!v0_range.uses.is_empty());
+    }
+
+    #[test]
+    fn test_liveness_load_store() {
+        // Test load and store instructions
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = load.i32 v0
+    store.i32 v0, v1
+    return v1
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // v0 should be used in load and store
+        let v0_range = liveness.live_ranges.get(&Value::new(0)).unwrap();
+        assert!(!v0_range.uses.is_empty());
+
+        // v1 should be defined by load and used in store and return
+        let v1_range = liveness.live_ranges.get(&Value::new(1)).unwrap();
+        assert_eq!(v1_range.def.block, 0);
+        assert!(!v1_range.uses.is_empty());
+    }
+
+    #[test]
+    fn test_liveness_comparison() {
+        // Test comparison instructions
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 42
+    v2 = icmp_eq v0, v1
+    return v2
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // v0 should be used in comparison
+        let v0_range = liveness.live_ranges.get(&Value::new(0)).unwrap();
+        assert!(!v0_range.uses.is_empty());
+
+        // v1 should be used in comparison
+        let v1_range = liveness.live_ranges.get(&Value::new(1)).unwrap();
+        assert!(!v1_range.uses.is_empty());
+
+        // v2 should be defined by comparison
+        let v2_range = liveness.live_ranges.get(&Value::new(2)).unwrap();
+        assert_eq!(v2_range.def.block, 0);
+    }
+
+    #[test]
+    fn test_liveness_multiple_uses_same_block() {
+        // Test value used multiple times in different instructions within same block
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iadd v0, v0
+    v2 = iadd v1, v0
+    v3 = iadd v1, v1
+    return v3
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // v0 should be used multiple times
+        let v0_range = liveness.live_ranges.get(&Value::new(0)).unwrap();
+        assert!(v0_range.uses.len() >= 3);
+
+        // v1 should be used multiple times (in v2 and v3)
+        let v1_range = liveness.live_ranges.get(&Value::new(1)).unwrap();
+        assert!(v1_range.uses.len() >= 2);
+    }
+
+    #[test]
+    fn test_liveness_empty_block() {
+        // Test block with only return (no other instructions)
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    return v0
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // v0 should be used in return
+        let v0_range = liveness.live_ranges.get(&Value::new(0)).unwrap();
+        assert_eq!(v0_range.def.block, 0);
+        assert_eq!(v0_range.def.inst, 0); // Parameter
+        assert!(!v0_range.uses.is_empty());
+    }
+
+    #[test]
+    fn test_liveness_multiple_block_params() {
+        // Test block with multiple parameters
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 1
+    brif v1, block1, block1
+
+block1(v2: i32, v3: i32):
+    v4 = iadd v2, v3
+    return v4
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // Block 1 should have two parameters
+        assert!(liveness.block_params.contains_key(&(1, 0)));
+        assert!(liveness.block_params.contains_key(&(1, 1)));
+
+        let v2 = Value::new(2);
+        let v3 = Value::new(3);
+        assert_eq!(liveness.block_params.get(&(1, 0)), Some(&v2));
+        assert_eq!(liveness.block_params.get(&(1, 1)), Some(&v3));
+    }
+
+    #[test]
+    fn test_liveness_call_instruction() {
+        // Test function call instruction
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    call %other(v0) -> v2
+    return v2
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // v0 should be used as argument to call
+        let v0_range = liveness.live_ranges.get(&Value::new(0)).unwrap();
+        assert!(!v0_range.uses.is_empty());
+
+        // v2 should be defined by call result
+        let v2_range = liveness.live_ranges.get(&Value::new(2)).unwrap();
+        assert_eq!(v2_range.def.block, 0);
+    }
+
+    #[test]
+    fn test_liveness_syscall() {
+        // Test syscall instruction
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    syscall 1(v0)
+    return v0
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // v0 should be used in syscall and return
+        let v0_range = liveness.live_ranges.get(&Value::new(0)).unwrap();
+        assert!(v0_range.uses.len() >= 2);
+    }
+
+    #[test]
+    fn test_liveness_complex_control_flow() {
+        // Test complex nested control flow
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 1
+    v2 = iconst 2
+    brif v1, block1, block2
+
+block1:
+    brif v2, block3, block4
+
+block2:
+    return v0
+
+block3:
+    return v0
+
+block4:
+    return v0
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // v0 should be live across multiple blocks
+        let v0_range = liveness.live_ranges.get(&Value::new(0)).unwrap();
+        assert_eq!(v0_range.def.block, 0);
+        // v0 is used in blocks 2, 3, and 4
+        assert!(v0_range.last_use.block >= 2);
+        assert!(!v0_range.uses.is_empty());
+
+        // v1 should be used in first branch
+        let v1_range = liveness.live_ranges.get(&Value::new(1)).unwrap();
+        assert!(!v1_range.uses.is_empty());
+
+        // v2 should be used in second branch
+        let v2_range = liveness.live_ranges.get(&Value::new(2)).unwrap();
+        assert!(!v2_range.uses.is_empty());
+    }
+
+    #[test]
+    fn test_liveness_live_sets() {
+        // Test that live_sets are correctly populated
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 42
+    v2 = iadd v0, v1
+    return v2
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // Check that live_sets contains entries
+        assert!(!liveness.live_sets.is_empty());
+
+        // v0 should be live at block 0, inst 0 (parameter)
+        let entry_point = InstPoint { block: 0, inst: 0 };
+        assert!(liveness.live_sets.contains_key(&entry_point));
+
+        // v0 should be live at the iadd instruction
+        let add_point = InstPoint { block: 0, inst: 2 };
+        let live_at_add = liveness.live_sets.get(&add_point);
+        assert!(live_at_add.is_some());
+        assert!(live_at_add.unwrap().contains(&Value::new(0)));
+
+        // v1 should be live at the iadd instruction
+        assert!(live_at_add.unwrap().contains(&Value::new(1)));
+
+        // v2 should be live at the return
+        let return_point = InstPoint { block: 0, inst: 3 };
+        let live_at_return = liveness.live_sets.get(&return_point);
+        assert!(live_at_return.is_some());
+        assert!(live_at_return.unwrap().contains(&Value::new(2)));
+    }
+
+    #[test]
+    fn test_liveness_defs_and_uses_maps() {
+        // Test that defs and uses maps are correctly populated
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 42
+    v2 = iadd v0, v1
+    return v2
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // v0 should be in defs at block entry
+        let entry_point = InstPoint { block: 0, inst: 0 };
+        assert_eq!(liveness.defs.get(&entry_point), Some(&Value::new(0)));
+
+        // v1 should be in defs at instruction 1
+        let v1_def_point = InstPoint { block: 0, inst: 1 };
+        assert_eq!(liveness.defs.get(&v1_def_point), Some(&Value::new(1)));
+
+        // v2 should be in defs at instruction 2
+        let v2_def_point = InstPoint { block: 0, inst: 2 };
+        assert_eq!(liveness.defs.get(&v2_def_point), Some(&Value::new(2)));
+
+        // v0 and v1 should be in uses at instruction 2 (iadd)
+        let add_uses = liveness.uses.get(&v2_def_point);
+        assert!(add_uses.is_some());
+        let uses = add_uses.unwrap();
+        assert!(uses.contains(&Value::new(0)));
+        assert!(uses.contains(&Value::new(1)));
+
+        // v2 should be in uses at return
+        let return_point = InstPoint { block: 0, inst: 3 };
+        let return_uses = liveness.uses.get(&return_point);
+        assert!(return_uses.is_some());
+        assert!(return_uses.unwrap().contains(&Value::new(2)));
+    }
+
+    #[test]
+    fn test_liveness_value_used_before_defined_in_block() {
+        // Test that values used before being defined in same block are handled
+        // (This shouldn't happen in SSA, but test the behavior)
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iadd v0, v0
+    v2 = iadd v1, v0
+    return v2
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // v0 should be defined before v1 uses it
+        let v0_range = liveness.live_ranges.get(&Value::new(0)).unwrap();
+        let v1_range = liveness.live_ranges.get(&Value::new(1)).unwrap();
+
+        // v0's definition should come before v1's first use
+        assert!(v0_range.def.block <= v1_range.def.block);
+        if v0_range.def.block == v1_range.def.block {
+            assert!(v0_range.def.inst <= v1_range.def.inst);
+        }
+    }
+
+    #[test]
+    fn test_liveness_jump_instruction() {
+        // Test jump instruction (no values used)
+        let ir = r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst 42
+    jump block1
+
+block1:
+    return v1
+}"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // v1 should be live across blocks
+        let v1_range = liveness.live_ranges.get(&Value::new(1)).unwrap();
+        assert_eq!(v1_range.def.block, 0);
+        assert!(v1_range.last_use.block >= 1);
     }
 }
