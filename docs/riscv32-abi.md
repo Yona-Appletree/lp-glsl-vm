@@ -12,19 +12,20 @@ Based on the RISC-V User-Level ISA specification (Chapter 18: Calling Convention
 
 Table 18.1 from the RISC-V specification:
 
-| C type | Description | Bytes in RV32 |
-|--------|-------------|---------------|
-| `char` | Character value/byte | 1 |
-| `short` | Short integer | 2 |
-| `int` | Integer | 4 |
-| `long` | Long integer | 4 |
-| `long long` | Long long integer | 8 |
-| `void*` | Pointer | 4 |
-| `float` | Single-precision float | 4 |
-| `double` | Double-precision float | 8 |
-| `long double` | Extended-precision float | 16 |
+| C type        | Description              | Bytes in RV32 |
+| ------------- | ------------------------ | ------------- |
+| `char`        | Character value/byte     | 1             |
+| `short`       | Short integer            | 2             |
+| `int`         | Integer                  | 4             |
+| `long`        | Long integer             | 4             |
+| `long long`   | Long long integer        | 8             |
+| `void*`       | Pointer                  | 4             |
+| `float`       | Single-precision float   | 4             |
+| `double`      | Double-precision float   | 8             |
+| `long double` | Extended-precision float | 16            |
 
 **Key differences from RV64:**
+
 - `long` and pointers are **4 bytes** (not 8 bytes)
 - RV32 uses **ILP32** integer model (int/long/pointer = 32 bits)
 - All datatypes are naturally aligned when stored in memory
@@ -219,38 +220,40 @@ if stack_size > 0 {
 
 ### Integer Registers
 
-| Register | ABI Name | Description | Saver |
-|----------|----------|-------------|-------|
-| x0 | zero | Hard-wired zero | — |
-| x1 | ra | Return address | Caller |
-| x2 | sp | Stack pointer | Callee |
-| x3 | gp | Global pointer | — |
-| x4 | tp | Thread pointer | — |
-| x5-7 | t0-2 | Temporaries | Caller |
-| x8 | s0/fp | Saved register/frame pointer | Callee |
-| x9 | s1 | Saved register | Callee |
-| x10-11 | a0-1 | Function arguments/return values | Caller |
-| x12-17 | a2-7 | Function arguments | Caller |
-| x18-27 | s2-11 | Saved registers | Callee |
-| x28-31 | t3-6 | Temporaries | Caller |
+| Register | ABI Name | Description                      | Saver  |
+| -------- | -------- | -------------------------------- | ------ |
+| x0       | zero     | Hard-wired zero                  | —      |
+| x1       | ra       | Return address                   | Caller |
+| x2       | sp       | Stack pointer                    | Callee |
+| x3       | gp       | Global pointer                   | —      |
+| x4       | tp       | Thread pointer                   | —      |
+| x5-7     | t0-2     | Temporaries                      | Caller |
+| x8       | s0/fp    | Saved register/frame pointer     | Callee |
+| x9       | s1       | Saved register                   | Callee |
+| x10-11   | a0-1     | Function arguments/return values | Caller |
+| x12-17   | a2-7     | Function arguments               | Caller |
+| x18-27   | s2-11    | Saved registers                  | Callee |
+| x28-31   | t3-6     | Temporaries                      | Caller |
 
 ### Floating-Point Registers
 
-| Register | ABI Name | Description | Saver |
-|----------|----------|-------------|-------|
-| f0-7 | ft0-7 | FP temporaries | Caller |
-| f8-9 | fs0-1 | FP saved registers | Callee |
-| f10-11 | fa0-1 | FP arguments/return values | Caller |
-| f12-17 | fa2-7 | FP arguments | Caller |
-| f18-27 | fs2-11 | FP saved registers | Callee |
-| f28-31 | ft8-11 | FP temporaries | Caller |
+| Register | ABI Name | Description                | Saver  |
+| -------- | -------- | -------------------------- | ------ |
+| f0-7     | ft0-7    | FP temporaries             | Caller |
+| f8-9     | fs0-1    | FP saved registers         | Callee |
+| f10-11   | fa0-1    | FP arguments/return values | Caller |
+| f12-17   | fa2-7    | FP arguments               | Caller |
+| f18-27   | fs2-11   | FP saved registers         | Callee |
+| f28-31   | ft8-11   | FP temporaries             | Caller |
 
 ### Callee-Saved Registers
 
 **Integer callee-saved:**
+
 - x8 (s0/fp), x9 (s1), x18-x27 (s2-s11)
 
 **Floating-point callee-saved:**
+
 - f8-f9 (fs0-fs1), f18-f27 (fs2-fs11)
 
 **Note**: x2 (SP) and x8 (FP) are special - FP is saved in the setup area, SP is not saved.
@@ -421,6 +424,7 @@ Caller's Frame:
 ```
 
 This chain allows:
+
 - **Stack unwinding**: Walk up the call stack
 - **Debugging**: Inspect variables in caller frames
 - **Exception handling**: Unwind to find exception handlers
@@ -432,6 +436,7 @@ Even if SP moves (due to variable stack allocations, alloca, or dynamic stack gr
 ### Frame Pointer Usage: Accessing Stack Locations
 
 Addressing modes:
+
 - **`FPOffset(offset)`**: Access relative to FP (stable reference)
 - **`SPOffset(offset)`**: Access relative to SP (changes as stack grows)
 - **`IncomingArg(offset)`**: Access incoming arguments (computed relative to SP)
@@ -465,6 +470,7 @@ When a function returns more values than can fit in registers, the RISC-V ABI us
 ### Return Register Limits
 
 **Return value registers:**
+
 - **Integer returns**: `a0-a1` (x10-x11) - **2 registers**
 - **Float returns**: `fa0-fa1` (f10-f11) - **2 registers**
 - **Total**: Up to **4 return values** can fit in registers
@@ -476,6 +482,7 @@ When there are more than 4 return values (or when `enable_multi_ret_implicit_sre
 When multi-return is needed, the caller passes a **hidden argument** - a pointer to the return area:
 
 **Key points:**
+
 - The return area pointer is passed in **x10 (a0)** - the first argument register
 - This consumes one argument register slot
 - It's a **hidden/implicit** argument (not visible in the function signature)
@@ -587,4 +594,3 @@ The soft-float calling convention is used on RV32 implementations that lack floa
 - **Result** (`double`): Returned in `a0-a1` (x10-x11) - 8 bytes in integer registers
 
 The dynamic rounding mode and accrued exception flags are accessed through the routines provided by the C99 header `fenv.h`.
-
