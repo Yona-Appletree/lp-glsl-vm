@@ -3,16 +3,17 @@
 use lpc_lpir::Function;
 
 use super::super::{
-    abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation,
+    abi::AbiInfo, frame::FrameLayout, regalloc::RegisterAllocation,
 };
 use super::types::ByteSize;
 use crate::{Gpr, Inst as RiscvInst};
+use crate::inst_buffer::InstBuffer;
 
 impl super::Lowerer {
     /// Generate function prologue.
     pub(super) fn gen_prologue(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         func: &Function,
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,

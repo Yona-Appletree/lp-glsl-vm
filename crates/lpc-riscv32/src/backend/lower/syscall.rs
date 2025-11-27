@@ -3,16 +3,17 @@
 use lpc_lpir::Value;
 
 use super::{
-    super::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation},
+    super::{frame::FrameLayout, regalloc::RegisterAllocation},
     types::LoweringError,
 };
 use crate::{Gpr, Inst as RiscvInst};
+use crate::inst_buffer::InstBuffer;
 
 impl super::Lowerer {
     /// Lower syscall instruction.
     pub(super) fn lower_syscall(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         number: i32,
         args: &[Value],
         allocation: &RegisterAllocation,

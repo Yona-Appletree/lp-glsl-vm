@@ -3,10 +3,11 @@
 use lpc_lpir::Value;
 
 use super::{
-    super::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation},
+    super::{frame::FrameLayout, regalloc::RegisterAllocation},
     types::{LoweringError, Relocation, RelocationInstType, RelocationTarget},
 };
 use crate::{Gpr, Inst as RiscvInst};
+use crate::inst_buffer::InstBuffer;
 
 impl super::Lowerer {
     /// Lower branch instruction.
@@ -14,7 +15,7 @@ impl super::Lowerer {
     /// Emits placeholder instructions and records relocations for fixup.
     pub(super) fn lower_br(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         condition: Value,
         target_true: u32,
         target_false: u32,

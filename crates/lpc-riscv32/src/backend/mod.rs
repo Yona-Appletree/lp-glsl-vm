@@ -1,6 +1,5 @@
 mod abi;
 mod compile;
-mod emit;
 mod frame;
 mod liveness;
 mod lower;
@@ -14,7 +13,7 @@ mod debug;
 pub use abi::{Abi, AbiInfo};
 pub use compile::{compile_module, compile_module_to_insts, CompiledModule};
 pub use crate::elf::{debug_elf, generate_elf};
-pub use emit::CodeBuffer;
+pub use crate::inst_buffer::InstBuffer;
 pub use frame::FrameLayout;
 pub use liveness::{compute_liveness, LivenessInfo};
 pub use lower::Lowerer;

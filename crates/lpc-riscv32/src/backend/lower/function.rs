@@ -6,12 +6,13 @@ use lpc_lpir::{Function, Value};
 
 use super::{
     super::{
-        abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, liveness::InstPoint,
+        abi::AbiInfo, frame::FrameLayout, liveness::InstPoint,
         regalloc::RegisterAllocation, spill_reload::SpillReloadPlan,
     },
     types::{LoweringError, RelocationInstType, RelocationTarget},
 };
 use crate::Inst as RiscvInst;
+use crate::inst_buffer::InstBuffer;
 
 /// Lower a function to RISC-V 32-bit code.
 ///
@@ -23,8 +24,8 @@ pub(super) fn lower_function_impl(
     spill_reload: &SpillReloadPlan,
     frame_layout: &FrameLayout,
     abi_info: &AbiInfo,
-) -> Result<CodeBuffer, LoweringError> {
-    let mut code = CodeBuffer::new();
+) -> Result<InstBuffer, LoweringError> {
+    let mut code = InstBuffer::new();
 
     // Clear function-internal relocations for this function
     lowerer.function_relocations.clear();

@@ -5,19 +5,19 @@ use lpc_lpir::Value;
 use super::{
     super::{
         abi::{Abi, AbiInfo},
-        emit::CodeBuffer,
         frame::FrameLayout,
         regalloc::RegisterAllocation,
     },
     types::{LoweringError, Relocation, RelocationInstType, RelocationTarget},
 };
 use crate::{Gpr, Inst as RiscvInst};
+use crate::inst_buffer::InstBuffer;
 
 impl super::Lowerer {
     /// Lower call instruction.
     pub(super) fn lower_call(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         callee: &str,
         args: &[Value],
         results: &[Value],

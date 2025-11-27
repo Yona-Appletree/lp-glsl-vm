@@ -1,16 +1,17 @@
 //! Function epilogue generation.
 
 use super::{
-    super::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout},
+    super::{abi::AbiInfo, frame::FrameLayout},
     types::ByteSize,
 };
 use crate::{Gpr, Inst as RiscvInst};
+use crate::inst_buffer::InstBuffer;
 
 impl super::Lowerer {
     /// Generate function epilogue.
     pub(super) fn gen_epilogue(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
     ) {

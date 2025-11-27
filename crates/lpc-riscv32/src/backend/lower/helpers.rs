@@ -4,19 +4,20 @@ use lpc_lpir::Value;
 
 use super::{
     super::{
-        emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation,
+        frame::FrameLayout, regalloc::RegisterAllocation,
         spill_reload::SpillReloadOp,
     },
     types::LoweringError,
 };
 use crate::{Gpr, Inst as RiscvInst};
+use crate::inst_buffer::InstBuffer;
 
 /// Helper methods for Lowerer.
 impl super::Lowerer {
     /// Emit a spill or reload operation.
     pub(super) fn emit_spill_reload(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         op: &SpillReloadOp,
         frame_layout: &FrameLayout,
     ) {
@@ -61,7 +62,7 @@ impl super::Lowerer {
     /// Load a value into a register (handles spills).
     pub(super) fn load_value_into_reg(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         value: Value,
         target_reg: Gpr,
         allocation: &RegisterAllocation,
@@ -125,7 +126,7 @@ impl super::Lowerer {
     /// Helper: Get argument register, loading from spill slot if needed.
     pub(super) fn get_arg_reg(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         arg: Value,
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,

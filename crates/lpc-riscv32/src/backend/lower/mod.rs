@@ -25,8 +25,9 @@ pub use types::{
     RelocationTarget, WordSize,
 };
 
-use super::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};
+use super::{abi::AbiInfo, frame::FrameLayout, regalloc::RegisterAllocation};
 use crate::Inst as RiscvInst;
+use crate::inst_buffer::InstBuffer;
 
 /// Lower IR to RISC-V 32-bit code.
 ///
@@ -103,14 +104,14 @@ impl Lowerer {
         spill_reload: &super::spill_reload::SpillReloadPlan,
         frame_layout: &FrameLayout,
         abi_info: &AbiInfo,
-    ) -> Result<CodeBuffer, LoweringError> {
+    ) -> Result<InstBuffer, LoweringError> {
         function::lower_function_impl(self, func, allocation, spill_reload, frame_layout, abi_info)
     }
 
     /// Lower a single instruction.
     pub(super) fn lower_inst(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         inst: &Inst,
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,

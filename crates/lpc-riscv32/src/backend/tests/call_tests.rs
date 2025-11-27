@@ -7,14 +7,14 @@ mod tests {
 
     use crate::{
         backend::{
-            allocate_registers, compute_liveness, create_spill_reload_plan, Abi, CodeBuffer,
+            allocate_registers, compute_liveness, create_spill_reload_plan, Abi, InstBuffer,
             FrameLayout, Lowerer,
         },
         expect_ir_syscall,
     };
 
     /// Helper to lower a function with all required analysis passes.
-    fn lower_function(func: &lpc_lpir::Function) -> CodeBuffer {
+    fn lower_function(func: &lpc_lpir::Function) -> InstBuffer {
         let liveness = compute_liveness(func);
         let allocation = allocate_registers(func, &liveness);
         let spill_reload = create_spill_reload_plan(func, &allocation, &liveness);

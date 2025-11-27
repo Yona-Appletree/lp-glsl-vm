@@ -3,10 +3,11 @@
 use lpc_lpir::Value;
 
 use super::{
-    super::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation},
+    super::{abi::AbiInfo, frame::FrameLayout, regalloc::RegisterAllocation},
     types::{LoweringError, Relocation, RelocationInstType, RelocationTarget},
 };
 use crate::{Gpr, Inst as RiscvInst};
+use crate::inst_buffer::InstBuffer;
 
 impl super::Lowerer {
     /// Lower return instruction.
@@ -15,7 +16,7 @@ impl super::Lowerer {
     /// Emits a placeholder jal and records a relocation for fixup.
     pub(super) fn lower_return(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         values: &[Value],
         allocation: &RegisterAllocation,
         frame_layout: &FrameLayout,

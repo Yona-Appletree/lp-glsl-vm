@@ -3,16 +3,17 @@
 use lpc_lpir::Value;
 
 use super::{
-    super::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation},
+    super::{frame::FrameLayout, regalloc::RegisterAllocation},
     types::LoweringError,
 };
 use crate::{Gpr, Inst as RiscvInst};
+use crate::inst_buffer::InstBuffer;
 
 impl super::Lowerer {
     /// Lower iadd instruction.
     pub(super) fn lower_iadd(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         result: Value,
         arg1: Value,
         arg2: Value,
@@ -84,7 +85,7 @@ impl super::Lowerer {
     /// Lower isub instruction.
     pub(super) fn lower_isub(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         result: Value,
         arg1: Value,
         arg2: Value,
@@ -130,7 +131,7 @@ impl super::Lowerer {
     /// Lower imul instruction.
     pub(super) fn lower_imul(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         result: Value,
         arg1: Value,
         arg2: Value,

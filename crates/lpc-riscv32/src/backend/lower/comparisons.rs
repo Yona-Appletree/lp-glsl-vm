@@ -3,16 +3,17 @@
 use lpc_lpir::Value;
 
 use super::{
-    super::{emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation},
+    super::{frame::FrameLayout, regalloc::RegisterAllocation},
     types::LoweringError,
 };
 use crate::{Gpr, Inst as RiscvInst};
+use crate::inst_buffer::InstBuffer;
 
 impl super::Lowerer {
     /// Lower icmp_eq instruction: result = (arg1 == arg2) ? 1 : 0
     pub(super) fn lower_icmp_eq(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         result: Value,
         arg1: Value,
         arg2: Value,
@@ -42,7 +43,7 @@ impl super::Lowerer {
     /// Lower icmp_ne instruction: result = (arg1 != arg2) ? 1 : 0
     pub(super) fn lower_icmp_ne(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         result: Value,
         arg1: Value,
         arg2: Value,
@@ -72,7 +73,7 @@ impl super::Lowerer {
     /// Lower icmp_lt instruction: result = (arg1 < arg2) ? 1 : 0 (signed)
     pub(super) fn lower_icmp_lt(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         result: Value,
         arg1: Value,
         arg2: Value,
@@ -94,7 +95,7 @@ impl super::Lowerer {
     /// Lower icmp_le instruction: result = (arg1 <= arg2) ? 1 : 0 (signed)
     pub(super) fn lower_icmp_le(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         result: Value,
         arg1: Value,
         arg2: Value,
@@ -124,7 +125,7 @@ impl super::Lowerer {
     /// Lower icmp_gt instruction: result = (arg1 > arg2) ? 1 : 0 (signed)
     pub(super) fn lower_icmp_gt(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         result: Value,
         arg1: Value,
         arg2: Value,
@@ -147,7 +148,7 @@ impl super::Lowerer {
     /// Lower icmp_ge instruction: result = (arg1 >= arg2) ? 1 : 0 (signed)
     pub(super) fn lower_icmp_ge(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         result: Value,
         arg1: Value,
         arg2: Value,

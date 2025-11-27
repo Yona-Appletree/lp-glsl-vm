@@ -2,18 +2,17 @@
 
 use alloc::vec::Vec;
 
-use super::lower::InstOffset;
 use crate::Inst;
 
 /// A code buffer that accumulates RISC-V 32-bit instructions.
 ///
 /// Instructions are stored in structured form and encoded to binary
 /// only when `as_bytes()` is called (lazy encoding, like Cranelift).
-pub struct CodeBuffer {
+pub struct InstBuffer {
     instructions: Vec<Inst>,
 }
 
-impl CodeBuffer {
+impl InstBuffer {
     /// Create a new empty code buffer.
     pub fn new() -> Self {
         Self {
@@ -37,8 +36,8 @@ impl CodeBuffer {
     }
 
     /// Get the current instruction count.
-    pub fn instruction_count(&self) -> InstOffset {
-        InstOffset::from(self.instructions.len())
+    pub fn instruction_count(&self) -> usize {
+        self.instructions.len()
     }
 
     /// Set an instruction at a specific index (for fixup).
@@ -46,8 +45,7 @@ impl CodeBuffer {
     /// # Panics
     ///
     /// Panics if `index >= instructions.len()`.
-    pub fn set_instruction(&mut self, index: InstOffset, inst: Inst) {
-        let idx = index.as_usize();
+    pub fn set_instruction(&mut self, idx: usize, inst: Inst) {
         assert!(
             idx < self.instructions.len(),
             "Instruction index {} is out of bounds (instruction count: {})",
@@ -82,7 +80,7 @@ impl CodeBuffer {
     }
 }
 
-impl Default for CodeBuffer {
+impl Default for InstBuffer {
     fn default() -> Self {
         Self::new()
     }
@@ -95,9 +93,9 @@ mod tests {
 
     #[test]
     fn test_code_buffer() {
-        let mut buf = CodeBuffer::new();
+        let mut buf = InstBuffer::new();
         assert_eq!(buf.len(), 0);
-        assert_eq!(buf.instruction_count().as_usize(), 0);
+        assert_eq!(buf.instruction_count(), 0);
 
         // Emit an instruction
         let inst = Inst::Addi {
@@ -107,12 +105,12 @@ mod tests {
         };
         buf.emit(inst.clone());
         assert_eq!(buf.len(), 4);
-        assert_eq!(buf.instruction_count().as_usize(), 1);
+        assert_eq!(buf.instruction_count(), 1);
 
         // Emit another instruction
         buf.emit(inst.clone());
         assert_eq!(buf.len(), 8);
-        assert_eq!(buf.instruction_count().as_usize(), 2);
+        assert_eq!(buf.instruction_count(), 2);
 
         // Check bytes
         let bytes = buf.as_bytes();

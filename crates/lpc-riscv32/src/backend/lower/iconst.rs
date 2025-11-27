@@ -3,16 +3,17 @@
 use lpc_lpir::Value;
 
 use super::{
-    super::{emit::CodeBuffer, regalloc::RegisterAllocation},
+    super::regalloc::RegisterAllocation,
     types::LoweringError,
 };
 use crate::{Gpr, Inst as RiscvInst};
+use crate::inst_buffer::InstBuffer;
 
 impl super::Lowerer {
     /// Lower iconst instruction.
     pub(super) fn lower_iconst(
         &mut self,
-        code: &mut CodeBuffer,
+        code: &mut InstBuffer,
         result: Value,
         value: i64,
         allocation: &RegisterAllocation,
