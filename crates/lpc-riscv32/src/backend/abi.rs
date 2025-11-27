@@ -3,6 +3,10 @@
 //! This module handles argument and return value passing according to the
 //! RISC-V 32-bit calling convention.
 
+extern crate alloc;
+
+use crate::{backend::frame::FrameLayout, inst_buffer::InstBuffer, Gpr};
+
 /// ABI information for a function.
 ///
 /// This tracks how arguments and return values are passed according to
@@ -43,11 +47,7 @@ impl Abi {
     /// # Returns
     ///
     /// ABI information describing how arguments and returns are passed.
-    pub fn compute_abi_info(
-        num_params: usize,
-        num_returns: usize,
-        enable_multi_ret: bool,
-    ) -> Self {
+    pub fn compute_abi_info(num_params: usize, num_returns: usize, enable_multi_ret: bool) -> Self {
         // RISC-V 32-bit: 8 argument registers (a0-a7, x10-x17)
         const MAX_REG_ARGS: usize = 8;
         // RISC-V 32-bit: 2 return registers (a0-a1, x10-x11)
@@ -67,7 +67,10 @@ impl Abi {
         } else {
             // Without multi-return, only 2 returns allowed
             if num_returns > MAX_REG_RETS {
-                panic!("Too many return values: {} (max {})", num_returns, MAX_REG_RETS);
+                panic!(
+                    "Too many return values: {} (max {})",
+                    num_returns, MAX_REG_RETS
+                );
             }
             num_returns
         };
@@ -94,6 +97,138 @@ impl Abi {
             stack_rets_size,
             uses_return_area,
         }
+    }
+}
+
+/// Generate instructions to adjust the stack pointer.
+///
+/// For small adjustments (within ±2047), uses a single `addi` instruction.
+/// For larger adjustments, uses `lui` + `addi` to load the constant, then `add`.
+fn gen_sp_reg_adjust(buf: &mut InstBuffer, amount: i32) {
+    if amount == 0 {
+        return;
+    }
+
+    // Check if amount fits in 12-bit signed immediate
+    if amount >= -2048 && amount <= 2047 {
+        // Single addi instruction
+        buf.push_addi(Gpr::Sp, Gpr::Sp, amount);
+    } else {
+        // Need to load constant first
+        // For now, we'll use a simple approach: load upper bits with lui,
+        // then add lower bits with addi
+        let upper = (amount >> 12) & 0xfffff;
+        let lower = amount & 0xfff;
+
+        // Load upper 20 bits
+        buf.push_lui(Gpr::T0, upper as u32);
+
+        // Add lower 12 bits if non-zero
+        if lower != 0 {
+            buf.push_addi(Gpr::T0, Gpr::T0, lower as i32);
+        }
+
+        // Add to SP
+        buf.push_add(Gpr::Sp, Gpr::Sp, Gpr::T0);
+    }
+}
+
+/// Generate prologue frame setup instructions.
+///
+/// This generates the sequence:
+/// 1. Allocate setup area: `addi sp, sp, -8`
+/// 2. Save return address: `sw ra, 4(sp)`
+/// 3. Save old FP: `sw fp, 0(sp)`
+/// 4. Set new FP: `add fp, sp, zero` (or `mv fp, sp` if we had a move instruction)
+pub fn gen_prologue_frame_setup(buf: &mut InstBuffer, frame_layout: &FrameLayout) {
+    if frame_layout.setup_area_size > 0 {
+        // Allocate setup area (8 bytes for RV32: FP + RA)
+        gen_sp_reg_adjust(buf, -8);
+
+        // Save return address at SP+4
+        buf.push_sw(Gpr::Sp, Gpr::Ra, 4);
+
+        // Save old FP at SP+0
+        buf.push_sw(Gpr::Sp, Gpr::S0, 0); // FP is s0 (x8)
+
+        // Set new FP: fp = sp (using add with zero)
+        buf.push_add(Gpr::S0, Gpr::Sp, Gpr::Zero);
+    }
+}
+
+/// Generate epilogue frame restore instructions.
+///
+/// This generates the sequence:
+/// 1. Restore RA: `lw ra, 4(sp)`
+/// 2. Restore FP: `lw fp, 0(sp)`
+/// 3. Deallocate setup: `addi sp, sp, 8`
+pub fn gen_epilogue_frame_restore(buf: &mut InstBuffer, frame_layout: &FrameLayout) {
+    if frame_layout.setup_area_size > 0 {
+        // Restore return address from SP+4
+        buf.push_lw(Gpr::Ra, Gpr::Sp, 4);
+
+        // Restore old FP from SP+0
+        buf.push_lw(Gpr::S0, Gpr::Sp, 0); // FP is s0 (x8)
+
+        // Deallocate setup area
+        gen_sp_reg_adjust(buf, 8);
+    }
+}
+
+/// Generate instructions to save clobbered callee-saved registers.
+///
+/// Registers are saved at offsets from SP, stored from top downward.
+pub fn gen_clobber_save(buf: &mut InstBuffer, frame_layout: &FrameLayout) {
+    let stack_size = frame_layout.clobber_size
+        + frame_layout.fixed_frame_storage_size
+        + frame_layout.outgoing_args_size;
+
+    if stack_size > 0 {
+        // Adjust SP downward for clobbers, fixed frame, and outgoing args
+        gen_sp_reg_adjust(buf, -(stack_size as i32));
+
+        // Save each clobbered register
+        // Registers are stored from top downward (highest offset first)
+        let mut cur_offset = 0;
+        for reg in &frame_layout.clobbered_callee_saves {
+            // Each register is 4 bytes, aligned to 4 bytes
+            cur_offset = (cur_offset + 3) & !3; // Align to 4 bytes
+
+            // Calculate offset from SP (stored from top downward)
+            let offset = stack_size - cur_offset - 4;
+
+            buf.push_sw(Gpr::Sp, *reg, offset as i32);
+
+            cur_offset += 4;
+        }
+    }
+}
+
+/// Generate instructions to restore clobbered callee-saved registers.
+///
+/// Registers are restored from the same offsets where they were saved.
+pub fn gen_clobber_restore(buf: &mut InstBuffer, frame_layout: &FrameLayout) {
+    let stack_size = frame_layout.clobber_size
+        + frame_layout.fixed_frame_storage_size
+        + frame_layout.outgoing_args_size;
+
+    if stack_size > 0 {
+        // Restore each clobbered register
+        let mut cur_offset = 0;
+        for reg in &frame_layout.clobbered_callee_saves {
+            // Each register is 4 bytes, aligned to 4 bytes
+            cur_offset = (cur_offset + 3) & !3; // Align to 4 bytes
+
+            // Calculate offset from SP (same as save)
+            let offset = stack_size - cur_offset - 4;
+
+            buf.push_lw(*reg, Gpr::Sp, offset as i32);
+
+            cur_offset += 4;
+        }
+
+        // Restore SP
+        gen_sp_reg_adjust(buf, stack_size as i32);
     }
 }
 
@@ -141,5 +276,126 @@ mod tests {
         assert_eq!(abi.num_reg_rets, 2);
         assert_eq!(abi.num_stack_rets, 0);
     }
-}
 
+    #[test]
+    fn test_prologue_frame_setup() {
+        use crate::backend::frame::{compute_frame_layout, FunctionCalls};
+
+        let layout = compute_frame_layout(&[], FunctionCalls::Regular, 0, 0, 0, 0, 0, false);
+        let mut buf = InstBuffer::new();
+        gen_prologue_frame_setup(&mut buf, &layout);
+
+        buf.assert_asm(
+            "
+            addi sp, sp, -8
+            sw ra, 4(sp)
+            sw s0, 0(sp)
+            add s0, sp, zero
+        ",
+        );
+    }
+
+    #[test]
+    fn test_prologue_no_setup() {
+        use crate::backend::frame::{compute_frame_layout, FunctionCalls};
+
+        let layout = compute_frame_layout(&[], FunctionCalls::None, 0, 0, 0, 0, 0, false);
+        let mut buf = InstBuffer::new();
+        gen_prologue_frame_setup(&mut buf, &layout);
+
+        // No setup area, so no instructions
+        assert_eq!(buf.instruction_count(), 0);
+    }
+
+    #[test]
+    fn test_epilogue_frame_restore() {
+        use crate::backend::frame::{compute_frame_layout, FunctionCalls};
+
+        let layout = compute_frame_layout(&[], FunctionCalls::Regular, 0, 0, 0, 0, 0, false);
+        let mut buf = InstBuffer::new();
+        gen_epilogue_frame_restore(&mut buf, &layout);
+
+        buf.assert_asm(
+            "
+            lw ra, 4(sp)
+            lw s0, 0(sp)
+            addi sp, sp, 8
+        ",
+        );
+    }
+
+    #[test]
+    fn test_clobber_save() {
+        use crate::backend::frame::{compute_frame_layout, FunctionCalls};
+
+        let layout = compute_frame_layout(
+            &[Gpr::S1, Gpr::S2],
+            FunctionCalls::Regular,
+            0,
+            0,
+            0,
+            0,
+            0,
+            false,
+        );
+        let mut buf = InstBuffer::new();
+        gen_clobber_save(&mut buf, &layout);
+
+        // Should adjust SP and save 2 registers
+        // Stack size = 16 (clobber) + 0 + 0 = 16
+        // Adjust SP: addi sp, sp, -16
+        // Save s1 at offset 12, s2 at offset 8
+        buf.assert_asm(
+            "
+            addi sp, sp, -16
+            sw s1, 12(sp)
+            sw s2, 8(sp)
+        ",
+        );
+    }
+
+    #[test]
+    fn test_clobber_restore() {
+        use crate::backend::frame::{compute_frame_layout, FunctionCalls};
+
+        let layout = compute_frame_layout(
+            &[Gpr::S1, Gpr::S2],
+            FunctionCalls::Regular,
+            0,
+            0,
+            0,
+            0,
+            0,
+            false,
+        );
+        let mut buf = InstBuffer::new();
+        gen_clobber_restore(&mut buf, &layout);
+
+        // Should restore 2 registers and adjust SP
+        buf.assert_asm(
+            "
+            lw s1, 12(sp)
+            lw s2, 8(sp)
+            addi sp, sp, 16
+        ",
+        );
+    }
+
+    #[test]
+    fn test_sp_reg_adjust_small() {
+        let mut buf = InstBuffer::new();
+        gen_sp_reg_adjust(&mut buf, -8);
+        buf.assert_asm("addi sp, sp, -8");
+
+        let mut buf = InstBuffer::new();
+        gen_sp_reg_adjust(&mut buf, 16);
+        buf.assert_asm("addi sp, sp, 16");
+    }
+
+    #[test]
+    fn test_sp_reg_adjust_zero() {
+        let mut buf = InstBuffer::new();
+        gen_sp_reg_adjust(&mut buf, 0);
+        assert_eq!(buf.instruction_count(), 0);
+    }
+}
