@@ -22,12 +22,14 @@ mod inst_buffer;
 
 pub use asm_parser::{assemble_code, assemble_instruction};
 // Re-export backend items for convenience
-pub use backend::{
-    compile_module, compile_module_to_insts, debug_elf, debug_ir, debug_ir_with_ram, expect_ir_a0,
-    expect_ir_error, expect_ir_error_with_ram, expect_ir_memory_error,
-    expect_ir_memory_error_with_ram, expect_ir_ok, expect_ir_register, expect_ir_syscall,
-    expect_ir_unaligned_error, generate_elf, CompiledModule,
-};
+// TODO: Re-enable these once backend implementation is complete
+// pub use backend::{
+//     compile_module, compile_module_to_insts, debug_elf, debug_ir, debug_ir_with_ram, expect_ir_a0,
+//     expect_ir_error, expect_ir_error_with_ram, expect_ir_memory_error,
+//     expect_ir_memory_error_with_ram, expect_ir_ok, expect_ir_register, expect_ir_syscall,
+//     expect_ir_unaligned_error, generate_elf, CompiledModule,
+// };
+pub use backend::{FrameLayout, Abi};
 pub use decode::{decode_instruction, DecodedFields};
 pub use disasm::{disassemble_code, disassemble_code_with_labels, disassemble_instruction};
 // Re-export emu items for convenience
