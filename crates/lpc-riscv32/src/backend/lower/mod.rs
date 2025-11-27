@@ -18,6 +18,31 @@ use crate::{
     Gpr, Inst,
 };
 
+/// Represents a relocation that needs to be fixed up.
+///
+/// A relocation records where a branch instruction is and what block it targets.
+/// After all blocks are lowered, we fix up these relocations with the correct
+/// PC-relative offsets.
+pub(crate) struct Relocation {
+    /// Instruction index in the buffer where the branch is
+    pub(crate) inst_idx: usize,
+    /// Target block index
+    pub(crate) target_block: u32,
+    /// Type of branch (determines how to patch)
+    pub(crate) branch_type: BranchType,
+}
+
+/// Type of branch instruction for patching.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum BranchType {
+    /// Unconditional jump (JAL) - uses Jal20 format
+    Jump,
+    /// Conditional branch true target (BEQ/BNE/etc) - uses B12 format
+    BranchTrue,
+    /// Conditional branch false target (JAL if needed) - uses Jal20 format
+    BranchFalse,
+}
+
 /// Context for lowering a function.
 ///
 /// This holds all the state needed to lower IR instructions to RISC-V instructions.
@@ -36,6 +61,12 @@ pub struct Lowerer {
     value_to_reg: Vec<Option<Gpr>>,
     /// Next available register for temporary values.
     next_temp_reg: usize,
+    /// Map from block index to instruction index where block starts
+    #[cfg_attr(test, allow(dead_code))]
+    block_addresses: Vec<usize>,
+    /// Relocations that need to be fixed up
+    #[cfg_attr(test, allow(dead_code))]
+    relocations: Vec<Relocation>,
 }
 
 impl Lowerer {
@@ -72,22 +103,30 @@ impl Lowerer {
             inst_buffer: InstBuffer::new(),
             value_to_reg,
             next_temp_reg: 0,
+            block_addresses: Vec::new(),
+            relocations: Vec::new(),
         }
     }
 
     /// Lower the entire function to RISC-V instructions.
     pub fn lower_function(mut self) -> InstBuffer {
+        // Initialize block addresses vector
+        self.block_addresses.resize(self.function.blocks.len(), 0);
+
         // Generate prologue
         crate::backend::abi::gen_prologue_frame_setup(&mut self.inst_buffer, &self.frame_layout);
         crate::backend::abi::gen_clobber_save(&mut self.inst_buffer, &self.frame_layout);
 
-        // Lower all blocks
+        // Phase 1: Lower all blocks (records relocations)
         // Clone blocks to avoid borrow checker issues
         let blocks: Vec<(usize, Block)> =
             self.function.blocks.iter().cloned().enumerate().collect();
         for (block_idx, block) in blocks {
             self.lower_block(block_idx, &block);
         }
+
+        // Phase 2: Fix up relocations
+        self.fixup_relocations();
 
         // Generate epilogue
         crate::backend::abi::gen_clobber_restore(&mut self.inst_buffer, &self.frame_layout);
@@ -97,12 +136,21 @@ impl Lowerer {
     }
 
     /// Lower a single basic block.
-    fn lower_block(&mut self, _block_idx: usize, block: &Block) {
+    fn lower_block(&mut self, block_idx: usize, block: &Block) {
+        // Record where this block starts (instruction index)
+        let block_start = self.inst_buffer.instruction_count();
+
+        // Ensure block_addresses is large enough
+        if block_idx >= self.block_addresses.len() {
+            self.block_addresses.resize(block_idx + 1, 0);
+        }
+        self.block_addresses[block_idx] = block_start;
+
         // Handle block parameters (phi nodes)
         // For now, we'll just assign registers to them
         // TODO: Proper phi node handling
 
-        // Lower all instructions in the block
+        // Lower all instructions in the block (branches will record relocations)
         for inst in &block.insts {
             self.lower_inst(inst);
         }
@@ -249,6 +297,95 @@ impl Lowerer {
             .get(idx)
             .and_then(|r| *r)
             .unwrap_or_else(|| panic!("Value {} has no register allocated", value.index()))
+    }
+
+    /// Record a relocation that needs to be fixed up.
+    pub(crate) fn record_relocation(&mut self, reloc: Relocation) {
+        self.relocations.push(reloc);
+    }
+
+    #[cfg(test)]
+    /// Get relocations (for testing)
+    pub(crate) fn relocations(&self) -> &[Relocation] {
+        &self.relocations
+    }
+
+    #[cfg(test)]
+    /// Get block addresses (for testing)
+    pub(crate) fn block_addresses(&self) -> &[usize] {
+        &self.block_addresses
+    }
+
+    /// Fix up all relocations with correct PC-relative offsets.
+    ///
+    /// This must be called after all blocks are lowered so that block
+    /// addresses are known.
+    pub(crate) fn fixup_relocations(&mut self) {
+        for reloc in &self.relocations {
+            // Get current instruction address (in instructions, not bytes)
+            let current_inst_idx = reloc.inst_idx;
+
+            // Get target block start address
+            let target_block_start = self
+                .block_addresses
+                .get(reloc.target_block as usize)
+                .copied()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Relocation references invalid block index {}",
+                        reloc.target_block
+                    )
+                });
+
+            // Calculate PC-relative offset (in instructions)
+            // RISC-V offsets are relative to the current instruction
+            let offset_insts = (target_block_start as i32) - (current_inst_idx as i32);
+
+            // Get current instruction and update offset
+            let insts = self.inst_buffer.instructions();
+            let current_inst = &insts[reloc.inst_idx];
+
+            let fixed_inst = match (current_inst, &reloc.branch_type) {
+                (Inst::Jal { rd, .. }, BranchType::Jump | BranchType::BranchFalse) => {
+                    // JAL: offset is in instructions, encoded as imm[20:1]
+                    // Range: ±1MB (±524288 instructions)
+                    Inst::Jal {
+                        rd: *rd,
+                        imm: offset_insts,
+                    }
+                }
+                (Inst::Bne { rs1, rs2, .. }, BranchType::BranchTrue) => {
+                    // Branch: offset is in instructions, encoded as imm[12:1]
+                    // Range: ±4KB (±2048 instructions)
+                    Inst::Bne {
+                        rs1: *rs1,
+                        rs2: *rs2,
+                        imm: offset_insts,
+                    }
+                }
+                (Inst::Beq { rs1, rs2, .. }, BranchType::BranchTrue) => Inst::Beq {
+                    rs1: *rs1,
+                    rs2: *rs2,
+                    imm: offset_insts,
+                },
+                (Inst::Blt { rs1, rs2, .. }, BranchType::BranchTrue) => Inst::Blt {
+                    rs1: *rs1,
+                    rs2: *rs2,
+                    imm: offset_insts,
+                },
+                (Inst::Bge { rs1, rs2, .. }, BranchType::BranchTrue) => Inst::Bge {
+                    rs1: *rs1,
+                    rs2: *rs2,
+                    imm: offset_insts,
+                },
+                _ => panic!(
+                    "Invalid relocation type {:?} for instruction: {:?}",
+                    reloc.branch_type, current_inst
+                ),
+            };
+
+            self.inst_buffer.set_instruction(reloc.inst_idx, fixed_inst);
+        }
     }
 }
 
