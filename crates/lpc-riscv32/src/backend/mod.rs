@@ -9,6 +9,9 @@ mod regalloc;
 mod register_role;
 mod spill_reload;
 mod test_helpers;
+mod tests;
+#[cfg(feature = "debug-lowering")]
+mod debug;
 
 pub use abi::{Abi, AbiInfo};
 pub use compile::{compile_module, compile_module_to_insts, CompiledModule};

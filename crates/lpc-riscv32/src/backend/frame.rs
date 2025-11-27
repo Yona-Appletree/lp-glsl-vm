@@ -26,35 +26,26 @@ pub enum StorageLocation {
     CalleeSaved { reg: Gpr, offset: ByteOffset },
 }
 
-/// Frame layout for a RISC-V 32-bit function.
-///
-/// The frame layout follows Cranelift's model with a clear separation between
-/// caller-owned tail space and callee-owned local storage:
 /// ```text
-/// 
-/// Higher addresses (caller's side)
-///        ↑
-///        │  [Caller's stack frame]    ← SP before prologue
-///        ├───────────────────────────
-///        │
-///        │  [Outgoing args]           ← SP + (local_frame_size - outgoing_args_size) to SP + local_frame_size
-///        │  [Spill slots]             ← SP + tail_args_size + setup_size + clobber_size
-///        │  [Clobber area]            ← SP + tail_args_size + setup_size
-///        │  [Setup area]              ← SP + tail_args_size
-///        │  [Tail-args area]          ← SP + 0 (at SP)
-///        │
-///        ├───────────────────────────
-///        │  ← SP (points HERE, bottom of allocated frame)
-///        │
-///        ↓  (stack grows this direction)
-/// Lower addresses (more local storage)
+/// ┌─────────────────────────────────────┐
+/// │  Caller's Stack Frame               │
+/// ├─────────────────────────────────────┤
+/// │  Tail-Args Area (caller-owned)      │  ← SP before prologue (caller's SP after prologue)
+/// │    - Incoming stack args            │
+/// │    - Outgoing stack args            │
+/// │    - Stack return area              │
+/// ├─────────────────────────────────────┤
+/// │  Setup Area (FP/LR)                 │  ← SP after prologue (callee's frame)
+/// ├─────────────────────────────────────┤
+/// │  Clobber Area (callee-saved regs)   │
+/// ├─────────────────────────────────────┤
+/// │  Spill Slots                        │
+/// └─────────────────────────────────────┘
 /// ```
 ///
 /// Key points:
 /// - Tail-args area is caller-owned and persists across prologue/epilogue
-/// - Tail-args contains incoming stack args and stack return area (NOT outgoing args)
-/// - Callee's local frame (setup/clobber/spills/outgoing-args) is allocated below tail-args
-/// - Outgoing args are in the local frame, allocated with clobbers/spills (Cranelift model)
+/// - Callee's local frame (setup/clobber/spills) is allocated below tail-args
 /// - Prologue adjusts SP in two phases:
 ///   1. Ensure tail-args space (if needed): SP -= (tail_args_size - incoming_args_size)
 ///   2. Allocate local frame: SP -= local_frame_size

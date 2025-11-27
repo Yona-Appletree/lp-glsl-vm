@@ -7,8 +7,6 @@ mod arithmetic;
 mod branch;
 mod call;
 mod comparisons;
-#[cfg(feature = "debug-lowering")]
-mod debug;
 mod epilogue;
 mod function;
 mod helpers;
