@@ -5,16 +5,17 @@ mod tests {
 
     use lpc_lpir::parse_module;
 
-    use crate::{
-        backend::{
-            allocate_registers, compute_liveness, create_spill_reload_plan, Abi, InstBuffer,
-            FrameLayout, Lowerer,
-        },
-        expect_ir_syscall,
+    use crate::expect_ir_syscall;
+    use crate::backend::{
+        allocate_registers, compute_liveness, create_spill_reload_plan, Abi, InstBuffer,
+        Lowerer,
     };
 
     /// Helper to lower a function with all required analysis passes.
     fn lower_function(func: &lpc_lpir::Function) -> InstBuffer {
+        use crate::backend::frame::{compute_frame_layout, FunctionCalls};
+        use crate::backend::lower::compute_phi_sources;
+
         let liveness = compute_liveness(func);
         let allocation = allocate_registers(func, &liveness);
         let spill_reload = create_spill_reload_plan(func, &allocation, &liveness);
@@ -28,22 +29,40 @@ mod tests {
 
         // Include temporary spill slots needed for caller-saved register preservation
         let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
-        let frame_layout = FrameLayout::compute(
+        
+        let num_params = func.signature.params.len();
+        let num_returns = func.signature.returns.len();
+        let abi = Abi::compute_abi_info(num_params, num_returns, true);
+        
+        let function_calls = if has_calls {
+            FunctionCalls::Regular
+        } else {
+            FunctionCalls::None
+        };
+
+        let frame_layout = compute_frame_layout(
             &allocation.used_callee_saved,
-            total_spill_slots,
-            has_calls,
-            func.signature.params.len(),
-            8, // Default max outgoing args for test helper
-            func.signature.returns.len(),
-            8, // Default max callee stack returns for test helper
+            function_calls,
+            0,                        // incoming_args_size
+            0,                        // tail_args_size
+            total_spill_slots as u32, // stackslots_size
+            0,                        // fixed_frame_storage_size
+            abi.stack_args_size,      // outgoing_args_size
+            false,                    // preserve_frame_pointers
         );
 
-        let abi_info = Abi::compute_abi_info(func, &allocation, 8);
+        let phi_sources = compute_phi_sources(func, &liveness);
 
-        let mut lowerer = Lowerer::new();
-        lowerer
-            .lower_function(func, &allocation, &spill_reload, &frame_layout, &abi_info)
-            .expect("Failed to lower function")
+        let lowerer = Lowerer::new(
+            func.clone(),
+            allocation,
+            spill_reload,
+            frame_layout,
+            abi,
+            liveness,
+            phi_sources,
+        );
+        lowerer.lower_function()
     }
 
     #[test]
@@ -453,7 +472,7 @@ block0:
 
         use lpc_lpir::parse_module;
 
-        use crate::backend::compile_module_to_insts;
+        use crate::compile_module_to_insts;
         extern crate std;
 
         let module = parse_module(ir).expect("Failed to parse");

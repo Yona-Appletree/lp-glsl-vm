@@ -4,13 +4,7 @@ mod tests {
 
     use lpc_lpir::parse_function;
 
-    use crate::{
-        backend::{
-            allocate_registers, compute_liveness, create_spill_reload_plan, Abi, FrameLayout,
-            Lowerer,
-        },
-        expect_ir_a0,
-    };
+    use crate::expect_ir_a0;
 
     #[test]
     fn test_block_address_recording_and_relocation_fixup() {
