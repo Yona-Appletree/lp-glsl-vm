@@ -1,5 +1,3 @@
-
-
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -20,8 +18,10 @@ block0:
     return v0
 }"#;
 
-        use crate::backend::frame::{compute_frame_layout, FunctionCalls};
-        use crate::backend::lower::compute_phi_sources;
+        use crate::backend::{
+            frame::{compute_frame_layout, FunctionCalls},
+            lower::compute_phi_sources,
+        };
 
         let func = parse_function(ir).expect("Failed to parse IR function");
         let liveness = compute_liveness(&func);
@@ -29,7 +29,7 @@ block0:
         let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
 
         let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
-        
+
         let num_params = func.signature.params.len();
         let num_returns = func.signature.returns.len();
         let abi = Abi::compute_abi_info(num_params, num_returns, true);

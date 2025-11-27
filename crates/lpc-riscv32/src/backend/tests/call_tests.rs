@@ -1,20 +1,23 @@
-
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use lpc_lpir::parse_module;
 
-    use crate::expect_ir_syscall;
-    use crate::backend::{
-        allocate_registers, compute_liveness, create_spill_reload_plan, Abi, InstBuffer,
-        Lowerer,
+    use crate::{
+        backend::{
+            allocate_registers, compute_liveness, create_spill_reload_plan, Abi, InstBuffer,
+            Lowerer,
+        },
+        expect_ir_syscall,
     };
 
     /// Helper to lower a function with all required analysis passes.
     fn lower_function(func: &lpc_lpir::Function) -> InstBuffer {
-        use crate::backend::frame::{compute_frame_layout, FunctionCalls};
-        use crate::backend::lower::compute_phi_sources;
+        use crate::backend::{
+            frame::{compute_frame_layout, FunctionCalls},
+            lower::compute_phi_sources,
+        };
 
         let liveness = compute_liveness(func);
         let allocation = allocate_registers(func, &liveness);
@@ -29,11 +32,11 @@ mod tests {
 
         // Include temporary spill slots needed for caller-saved register preservation
         let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
-        
+
         let num_params = func.signature.params.len();
         let num_returns = func.signature.returns.len();
         let abi = Abi::compute_abi_info(num_params, num_returns, true);
-        
+
         let function_calls = if has_calls {
             FunctionCalls::Regular
         } else {

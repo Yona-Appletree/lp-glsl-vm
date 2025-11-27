@@ -25,12 +25,13 @@ pub fn debug_ir_with_ram(ir: &str, ram_size: usize) -> Result<Riscv32Emulator, E
         regs: [0; 32],
     })?;
 
-    let compiled = compile_module_to_insts(&module).map_err(|e| EmulatorError::InvalidInstruction {
-        pc: 0,
-        instruction: 0,
-        reason: format!("Compilation error: {}", e),
-        regs: [0; 32],
-    })?;
+    let compiled =
+        compile_module_to_insts(&module).map_err(|e| EmulatorError::InvalidInstruction {
+            pc: 0,
+            instruction: 0,
+            reason: format!("Compilation error: {}", e),
+            regs: [0; 32],
+        })?;
 
     let bytes = compiled
         .to_bytes()
@@ -41,7 +42,8 @@ pub fn debug_ir_with_ram(ir: &str, ram_size: usize) -> Result<Riscv32Emulator, E
             regs: [0; 32],
         })?;
 
-    let mut emu = Riscv32Emulator::new(bytes, vec![0; ram_size]).with_log_level(LogLevel::Instructions);
+    let mut emu =
+        Riscv32Emulator::new(bytes, vec![0; ram_size]).with_log_level(LogLevel::Instructions);
     // Initialize stack pointer to a valid address (RAM starts at 0x80000000)
     emu.set_register(Gpr::Sp, 0x80001000u32 as i32);
     Ok(emu)
@@ -58,12 +60,12 @@ fn format_ir_error(emu: &Riscv32Emulator, error: &EmulatorError, code: &[u8], ir
     result.push_str("\n\n");
     result.push_str(&format!("Error: {}\n", error));
     result.push_str(&format!("PC: 0x{:08x}\n\n", error_pc));
-    
+
     // Add disassembly
     result.push_str("=== Generated Assembly ===\n");
     result.push_str(&disassemble_code(code));
     result.push_str("\n");
-    
+
     result.push_str(&emu.format_debug_info(Some(error_pc), 10));
 
     result
@@ -88,12 +90,12 @@ fn format_ir_register_mismatch(
         "Register {:?} mismatch: expected {}, got {}\n\n",
         reg, expected, actual
     ));
-    
+
     // Add disassembly
     result.push_str("=== Generated Assembly ===\n");
     result.push_str(&disassemble_code(code));
     result.push_str("\n");
-    
+
     result.push_str(&emu.format_debug_info(None, 20));
 
     result

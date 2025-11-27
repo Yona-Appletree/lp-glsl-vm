@@ -4,6 +4,7 @@ extern crate alloc;
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    string::String,
     vec::Vec,
 };
 
@@ -34,7 +35,7 @@ pub struct LivenessInfo {
     /// Set of live values at each instruction point
     pub live_sets: BTreeMap<InstPoint, BTreeSet<Value>>,
     /// Values defined at each instruction point
-    pub defs: BTreeMap<InstPoint, Value>,
+    pub defs: BTreeMap<InstPoint, BTreeSet<Value>>,
     /// Values used at each instruction point
     pub uses: BTreeMap<InstPoint, Vec<Value>>,
     /// Block parameters (phi-like values) - map from (block_idx, param_idx) to Value
@@ -51,7 +52,9 @@ pub fn compute_liveness(func: &Function) -> LivenessInfo {
     // Handle function parameters (defined at block 0 entry)
     for (param_idx, param_value) in func.blocks[0].params.iter().enumerate() {
         block_params.insert((0, param_idx), *param_value);
-        defs.insert(InstPoint { block: 0, inst: 0 }, *param_value);
+        defs.entry(InstPoint { block: 0, inst: 0 })
+            .or_insert_with(BTreeSet::new)
+            .insert(*param_value);
     }
 
     // Iterate through all blocks and instructions
@@ -60,13 +63,12 @@ pub fn compute_liveness(func: &Function) -> LivenessInfo {
         for (param_idx, param_value) in block.params.iter().enumerate() {
             block_params.insert((block_idx, param_idx), *param_value);
             // Block parameters are "defined" at block entry (before first instruction)
-            defs.insert(
-                InstPoint {
-                    block: block_idx,
-                    inst: 0,
-                },
-                *param_value,
-            );
+            defs.entry(InstPoint {
+                block: block_idx,
+                inst: 0,
+            })
+            .or_insert_with(BTreeSet::new)
+            .insert(*param_value);
         }
 
         // Process instructions in the block
@@ -83,7 +85,9 @@ pub fn compute_liveness(func: &Function) -> LivenessInfo {
                 }
                 _ => {
                     for result in inst.results() {
-                        defs.insert(point, result);
+                        defs.entry(point)
+                            .or_insert_with(BTreeSet::new)
+                            .insert(result);
                     }
                 }
             }
@@ -115,20 +119,22 @@ pub fn compute_liveness(func: &Function) -> LivenessInfo {
 
     // Step 3: Build live ranges
     let mut live_ranges = BTreeMap::new();
-    for (def_point, value) in &defs {
-        let last_use = last_uses.get(value).copied().unwrap_or(*def_point);
-        let mut uses_list = all_uses.get(value).cloned().unwrap_or_default();
-        // Sort uses for consistency
-        uses_list.sort();
+    for (def_point, values) in &defs {
+        for value in values {
+            let last_use = last_uses.get(value).copied().unwrap_or(*def_point);
+            let mut uses_list = all_uses.get(value).cloned().unwrap_or_default();
+            // Sort uses for consistency
+            uses_list.sort();
 
-        live_ranges.insert(
-            *value,
-            LiveRange {
-                def: *def_point,
-                last_use,
-                uses: uses_list,
-            },
-        );
+            live_ranges.insert(
+                *value,
+                LiveRange {
+                    def: *def_point,
+                    last_use,
+                    uses: uses_list,
+                },
+            );
+        }
     }
 
     // Step 4: Build live sets - precise tracking instead of conservative approximation
@@ -230,6 +236,131 @@ pub fn compute_liveness(func: &Function) -> LivenessInfo {
         uses,
         block_params,
     }
+}
+
+/// Format a function with liveness annotations as ASCII art.
+///
+/// This function displays the LPIR representation of a function with
+/// liveness information shown as ASCII art on the right side. Each
+/// row shows which variables are live at that instruction point.
+pub fn format_function_with_liveness(func: &Function, liveness: &LivenessInfo) -> String {
+    use alloc::format;
+
+    // Find the maximum value index
+    let mut max_value = 0u32;
+    for value in liveness.live_ranges.keys() {
+        max_value = max_value.max(value.index());
+    }
+
+    let mut output = String::new();
+
+    // Format function signature
+    if let Some(name) = &func.name {
+        output.push_str(&format!("function %{}", name));
+    } else {
+        output.push_str("function");
+    }
+
+    // Signature parameters
+    output.push('(');
+    for (i, param_ty) in func.signature.params.iter().enumerate() {
+        if i > 0 {
+            output.push_str(", ");
+        }
+        output.push_str(&format!("{}", param_ty));
+    }
+    output.push(')');
+
+    // Return type
+    if !func.signature.returns.is_empty() {
+        output.push_str(" -> ");
+        for (i, ret_ty) in func.signature.returns.iter().enumerate() {
+            if i > 0 {
+                output.push_str(", ");
+            }
+            output.push_str(&format!("{}", ret_ty));
+        }
+    }
+
+    output.push_str(" {\n\n");
+
+    // Process each block
+    for (block_idx, block) in func.blocks.iter().enumerate() {
+        // Format block header
+        output.push_str(&format!("block{}", block_idx));
+        if !block.params.is_empty() {
+            output.push('(');
+            for (i, param) in block.params.iter().enumerate() {
+                if i > 0 {
+                    output.push_str(", ");
+                }
+                output.push_str(&format!("v{}: i32", param.index()));
+            }
+            output.push(')');
+        }
+        output.push_str(":\n");
+
+        // Fixed column position for liveness separator
+        // Header: 25 spaces + "; " (2 chars) = 27 chars before "00" starts
+        const SEPARATOR_COLUMN: usize = 25;
+        const MARKER_START_COLUMN: usize = 27; // Position where "00" starts in header
+
+        // Print liveness header row
+        output.push_str(&" ".repeat(SEPARATOR_COLUMN));
+        output.push_str("; Liveness\n");
+        output.push_str(&" ".repeat(SEPARATOR_COLUMN));
+        output.push_str("; ");
+        for i in 0..=max_value {
+            output.push_str(&format!("{:02} ", i));
+        }
+        output.push('\n');
+
+        // Process each instruction
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
+            let point = InstPoint {
+                block: block_idx,
+                inst: inst_idx + 1, // +1 because 0 is reserved for block entry
+            };
+
+            // Format the instruction
+            let inst_str = format!("    {}", inst);
+            output.push_str(&inst_str);
+
+            // Get live set at this point
+            let live_set = liveness.live_sets.get(&point).cloned().unwrap_or_default();
+
+            // Calculate padding to align markers with header column numbers
+            // We want markers to start at MARKER_START_COLUMN (same as "00" in header)
+            // So: instruction_len + padding + "; " (2 chars) should equal MARKER_START_COLUMN
+            let current_pos = inst_str.len();
+            let target_pos = MARKER_START_COLUMN;
+            let padding = if current_pos + 2 < target_pos {
+                target_pos - current_pos - 2 // Subtract 2 for "; "
+            } else {
+                0
+            };
+            output.push_str(&" ".repeat(padding));
+            output.push_str("; ");
+
+            // Create ASCII art row showing live variables
+            // Each column is 3 characters wide (matching "00 " in header)
+            for i in 0..=max_value {
+                let value = Value::new(i);
+                if live_set.contains(&value) {
+                    output.push_str("■  ");
+                } else {
+                    output.push_str("   ");
+                }
+            }
+
+            output.push('\n');
+        }
+
+        output.push('\n');
+    }
+
+    output.push_str("}\n");
+    output
 }
 
 #[cfg(test)]
@@ -730,15 +861,30 @@ block0(v0: i32):
 
         // v0 should be in defs at block entry
         let entry_point = InstPoint { block: 0, inst: 0 };
-        assert_eq!(liveness.defs.get(&entry_point), Some(&Value::new(0)));
+        let entry_defs = liveness.defs.get(&entry_point);
+        assert!(entry_defs.is_some(), "Block entry should have definitions");
+        assert!(
+            entry_defs.unwrap().contains(&Value::new(0)),
+            "v0 should be defined at block entry"
+        );
 
         // v1 should be in defs at instruction 1
         let v1_def_point = InstPoint { block: 0, inst: 1 };
-        assert_eq!(liveness.defs.get(&v1_def_point), Some(&Value::new(1)));
+        let v1_defs = liveness.defs.get(&v1_def_point);
+        assert!(v1_defs.is_some(), "Instruction 1 should have definitions");
+        assert!(
+            v1_defs.unwrap().contains(&Value::new(1)),
+            "v1 should be defined at instruction 1"
+        );
 
         // v2 should be in defs at instruction 2
         let v2_def_point = InstPoint { block: 0, inst: 2 };
-        assert_eq!(liveness.defs.get(&v2_def_point), Some(&Value::new(2)));
+        let v2_defs = liveness.defs.get(&v2_def_point);
+        assert!(v2_defs.is_some(), "Instruction 2 should have definitions");
+        assert!(
+            v2_defs.unwrap().contains(&Value::new(2)),
+            "v2 should be defined at instruction 2"
+        );
 
         // v0 and v1 should be in uses at instruction 2 (iadd)
         let add_uses = liveness.uses.get(&v2_def_point);
@@ -806,5 +952,107 @@ block1(v2: i32):
         assert_eq!(v1_range.last_use.block, 0);
         // v1 is used at the jump instruction
         assert!(!v1_range.uses.is_empty());
+    }
+
+    #[test]
+    fn test_liveness_visualization_10_params() {
+        extern crate std;
+
+        // Test the 10-parameter sum function with liveness visualization
+        let ir = r#"
+function %test(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32):
+    ; Sum all arguments
+    v10 = iadd v0, v1
+    v11 = iadd v10, v2
+    v12 = iadd v11, v3
+    v13 = iadd v12, v4
+    v14 = iadd v13, v5
+    v15 = iadd v14, v6
+    v16 = iadd v15, v7
+    v17 = iadd v16, v8
+    v18 = iadd v17, v9
+    return v18
+}
+"#;
+
+        let func = parse_function(ir).expect("Failed to parse IR");
+        let liveness = compute_liveness(&func);
+
+        // Format with liveness visualization
+        let visualization = format_function_with_liveness(&func, &liveness);
+
+        std::eprintln!("{}", visualization);
+
+        // Verify that the visualization contains expected elements
+        assert!(visualization.contains("function %test"));
+        assert!(visualization.contains("block0"));
+        assert!(visualization.contains("v10 = iadd v0, v1"));
+        assert!(visualization.contains("Liveness"));
+        assert!(visualization.contains("■")); // Should contain live markers
+
+        // Verify liveness for specific instructions
+        // At v10 = iadd v0, v1: v0 and v1 are used at this instruction
+        let point_v10 = InstPoint { block: 0, inst: 1 };
+        let uses_at_v10 = liveness.uses.get(&point_v10);
+        assert!(uses_at_v10.is_some(), "v10 instruction should have uses");
+        let uses = uses_at_v10.unwrap();
+        assert!(
+            uses.contains(&Value::new(0)),
+            "v0 should be used at v10 instruction"
+        );
+        assert!(
+            uses.contains(&Value::new(1)),
+            "v1 should be used at v10 instruction"
+        );
+
+        // At v11 = iadd v10, v2: v10 and v2 are used at this instruction
+        let point_v11 = InstPoint { block: 0, inst: 2 };
+        let uses_at_v11 = liveness.uses.get(&point_v11);
+        assert!(uses_at_v11.is_some(), "v11 instruction should have uses");
+        let uses_v11 = uses_at_v11.unwrap();
+        assert!(
+            uses_v11.contains(&Value::new(10)),
+            "v10 should be used at v11 instruction"
+        );
+        assert!(
+            uses_v11.contains(&Value::new(2)),
+            "v2 should be used at v11 instruction"
+        );
+
+        // At return v18: v18 is used at this instruction
+        let point_return = InstPoint { block: 0, inst: 10 };
+        let uses_at_return = liveness.uses.get(&point_return);
+        assert!(
+            uses_at_return.is_some(),
+            "return instruction should have uses"
+        );
+        let uses_return = uses_at_return.unwrap();
+        assert!(
+            uses_return.contains(&Value::new(18)),
+            "v18 should be used at return"
+        );
+
+        // Verify that instruction result values have live ranges
+        for i in 10..=18 {
+            let value = Value::new(i);
+            assert!(
+                liveness.live_ranges.contains_key(&value),
+                "Value v{} should have a live range",
+                i
+            );
+        }
+
+        // Verify that parameters are tracked in defs at block entry
+        let entry_point = InstPoint { block: 0, inst: 0 };
+        // At least some parameters should be in defs (checking a few)
+        assert!(
+            liveness.defs.contains_key(&entry_point),
+            "Block entry should have parameter definitions"
+        );
+
+        // Print visualization for manual inspection (useful during development)
+        // Uncomment to see the output:
+        // println!("{}", visualization);
     }
 }

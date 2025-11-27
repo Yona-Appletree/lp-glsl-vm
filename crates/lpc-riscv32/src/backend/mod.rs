@@ -196,11 +196,13 @@ pub fn compile_module_to_insts(module: &Module) -> Result<CompiledModule, String
             };
             let func_total_spill_slots =
                 func_allocation.spill_slot_count + func_spill_reload.max_temp_spill_slots;
+            // Compute incoming_args_size: size of stack arguments passed to this function
+            let func_incoming_args_size = func_abi.stack_args_size;
             let func_frame_layout = frame::compute_frame_layout(
                 &func_allocation.used_callee_saved,
                 func_function_calls,
-                0,
-                0,
+                func_incoming_args_size,
+                0, // tail_args_size
                 func_total_spill_slots as u32,
                 0,
                 func_abi.stack_args_size,

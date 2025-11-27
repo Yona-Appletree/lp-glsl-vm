@@ -146,7 +146,7 @@ impl Abi {
                     // Index 0 -> a0, index 1 -> a1, etc.
                     i
                 };
-                
+
                 if reg_idx < 8 {
                     // In register: a0-a7
                     let reg = match reg_idx {
