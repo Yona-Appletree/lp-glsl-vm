@@ -5,6 +5,7 @@ use lpc_lpir::Function;
 use super::super::{
     abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation,
 };
+use super::types::ByteSize;
 use crate::{Gpr, Inst as RiscvInst};
 
 impl super::Lowerer {
@@ -130,8 +131,8 @@ impl super::Lowerer {
                 // Note: For entry functions, RA is garbage at the start, but we save it anyway
                 // because calls will set RA, and we need to preserve it across nested calls.
                 // The epilogue will handle entry functions specially.
-                let ra_offset = if frame_layout.setup_area_size > 0 {
-                    frame_layout.tail_args_size as i32 + frame_layout.setup_area_size as i32 - 4
+                let ra_offset = if frame_layout.setup_area_size > ByteSize::new(0) {
+                    i32::from(frame_layout.tail_args_size + frame_layout.setup_area_size) - 4
                 } else {
                     0
                 };

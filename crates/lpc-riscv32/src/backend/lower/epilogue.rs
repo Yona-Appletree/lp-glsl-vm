@@ -1,6 +1,9 @@
 //! Function epilogue generation.
 
-use super::super::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout};
+use super::{
+    super::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout},
+    types::ByteSize,
+};
 use crate::{Gpr, Inst as RiscvInst};
 
 impl super::Lowerer {
@@ -36,8 +39,8 @@ impl super::Lowerer {
             // For entry functions, we saved garbage RA at the start, so don't restore it.
             // The current RA (set by calls) should be used, or we'll emit ebreak.
             if frame_layout.has_function_calls && !self.is_entry_function {
-                let ra_offset = if frame_layout.setup_area_size > 0 {
-                    frame_layout.tail_args_size as i32 + frame_layout.setup_area_size as i32 - 4
+                let ra_offset = if frame_layout.setup_area_size > ByteSize::new(0) {
+                    i32::from(frame_layout.tail_args_size + frame_layout.setup_area_size) - 4
                 } else {
                     0
                 };

@@ -23,7 +23,8 @@ use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use lpc_lpir::Inst;
 // Re-export public types
 pub use types::{
-    ByteOffset, InstOffset, LoweringError, Relocation, RelocationInstType, RelocationTarget,
+    ByteOffset, ByteSize, InstOffset, InstSize, LoweringError, Relocation, RelocationInstType,
+    RelocationTarget, WordSize,
 };
 
 use super::{abi::AbiInfo, emit::CodeBuffer, frame::FrameLayout, regalloc::RegisterAllocation};

@@ -5,7 +5,7 @@
 
 use alloc::vec::Vec;
 
-use super::lower::ByteOffset;
+use super::lower::{ByteOffset, ByteSize, WordSize};
 use crate::Gpr;
 
 /// Storage location for a value in the frame.
@@ -31,21 +31,23 @@ pub enum StorageLocation {
 /// The frame layout follows Cranelift's model with a clear separation between
 /// caller-owned tail space and callee-owned local storage:
 /// ```text
-/// ┌─────────────────────────────────────┐
-/// │  Caller's Stack Frame               │
-/// ├─────────────────────────────────────┤
-/// │  Tail-Args Area (caller-owned)      │  ← SP before prologue
-/// │    - Incoming stack args            │
-/// │    - Stack return area              │
-/// ├─────────────────────────────────────┤
-/// │  Setup Area (FP/LR)                 │  ← SP after prologue
-/// ├─────────────────────────────────────┤
-/// │  Clobber Area (callee-saved regs)   │
-/// ├─────────────────────────────────────┤
-/// │  Spill Slots                        │
-/// ├─────────────────────────────────────┤
-/// │  Outgoing Args Area                  │  ← Bottom of local frame
-/// └─────────────────────────────────────┘
+/// 
+/// Higher addresses (caller's side)
+///        ↑
+///        │  [Caller's stack frame]    ← SP before prologue
+///        ├───────────────────────────
+///        │
+///        │  [Outgoing args]           ← SP + (local_frame_size - outgoing_args_size) to SP + local_frame_size
+///        │  [Spill slots]             ← SP + tail_args_size + setup_size + clobber_size
+///        │  [Clobber area]            ← SP + tail_args_size + setup_size
+///        │  [Setup area]              ← SP + tail_args_size
+///        │  [Tail-args area]          ← SP + 0 (at SP)
+///        │
+///        ├───────────────────────────
+///        │  ← SP (points HERE, bottom of allocated frame)
+///        │
+///        ↓  (stack grows this direction)
+/// Lower addresses (more local storage)
 /// ```
 ///
 /// Key points:
@@ -59,31 +61,28 @@ pub enum StorageLocation {
 /// - Epilogue reverses this: restore local frame, then undo tail adjustment
 #[derive(Debug, Clone)]
 pub struct FrameLayout {
-    /// Word size in bytes (4 for RISC-V 32-bit)
-    pub word_bytes: u32,
-
     /// Size of incoming arguments on stack (if > 8 args)
-    pub incoming_args_size: u32,
+    pub incoming_args_size: ByteSize,
 
     /// Size of setup area (FP/LR save area, 0 or 8 bytes)
-    pub setup_area_size: u32,
+    pub setup_area_size: ByteSize,
 
     /// Size of clobber area (callee-saved registers)
-    pub clobber_size: u32,
+    pub clobber_size: ByteSize,
 
     /// Size of fixed frame storage (spill slots)
-    pub fixed_frame_storage_size: u32,
+    pub fixed_frame_storage_size: ByteSize,
 
     /// Size of outgoing arguments area
-    pub outgoing_args_size: u32,
+    pub outgoing_args_size: ByteSize,
 
     /// Size of stack return area for this function's returns (if > 8 returns)
-    pub stack_return_area: u32,
+    pub stack_return_area: ByteSize,
 
     /// Size of tail-args area (largest of incoming args, callee stack returns, self stack returns)
     /// This area is caller-owned and persists after epilogue.
     /// Note: Outgoing args are NOT in tail-args - they're in the local frame.
-    pub tail_args_size: u32,
+    pub tail_args_size: ByteSize,
 
     /// List of callee-saved registers that need saving
     pub clobbered_callee_saves: Vec<Gpr>,
@@ -92,9 +91,11 @@ pub struct FrameLayout {
     pub has_function_calls: bool,
 }
 
-/// Align a size to 16 bytes (RISC-V ABI requirement).
-fn align_to_16(size: u32) -> u32 {
-    (size + 15) & !15
+/// Align a size in words to 4 words (16 bytes, RISC-V ABI requirement).
+fn align_to_4_words(size_words: WordSize) -> WordSize {
+    let words = size_words.as_u32();
+    let aligned_words = ((words + 3) & !3) as u32;
+    WordSize::new(aligned_words)
 }
 
 impl FrameLayout {
@@ -130,82 +131,83 @@ impl FrameLayout {
         );
         // Determine if setup area needed
         // Setup area is needed if we have calls, use callee-saved regs, or need spill slots
+        // Setup area is 2 words (8 bytes: 4 for RA, 4 for FP if used)
         let setup_area_size = if has_calls || !used_callee_saved.is_empty() || spill_slots > 0 {
-            8 // FP/LR save area (8 bytes for RISC-V 32-bit: 4 for RA, 4 for FP if used)
+            WordSize::new(2) // 2 words = 8 bytes
         } else {
-            0
+            WordSize::new(0)
         };
 
         // Compute clobber size (callee-saved registers)
-        // Each register is 4 bytes
-        let clobber_size = align_to_16(used_callee_saved.len() as u32 * 4);
+        // Each register is 1 word
+        let clobber_size = align_to_4_words(WordSize::new(used_callee_saved.len() as u32));
 
         // Compute fixed frame storage (spill slots)
-        // Each spill slot is 4 bytes
-        let fixed_frame_storage_size = align_to_16(spill_slots as u32 * 4);
+        // Each spill slot is 1 word
+        let fixed_frame_storage_size = align_to_4_words(WordSize::new(spill_slots as u32));
 
         // Compute incoming args size (if > 8 args, they go on stack)
-        // Align number of stack args: for <=2 args use 4, otherwise use 2*num_args, then multiply by 4
+        // Align number of stack args: for <=2 args use 4 words, otherwise use 2*num_args words
         let incoming_args_size = if incoming_args > 8 {
             let stack_args = (incoming_args - 8) as u32;
             let aligned_args = if stack_args <= 2 {
-                // For 1-2 stack args, use 4 args (16 bytes)
+                // For 1-2 stack args, use 4 words (16 bytes)
                 4
             } else {
-                // For 3+ stack args, align to 2*num_args
+                // For 3+ stack args, align to 2*num_args words
                 stack_args * 2
             };
-            align_to_16(aligned_args * 4)
+            align_to_4_words(WordSize::new(aligned_args))
         } else {
-            0
+            WordSize::new(0)
         };
 
         // Compute outgoing args size (if > 8 args, they go on stack)
-        // Align number of stack args: for <=2 args use 4, otherwise use 2*num_args, then multiply by 4
+        // Align number of stack args: for <=2 args use 4 words, otherwise use 2*num_args words
         let outgoing_args_size = if outgoing_args > 8 {
             let stack_args = (outgoing_args - 8) as u32;
             let aligned_args = if stack_args <= 2 {
-                // For 1-2 stack args, use 4 args (16 bytes)
+                // For 1-2 stack args, use 4 words (16 bytes)
                 4
             } else {
-                // For 3+ stack args, align to 2*num_args
+                // For 3+ stack args, align to 2*num_args words
                 stack_args * 2
             };
-            align_to_16(aligned_args * 4)
+            align_to_4_words(WordSize::new(aligned_args))
         } else {
-            0
+            WordSize::new(0)
         };
 
         // Compute stack return area size (if > 8 returns, they go on stack)
-        // Align number of stack returns: for <=2 returns use 4, otherwise use 2*num_returns, then multiply by 4
+        // Align number of stack returns: for <=2 returns use 4 words, otherwise use 2*num_returns words
         let stack_return_area = if return_count > 8 {
             let stack_returns = (return_count - 8) as u32;
             let aligned_returns = if stack_returns <= 2 {
-                // For 1-2 stack returns, use 4 returns (16 bytes)
+                // For 1-2 stack returns, use 4 words (16 bytes)
                 4
             } else {
-                // For 3+ stack returns, align to 2*num_returns
+                // For 3+ stack returns, align to 2*num_returns words
                 stack_returns * 2
             };
-            align_to_16(aligned_returns * 4)
+            align_to_4_words(WordSize::new(aligned_returns))
         } else {
-            0
+            WordSize::new(0)
         };
 
         // Compute max callee stack return area
-        // Align number of stack returns: for <=2 returns use 4, otherwise use 2*num_returns, then multiply by 4
+        // Align number of stack returns: for <=2 returns use 4 words, otherwise use 2*num_returns words
         let max_callee_stack_return_area = if max_callee_stack_returns > 8 {
             let stack_returns = (max_callee_stack_returns - 8) as u32;
             let aligned_returns = if stack_returns <= 2 {
-                // For 1-2 stack returns, use 4 returns (16 bytes)
+                // For 1-2 stack returns, use 4 words (16 bytes)
                 4
             } else {
-                // For 3+ stack returns, align to 2*num_returns
+                // For 3+ stack returns, align to 2*num_returns words
                 stack_returns * 2
             };
-            align_to_16(aligned_returns * 4)
+            align_to_4_words(WordSize::new(aligned_returns))
         } else {
-            0
+            WordSize::new(0)
         };
 
         // Tail-args size is the maximum of:
@@ -218,14 +220,13 @@ impl FrameLayout {
             .max(stack_return_area);
 
         let layout = FrameLayout {
-            word_bytes: 4,
-            incoming_args_size,
-            setup_area_size,
-            clobber_size,
-            fixed_frame_storage_size,
-            outgoing_args_size,
-            stack_return_area,
-            tail_args_size,
+            incoming_args_size: incoming_args_size.into(),
+            setup_area_size: setup_area_size.into(),
+            clobber_size: clobber_size.into(),
+            fixed_frame_storage_size: fixed_frame_storage_size.into(),
+            outgoing_args_size: outgoing_args_size.into(),
+            stack_return_area: stack_return_area.into(),
+            tail_args_size: tail_args_size.into(),
             clobbered_callee_saves: used_callee_saved.to_vec(),
             has_function_calls: has_calls,
         };
@@ -262,7 +263,7 @@ impl FrameLayout {
             self.fixed_frame_storage_size,
             size
         );
-        size
+        u32::from(size)
     }
 
     /// Get the size of the local frame (callee-owned storage).
@@ -270,10 +271,12 @@ impl FrameLayout {
     /// This excludes tail-args and represents only the callee's own frame:
     /// setup area + clobber area + spill slots + outgoing args.
     pub fn local_frame_size(&self) -> u32 {
-        self.setup_area_size
-            + self.clobber_size
-            + self.fixed_frame_storage_size
-            + self.outgoing_args_size
+        u32::from(
+            self.setup_area_size
+                + self.clobber_size
+                + self.fixed_frame_storage_size
+                + self.outgoing_args_size,
+        )
     }
 
     /// Get the tail adjustment needed for prologue.
@@ -285,7 +288,7 @@ impl FrameLayout {
     /// Returns the adjustment amount (positive means subtract from SP).
     pub fn tail_adjustment(&self) -> i32 {
         if self.tail_args_size > self.incoming_args_size {
-            (self.tail_args_size - self.incoming_args_size) as i32
+            i32::from(self.tail_args_size - self.incoming_args_size)
         } else {
             0
         }
@@ -293,30 +296,34 @@ impl FrameLayout {
 
     /// Get the offset of the outgoing args base (relative to adjusted SP).
     ///
-    /// Outgoing args are stored above the local frame.
+    /// Outgoing args are stored at the top of the local frame.
     pub fn outgoing_args_base_offset(&self) -> ByteOffset {
-        ByteOffset(self.local_frame_size() as i32)
+        let local_frame = self.local_frame_size();
+        let outgoing_base = local_frame - u32::from(self.outgoing_args_size);
+        ByteOffset(outgoing_base as i32)
     }
 
     /// Get the offset of the setup area base (relative to adjusted SP).
     ///
     /// Setup area is above tail-args: SP+tail_args_size to SP+tail_args_size+setup_area_size-1
     pub fn setup_area_base_offset(&self) -> ByteOffset {
-        ByteOffset(self.tail_args_size as i32)
+        ByteOffset(i32::from(self.tail_args_size))
     }
 
     /// Get the offset of the clobber area base (relative to adjusted SP).
     ///
     /// Clobber area is above the setup area.
     pub fn clobber_area_base_offset(&self) -> ByteOffset {
-        ByteOffset((self.tail_args_size + self.setup_area_size) as i32)
+        ByteOffset(i32::from(self.tail_args_size + self.setup_area_size))
     }
 
     /// Get the offset of spill slots base (relative to adjusted SP).
     ///
     /// Spill slots are above the clobber area.
     pub fn spill_slots_base_offset(&self) -> ByteOffset {
-        ByteOffset((self.tail_args_size + self.setup_area_size + self.clobber_size) as i32)
+        ByteOffset(i32::from(
+            self.tail_args_size + self.setup_area_size + self.clobber_size,
+        ))
     }
 
     /// Get the stack offset for a callee-saved register.
@@ -329,7 +336,7 @@ impl FrameLayout {
             .position(|&r| r.num() == reg.num())
             .map(|idx| {
                 let base = self.tail_args_size + self.setup_area_size;
-                let offset = base + (idx as u32 * 4);
+                let offset = u32::from(base) + (idx as u32 * 4);
                 ByteOffset(-(offset as i32))
             })
     }
@@ -340,7 +347,7 @@ impl FrameLayout {
     /// Negative offset because frame grows downward from SP.
     pub fn spill_slot_offset(&self, slot: u32) -> ByteOffset {
         let base_offset = self.tail_args_size + self.setup_area_size + self.clobber_size;
-        let offset = ByteOffset(-((base_offset + slot * 4) as i32));
+        let offset = ByteOffset(-(i32::from(base_offset) + (slot * 4) as i32));
         #[cfg(feature = "debug-lowering")]
         crate::debug_lowering!(
             "spill_slot_offset(slot={}): base={}, offset={}",
@@ -380,11 +387,12 @@ impl FrameLayout {
             return None; // In register
         }
         let stack_index = arg_index - 8;
-        // Outgoing args are stored above the local frame
-        // Offset = local_frame_size + (idx-8)*4
+        // Outgoing args are stored at the top of the local frame
+        // Offset = (local_frame_size - outgoing_args_size) + (idx-8)*4
         // This places them at the correct location for the callee to access at SP + (idx-8)*4
         let local_frame = self.local_frame_size();
-        let offset = ByteOffset((local_frame + (stack_index as u32) * 4) as i32);
+        let outgoing_base = local_frame - u32::from(self.outgoing_args_size);
+        let offset = ByteOffset((outgoing_base + (stack_index as u32) * 4) as i32);
         crate::debug!(
             "[FRAME] outgoing_arg_offset(arg_index={}): stack_index={}, local_frame={}, offset={}",
             arg_index,
@@ -420,7 +428,7 @@ impl FrameLayout {
         // So offset = tail_adjust + local_frame + (tail_args_size - incoming_args_size) + (idx-8)*4
         let offset = tail_adjust
             + local_frame as i32
-            + (self.tail_args_size - self.incoming_args_size) as i32
+            + i32::from(self.tail_args_size - self.incoming_args_size)
             + (stack_index * 4) as i32;
         Some(ByteOffset(offset))
     }
@@ -443,7 +451,7 @@ impl FrameLayout {
         // Offset is relative to caller's SP (after prologue)
         // Stack returns start at: tail_args_size - incoming_args_size (above incoming args)
         Some(ByteOffset(
-            (self.tail_args_size - self.incoming_args_size) as i32 + (stack_index * 4) as i32,
+            i32::from(self.tail_args_size - self.incoming_args_size) + (stack_index * 4) as i32,
         ))
     }
 
@@ -526,28 +534,28 @@ mod tests {
     #[test]
     fn test_compute_frame_layout_no_calls() {
         let layout = FrameLayout::compute(&[], 0, false, 0, 0, 0, 0);
-        assert_eq!(layout.setup_area_size, 0);
-        assert_eq!(layout.clobber_size, 0);
-        assert_eq!(layout.fixed_frame_storage_size, 0);
-        assert_eq!(layout.outgoing_args_size, 0);
+        assert_eq!(layout.setup_area_size, ByteSize::new(0));
+        assert_eq!(layout.clobber_size, ByteSize::new(0));
+        assert_eq!(layout.fixed_frame_storage_size, ByteSize::new(0));
+        assert_eq!(layout.outgoing_args_size, ByteSize::new(0));
         assert_eq!(layout.total_size(), 0);
     }
 
     #[test]
     fn test_compute_frame_layout_with_calls() {
         let layout = FrameLayout::compute(&[], 0, true, 0, 0, 0, 0);
-        assert_eq!(layout.setup_area_size, 8);
+        assert_eq!(layout.setup_area_size, ByteSize::new(8));
         assert_eq!(layout.has_function_calls, true);
-        assert_eq!(layout.outgoing_args_size, 0);
+        assert_eq!(layout.outgoing_args_size, ByteSize::new(0));
         assert_eq!(layout.total_size(), 8); // setup only
     }
 
     #[test]
     fn test_compute_frame_layout_with_spills() {
         let layout = FrameLayout::compute(&[], 2, false, 0, 0, 0, 0);
-        assert_eq!(layout.setup_area_size, 8);
-        assert_eq!(layout.fixed_frame_storage_size, 16); // Aligned to 16
-        assert_eq!(layout.outgoing_args_size, 0);
+        assert_eq!(layout.setup_area_size, ByteSize::new(8));
+        assert_eq!(layout.fixed_frame_storage_size, ByteSize::new(16)); // Aligned to 16
+        assert_eq!(layout.outgoing_args_size, ByteSize::new(0));
         assert_eq!(layout.total_size(), 24); // setup + spills
     }
 
@@ -555,8 +563,8 @@ mod tests {
     fn test_compute_frame_layout_with_callee_saved() {
         let used = vec![Gpr::S0, Gpr::S1];
         let layout = FrameLayout::compute(&used, 0, false, 0, 0, 0, 0);
-        assert_eq!(layout.setup_area_size, 8);
-        assert_eq!(layout.clobber_size, 16); // Aligned to 16
+        assert_eq!(layout.setup_area_size, ByteSize::new(8));
+        assert_eq!(layout.clobber_size, ByteSize::new(16)); // Aligned to 16
         assert_eq!(layout.clobbered_callee_saves.len(), 2);
         assert_eq!(layout.total_size(), 24);
     }
@@ -593,14 +601,14 @@ mod tests {
     fn test_outgoing_args_size() {
         // Test with 10 outgoing args (2 need to go on stack)
         let layout = FrameLayout::compute(&[], 0, true, 0, 10, 0, 0);
-        assert_eq!(layout.outgoing_args_size, 16); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.outgoing_args_size, ByteSize::new(16)); // (10-8)*4 = 8, aligned to 16
     }
 
     #[test]
     fn test_incoming_args_size() {
         // Test with 10 incoming args (2 need to go on stack)
         let layout = FrameLayout::compute(&[], 0, true, 10, 0, 0, 0);
-        assert_eq!(layout.incoming_args_size, 16); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.incoming_args_size, ByteSize::new(16)); // (10-8)*4 = 8, aligned to 16
     }
 
     #[test]
@@ -629,8 +637,9 @@ mod tests {
             assert_eq!(layout.outgoing_arg_offset(i), None);
         }
 
-        // Stack args should be stored above local frame: local_frame_size + (idx-8)*4
-        // For this test: local_frame = setup(8) = 8
+        // Stack args should be stored at the top of the local frame
+        // For this test: local_frame = setup(8) + outgoing(16) = 24
+        // Outgoing base = 24 - 16 = 8
         assert_eq!(layout.outgoing_arg_offset(8), Some(ByteOffset(8))); // SP + 8
         assert_eq!(layout.outgoing_arg_offset(9), Some(ByteOffset(12))); // SP + 12
         assert_eq!(layout.outgoing_arg_offset(10), Some(ByteOffset(16))); // SP + 16
@@ -641,10 +650,11 @@ mod tests {
         // Test with spills - outgoing args are below spill slots in local frame
         let layout = FrameLayout::compute(&[], 2, true, 0, 10, 0, 0);
 
-        // Outgoing args are above local frame: local_frame_size + (idx-8)*4
-        // For this test: local_frame = setup(8) = 8
-        assert_eq!(layout.outgoing_arg_offset(8), Some(ByteOffset(8))); // SP + 8
-        assert_eq!(layout.outgoing_arg_offset(9), Some(ByteOffset(12))); // SP + 12
+        // Outgoing args are at the top of the local frame
+        // For this test: local_frame = setup(8) + spills(16) + outgoing(16) = 40
+        // Outgoing base = 40 - 16 = 24
+        assert_eq!(layout.outgoing_arg_offset(8), Some(ByteOffset(24))); // SP + 24
+        assert_eq!(layout.outgoing_arg_offset(9), Some(ByteOffset(28))); // SP + 28
                                                                          // total_size includes tail_args(0) + setup(8) + spills(16) + outgoing(16) = 40
         assert_eq!(layout.total_size(), 40);
     }
@@ -662,13 +672,13 @@ mod tests {
             let incoming = layout.incoming_arg_offset(i);
             let outgoing = layout.outgoing_arg_offset(i);
             // Incoming args are at positive offsets: (idx-8)*4 (relative to SP before prologue)
-            // Outgoing args are above local frame: local_frame_size + (idx-8)*4 (relative to SP after prologue)
+            // Outgoing args are at the top of the local frame: (local_frame_size - outgoing_args_size) + (idx-8)*4
             // They appear at the same location because caller's SP after prologue = callee's SP before prologue
             // and outgoing offset accounts for the local frame
             let incoming_expected = Some(ByteOffset((i - 8) as i32 * 4));
-            let outgoing_expected = Some(ByteOffset(
-                (layout.local_frame_size() + ((i - 8) as u32) * 4) as i32,
-            ));
+            let local_frame = layout.local_frame_size();
+            let outgoing_base = local_frame - u32::from(layout.outgoing_args_size);
+            let outgoing_expected = Some(ByteOffset((outgoing_base + ((i - 8) as u32) * 4) as i32));
             assert_eq!(incoming, incoming_expected, "Incoming offset for arg {}", i);
             assert_eq!(outgoing, outgoing_expected, "Outgoing offset for arg {}", i);
             // They should NOT match as offsets, but they point to the same memory location
@@ -694,13 +704,13 @@ mod tests {
         // Setup area is above tail-args
         assert_eq!(
             layout.setup_area_base_offset().as_i32(),
-            layout.tail_args_size as i32
+            i32::from(layout.tail_args_size)
         );
 
         // Clobber area is above setup area
         assert_eq!(
             layout.clobber_area_base_offset().as_i32(),
-            (layout.tail_args_size + layout.setup_area_size) as i32
+            i32::from(layout.tail_args_size + layout.setup_area_size)
         );
 
         // Spill slots are above clobber area
@@ -708,7 +718,7 @@ mod tests {
             layout.tail_args_size + layout.setup_area_size + layout.clobber_size;
         assert_eq!(
             layout.spill_slots_base_offset().as_i32(),
-            expected_spill_base as i32
+            i32::from(expected_spill_base)
         );
     }
 
@@ -745,7 +755,7 @@ mod tests {
         // Verify the calculation: tail_adjust + local_frame + (tail_args_size - incoming_args_size) + (idx-8)*4
         let expected_store = layout.tail_adjustment()
             + layout.local_frame_size() as i32
-            + (layout.tail_args_size - layout.incoming_args_size) as i32
+            + i32::from(layout.tail_args_size - layout.incoming_args_size)
             + 0;
         assert_eq!(
             store_offset_8.as_i32(),
@@ -759,7 +769,7 @@ mod tests {
         );
 
         // Verify load offset: (tail_args_size - incoming_args_size) + (idx-8)*4
-        let expected_load = (layout.tail_args_size - layout.incoming_args_size) as i32 + 0;
+        let expected_load = i32::from(layout.tail_args_size - layout.incoming_args_size) + 0;
         assert_eq!(load_offset_8.as_i32(), expected_load);
 
         // Now check the other offsets
@@ -786,16 +796,17 @@ mod tests {
         // Verify outgoing args are at positive offsets (matching RISC-V convention)
         let layout = FrameLayout::compute(&[], 0, true, 0, 10, 0, 0);
 
-        // Outgoing args should start above local frame: local_frame_size + (idx-8)*4
-        // For this test: local_frame = setup(8) = 8
-        assert_eq!(layout.outgoing_args_base_offset().as_i32(), 8); // local_frame_size
+        // Outgoing args should start at the top of the local frame
+        // For this test: local_frame = setup(8) + outgoing(16) = 24
+        // Outgoing base = 24 - 16 = 8
+        assert_eq!(layout.outgoing_args_base_offset().as_i32(), 8); // local_frame_size - outgoing_args_size
         assert_eq!(layout.outgoing_arg_offset(8), Some(ByteOffset(8))); // SP + 8
         assert_eq!(layout.outgoing_arg_offset(9), Some(ByteOffset(12))); // SP + 12
 
         // Setup area should be above tail-args
         assert_eq!(
             layout.setup_area_base_offset().as_i32(),
-            layout.tail_args_size as i32
+            i32::from(layout.tail_args_size)
         );
     }
 
@@ -811,7 +822,7 @@ mod tests {
             + layout.clobber_size
             + layout.fixed_frame_storage_size
             + layout.outgoing_args_size;
-        assert_eq!(layout.total_size(), expected_total);
+        assert_eq!(layout.total_size(), u32::from(expected_total));
         assert_eq!(layout.total_size(), 24);
     }
 
@@ -821,26 +832,27 @@ mod tests {
         let used = vec![Gpr::S0];
         let layout = FrameLayout::compute(&used, 2, true, 0, 10, 0, 0);
 
-        // Verify order: outgoing args at positive offsets (matching RISC-V convention)
-        // Base offset is 0 (first outgoing arg at SP + 0)
-        assert_eq!(layout.outgoing_args_base_offset().as_i32(), 0);
+        // Verify order: outgoing args at the top of the local frame
+        // For this test: local_frame = setup(8) + clobber(16) + spills(16) + outgoing(16) = 56
+        // Outgoing base = 56 - 16 = 40
+        assert_eq!(layout.outgoing_args_base_offset().as_i32(), 40);
 
         // Setup area above tail-args
         assert_eq!(
             layout.setup_area_base_offset().as_i32(),
-            layout.tail_args_size as i32
+            i32::from(layout.tail_args_size)
         );
 
         // Clobber area above setup
         assert_eq!(
             layout.clobber_area_base_offset().as_i32(),
-            (layout.tail_args_size + layout.setup_area_size) as i32
+            i32::from(layout.tail_args_size + layout.setup_area_size)
         );
 
         // Spills above clobber
         assert_eq!(
             layout.spill_slots_base_offset().as_i32(),
-            (layout.tail_args_size + layout.setup_area_size + layout.clobber_size) as i32
+            i32::from(layout.tail_args_size + layout.setup_area_size + layout.clobber_size)
         );
 
         // Total size should include all components (including outgoing args)
@@ -849,7 +861,7 @@ mod tests {
             + layout.clobber_size
             + layout.fixed_frame_storage_size
             + layout.outgoing_args_size;
-        assert_eq!(layout.total_size(), expected_total);
+        assert_eq!(layout.total_size(), u32::from(expected_total));
     }
 
     #[test]
@@ -885,18 +897,25 @@ mod tests {
         let used = vec![Gpr::S0];
         let layout = FrameLayout::compute(&used, 2, true, 10, 10, 0, 0);
 
-        // Incoming and outgoing args use the same offsets (matching RISC-V convention)
+        // Incoming and outgoing args use different offsets but point to the same memory location
+        // Incoming args are at (idx-8)*4 relative to callee's SP before prologue
+        // Outgoing args are at (local_frame_size - outgoing_args_size) + (idx-8)*4 relative to caller's SP after prologue
+        // Since caller's SP after prologue = callee's SP before prologue, they point to the same location
         for i in 8..=10 {
             let incoming = layout.incoming_arg_offset(i);
             let outgoing = layout.outgoing_arg_offset(i);
-            // Both are at positive offsets (SP + offset)
-            let expected = Some(ByteOffset((i - 8) as i32 * 4));
-            assert_eq!(incoming, expected, "Incoming offset for arg {}", i);
-            assert_eq!(outgoing, expected, "Outgoing offset for arg {}", i);
-            // They should match
-            assert_eq!(
+            // Incoming args are at positive offsets: (idx-8)*4
+            let incoming_expected = Some(ByteOffset((i - 8) as i32 * 4));
+            // Outgoing args are at the top of the local frame
+            let local_frame = layout.local_frame_size();
+            let outgoing_base = local_frame - u32::from(layout.outgoing_args_size);
+            let outgoing_expected = Some(ByteOffset((outgoing_base + ((i - 8) as u32) * 4) as i32));
+            assert_eq!(incoming, incoming_expected, "Incoming offset for arg {}", i);
+            assert_eq!(outgoing, outgoing_expected, "Outgoing offset for arg {}", i);
+            // They should NOT match as offsets, but they point to the same memory location
+            assert_ne!(
                 incoming, outgoing,
-                "Incoming and outgoing offsets should match for arg {} even with complex frame",
+                "Incoming and outgoing offsets are different but point to same location for arg {}",
                 i
             );
         }
@@ -911,7 +930,7 @@ mod tests {
         // Setup area base is at tail_args_size (0, since outgoing args are NOT in tail-args)
         // RA is saved at setup_area_base + (setup_area_size - 4) = 0 + (8 - 4) = 4
         let setup_base = layout.setup_area_base_offset().as_i32();
-        let ra_offset = setup_base + layout.setup_area_size as i32 - 4;
+        let ra_offset = setup_base + i32::from(layout.setup_area_size) - 4;
         assert_eq!(ra_offset, 4);
     }
 
@@ -927,7 +946,7 @@ mod tests {
             layout.outgoing_args_base_offset().as_i32(),
             layout.local_frame_size() as i32
         );
-        assert_eq!(layout.outgoing_args_size, 0);
+        assert_eq!(layout.outgoing_args_size, ByteSize::new(0));
 
         // Setup area should still be above (at offset 0 when no tail-args)
         assert_eq!(layout.setup_area_base_offset().as_i32(), 0);
@@ -937,7 +956,7 @@ mod tests {
             + layout.clobber_size
             + layout.fixed_frame_storage_size
             + layout.outgoing_args_size;
-        assert_eq!(layout.total_size(), expected_total);
+        assert_eq!(layout.total_size(), u32::from(expected_total));
     }
 
     // Tests based on Cranelift's tail-args model
@@ -948,7 +967,7 @@ mod tests {
 
         // tail_args_size should equal incoming_args_size when no outgoing args
         assert_eq!(layout.tail_args_size, layout.incoming_args_size);
-        assert_eq!(layout.incoming_args_size, 16); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.incoming_args_size, ByteSize::new(16)); // (10-8)*4 = 8, aligned to 16
         assert_eq!(layout.tail_adjustment(), 0); // No adjustment needed
     }
 
@@ -959,8 +978,8 @@ mod tests {
 
         // tail_args_size should NOT include outgoing_args (they're in local frame)
         // With no incoming args and no stack returns, tail_args_size = 0
-        assert_eq!(layout.tail_args_size, 0);
-        assert_eq!(layout.outgoing_args_size, 16); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.tail_args_size, ByteSize::new(0));
+        assert_eq!(layout.outgoing_args_size, ByteSize::new(16)); // (10-8)*4 = 8, aligned to 16
         assert_eq!(layout.tail_adjustment(), 0); // No tail adjustment needed
     }
 
@@ -971,9 +990,9 @@ mod tests {
         let layout = FrameLayout::compute(&[], 0, true, 12, 10, 0, 0);
 
         // tail_args_size should equal incoming_args_size (larger)
-        assert_eq!(layout.incoming_args_size, 32); // (12-8)*4 = 16, aligned to 16 = 16, actually (12-8)*4=16 aligned to 16 = 16... wait
-        assert_eq!(layout.outgoing_args_size, 16); // (10-8)*4 = 8, aligned to 16
-        assert_eq!(layout.tail_args_size, 32); // max(32, 16) = 32
+        assert_eq!(layout.incoming_args_size, ByteSize::new(32)); // (12-8)*4 = 16, aligned to 16 = 16, actually (12-8)*4=16 aligned to 16 = 16... wait
+        assert_eq!(layout.outgoing_args_size, ByteSize::new(16)); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.tail_args_size, ByteSize::new(32)); // max(32, 16) = 32
         assert_eq!(layout.tail_adjustment(), 0); // No adjustment needed (incoming is larger)
     }
 
@@ -984,9 +1003,9 @@ mod tests {
         let layout = FrameLayout::compute(&[], 0, true, 10, 12, 0, 0);
 
         // tail_args_size should equal incoming_args_size (outgoing args NOT in tail-args)
-        assert_eq!(layout.incoming_args_size, 16); // (10-8)*4 = 8, aligned to 16
-        assert_eq!(layout.outgoing_args_size, 32); // (12-8)*4 = 16, aligned to 16 = 16, actually 16 aligned = 16... wait
-        assert_eq!(layout.tail_args_size, 16); // Only incoming args, not outgoing
+        assert_eq!(layout.incoming_args_size, ByteSize::new(16)); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.outgoing_args_size, ByteSize::new(32)); // (12-8)*4 = 16, aligned to 16 = 16, actually 16 aligned = 16... wait
+        assert_eq!(layout.tail_args_size, ByteSize::new(16)); // Only incoming args, not outgoing
         assert_eq!(layout.tail_adjustment(), 0); // No adjustment needed (incoming is larger)
     }
 
@@ -996,8 +1015,8 @@ mod tests {
         let layout = FrameLayout::compute(&[], 0, true, 0, 0, 10, 0);
 
         // tail_args_size should account for stack return area
-        assert_eq!(layout.stack_return_area, 16); // (10-8)*4 = 8, aligned to 16
-        assert_eq!(layout.tail_args_size, 16);
+        assert_eq!(layout.stack_return_area, ByteSize::new(16)); // (10-8)*4 = 8, aligned to 16
+        assert_eq!(layout.tail_args_size, ByteSize::new(16));
     }
 
     #[test]
@@ -1006,10 +1025,10 @@ mod tests {
         let layout = FrameLayout::compute(&[], 0, true, 0, 10, 0, 12);
 
         // tail_args_size should include max_callee_stack_returns (NOT outgoing_args)
-        assert_eq!(layout.outgoing_args_size, 16); // (10-8)*4 = 8, aligned to 16
-                                                   // tail_args_size = max(0, max_callee_stack_return_area, 0)
-                                                   // max_callee_stack_return_area = 32 for 12 returns (4 on stack)
-        assert_eq!(layout.tail_args_size, 32); // Only callee returns, not outgoing args
+        assert_eq!(layout.outgoing_args_size, ByteSize::new(16)); // (10-8)*4 = 8, aligned to 16
+                                                                  // tail_args_size = max(0, max_callee_stack_return_area, 0)
+                                                                  // max_callee_stack_return_area = 32 for 12 returns (4 on stack)
+        assert_eq!(layout.tail_args_size, ByteSize::new(32)); // Only callee returns, not outgoing args
     }
 
     #[test]
@@ -1017,10 +1036,10 @@ mod tests {
         // Complex: incoming=10, outgoing=12, self_returns=14, callee_returns=16
         let layout = FrameLayout::compute(&[], 0, true, 10, 12, 14, 16);
 
-        let incoming = 16; // (10-8)*4 = 8 aligned to 16
-        let outgoing = 32; // (12-8)*4 = 16 aligned to 16 = 16, hmm...
-        let stack_ret = 48; // (14-8)*4 = 24 aligned to 16 = 32
-        let max_callee_ret = 64; // (16-8)*4 = 32 aligned to 16 = 32
+        let incoming = ByteSize::new(16); // (10-8)*4 = 8 aligned to 16
+        let outgoing = ByteSize::new(32); // (12-8)*4 = 16 aligned to 16 = 16, hmm...
+        let stack_ret = ByteSize::new(48); // (14-8)*4 = 24 aligned to 16 = 32
+        let max_callee_ret = ByteSize::new(64); // (16-8)*4 = 32 aligned to 16 = 32
 
         assert_eq!(layout.incoming_args_size, incoming);
         assert_eq!(layout.outgoing_args_size, outgoing);
@@ -1040,12 +1059,12 @@ mod tests {
             + layout.clobber_size
             + layout.fixed_frame_storage_size
             + layout.outgoing_args_size;
-        assert_eq!(layout.local_frame_size(), expected_local);
+        assert_eq!(layout.local_frame_size(), u32::from(expected_local));
 
         // total_size should be tail_args + local_frame
         assert_eq!(
             layout.total_size(),
-            layout.tail_args_size + layout.local_frame_size()
+            u32::from(layout.tail_args_size) + layout.local_frame_size()
         );
     }
 
@@ -1069,7 +1088,7 @@ mod tests {
         // offset = tail_adjustment + local_frame + (tail_args_size - incoming_args_size) + (idx-8)*4
         let expected_store = layout.tail_adjustment()
             + layout.local_frame_size() as i32
-            + (layout.tail_args_size - layout.incoming_args_size) as i32
+            + i32::from(layout.tail_args_size - layout.incoming_args_size)
             + 0;
         assert_eq!(store_offset.as_i32(), expected_store);
     }
@@ -1080,12 +1099,12 @@ mod tests {
         let layout = FrameLayout::compute(&[], 2, true, 8, 12, 0, 0);
 
         // Phase 1: tail adjustment = tail_args_size - incoming_args_size
-        let incoming_size = 0; // (8-8)*4 = 0
-        let outgoing_size = 32; // (12-8)*4 = 16 aligned to 16
+        let incoming_size = ByteSize::new(0); // (8-8)*4 = 0
+        let outgoing_size = ByteSize::new(32); // (12-8)*4 = 16 aligned to 16
         assert_eq!(layout.incoming_args_size, incoming_size);
         assert_eq!(layout.outgoing_args_size, outgoing_size);
         // tail_args_size does NOT include outgoing_args (they're in local frame)
-        assert_eq!(layout.tail_args_size, 0); // No incoming args, no stack returns
+        assert_eq!(layout.tail_args_size, ByteSize::new(0)); // No incoming args, no stack returns
         assert_eq!(layout.tail_adjustment(), 0); // No tail adjustment needed
 
         // Phase 2: local frame (includes outgoing args)
@@ -1093,9 +1112,12 @@ mod tests {
             + layout.clobber_size
             + layout.fixed_frame_storage_size
             + layout.outgoing_args_size;
-        assert_eq!(layout.local_frame_size(), local_frame);
+        assert_eq!(layout.local_frame_size(), u32::from(local_frame));
 
         // Total SP adjustment = tail_adjustment + local_frame
-        assert_eq!(layout.total_size(), layout.tail_args_size + local_frame);
+        assert_eq!(
+            layout.total_size(),
+            u32::from(layout.tail_args_size + local_frame)
+        );
     }
 }

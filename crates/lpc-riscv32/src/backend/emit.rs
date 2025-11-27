@@ -38,7 +38,7 @@ impl CodeBuffer {
 
     /// Get the current instruction count.
     pub fn instruction_count(&self) -> InstOffset {
-        InstOffset(self.instructions.len())
+        InstOffset::from(self.instructions.len())
     }
 
     /// Set an instruction at a specific index (for fixup).
