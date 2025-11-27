@@ -116,6 +116,8 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                 (0x0, 0x0) => Ok(Inst::Add { rd, rs1, rs2 }),
                 (0x0, 0x20) => Ok(Inst::Sub { rd, rs1, rs2 }),
                 (0x0, 0x01) => Ok(Inst::Mul { rd, rs1, rs2 }),
+                (0x4, 0x01) => Ok(Inst::Div { rd, rs1, rs2 }),
+                (0x6, 0x01) => Ok(Inst::Rem { rd, rs1, rs2 }),
                 (0x2, 0x0) => Ok(Inst::Slt { rd, rs1, rs2 }),
                 (0x3, 0x0) => Ok(Inst::Sltu { rd, rs1, rs2 }),
                 _ => Err(format!(

@@ -121,6 +121,16 @@ pub fn mul(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
     encode_r(0x33, rd, rs1, rs2, 0x0, 0x01)
 }
 
+/// DIV: rd = rs1 / rs2 (signed, M extension)
+pub fn div(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x4, 0x01)
+}
+
+/// REM: rd = rs1 % rs2 (signed, M extension)
+pub fn rem(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x6, 0x01)
+}
+
 /// ADDI: rd = rs1 + imm
 pub fn addi(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
     encode_i(0x13, rd, rs1, imm, 0x0)

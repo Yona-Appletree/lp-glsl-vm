@@ -15,6 +15,10 @@ pub enum Inst {
     Sub { rd: Gpr, rs1: Gpr, rs2: Gpr },
     /// MUL: rd = rs1 * rs2 (M extension)
     Mul { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// DIV: rd = rs1 / rs2 (signed, M extension)
+    Div { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// REM: rd = rs1 % rs2 (signed, M extension)
+    Rem { rd: Gpr, rs1: Gpr, rs2: Gpr },
     /// ADDI: rd = rs1 + imm
     Addi { rd: Gpr, rs1: Gpr, imm: i32 },
 
@@ -71,6 +75,8 @@ impl Inst {
             Inst::Add { rd, rs1, rs2 } => add(*rd, *rs1, *rs2),
             Inst::Sub { rd, rs1, rs2 } => sub(*rd, *rs1, *rs2),
             Inst::Mul { rd, rs1, rs2 } => mul(*rd, *rs1, *rs2),
+            Inst::Div { rd, rs1, rs2 } => div(*rd, *rs1, *rs2),
+            Inst::Rem { rd, rs1, rs2 } => rem(*rd, *rs1, *rs2),
             Inst::Addi { rd, rs1, imm } => addi(*rd, *rs1, *imm),
             Inst::Lw { rd, rs1, imm } => lw(*rd, *rs1, *imm),
             Inst::Sw { rs1, rs2, imm } => sw(*rs1, *rs2, *imm),

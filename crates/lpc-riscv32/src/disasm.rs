@@ -49,6 +49,12 @@ fn disassemble_instruction_with_labels(
                 (0x0, 0x01) => {
                     format!("mul {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
                 }
+                (0x4, 0x01) => {
+                    format!("div {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+                }
+                (0x6, 0x01) => {
+                    format!("rem {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
+                }
                 (0x2, 0x0) => {
                     format!("slt {}, {}, {}", gpr_name(rd), gpr_name(rs1), gpr_name(rs2))
                 }

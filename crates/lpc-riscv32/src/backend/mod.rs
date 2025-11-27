@@ -2,7 +2,9 @@
 
 pub mod frame;
 pub mod abi;
+pub mod lower;
 
 // Re-export for convenience
 pub use frame::FrameLayout;
 pub use abi::Abi;
+pub use lower::Lowerer;

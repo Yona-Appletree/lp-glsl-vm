@@ -99,6 +99,61 @@ pub fn execute_instruction(
                 rd_new: result,
             }
         }
+        Inst::Div { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1);
+            let val2 = read_reg(regs, rs2);
+            let rd_old = read_reg(regs, rd);
+            // Handle division by zero: RISC-V specifies result is all 1s
+            let result = if val2 == 0 {
+                -1i32
+            } else if val1 == i32::MIN && val2 == -1 {
+                // Overflow case: -2^31 / -1 = 2^31, which overflows i32
+                // RISC-V specifies result is -2^31 in this case
+                i32::MIN
+            } else {
+                val1 / val2
+            };
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0, // Will be set by emu
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Rem { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1);
+            let val2 = read_reg(regs, rs2);
+            let rd_old = read_reg(regs, rd);
+            // Handle division by zero: RISC-V specifies result is dividend
+            let result = if val2 == 0 {
+                val1
+            } else if val1 == i32::MIN && val2 == -1 {
+                // Overflow case: remainder is 0
+                0i32
+            } else {
+                val1 % val2
+            };
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0, // Will be set by emu
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
+        }
         Inst::Addi { rd, rs1, imm } => {
             let val1 = read_reg(regs, rs1);
             let rd_old = read_reg(regs, rd);
