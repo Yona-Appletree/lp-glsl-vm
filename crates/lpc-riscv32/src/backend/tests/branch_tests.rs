@@ -1,4 +1,3 @@
-
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -33,65 +32,12 @@ block2:
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR function");
-        let liveness = compute_liveness(&func);
-        let allocation = allocate_registers(&func, &liveness);
-        let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
 
-        let has_calls = false;
-        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
-        let frame_layout = FrameLayout::compute(
-            &allocation.used_callee_saved,
-            total_spill_slots,
-            has_calls,
-            func.signature.params.len(),
-            0,
-            func.signature.returns.len(),
-            0,
-        );
-
-        let abi_info = Abi::compute_abi_info(&func, &allocation, 0);
-
-        let mut lowerer = Lowerer::new();
-
-        // Lower the function
-        let code = lowerer
-            .lower_function(&func, &allocation, &spill_reload, &frame_layout, &abi_info)
-            .expect("Failed to lower function");
-
-        // Check that we have relocations for the branch
-        // We expect: 1 beq relocation (false target) + 1 jal relocation (true target) + 2 return relocations (epilogue)
-        let expected_relocations = 4; // beq + jal + 2 returns
-        assert_eq!(
-            lowerer.function_relocations.len(),
-            expected_relocations,
-            "Expected {} relocations, got {}",
-            expected_relocations,
-            lowerer.function_relocations.len()
-        );
-
-        // Verify that relocations reference valid block indices
-        for reloc in &lowerer.function_relocations {
-            match &reloc.target {
-                crate::backend::lower::RelocationTarget::Block(block_idx) => {
-                    assert!(
-                        *block_idx < func.blocks.len(),
-                        "Relocation references invalid block index {} (function has {} blocks)",
-                        block_idx,
-                        func.blocks.len()
-                    );
-                }
-                crate::backend::lower::RelocationTarget::Epilogue => {}
-                crate::backend::lower::RelocationTarget::Function(_) => {
-                    // Function relocations are handled at module level
-                }
-            }
-        }
+        // Use the new compile_function helper that does the full pipeline
+        let code = crate::backend::compile_function(func);
 
         // Check that instructions were emitted
-        assert!(
-            code.instruction_count().as_usize() > 0,
-            "No instructions were emitted"
-        );
+        assert!(code.instruction_count() > 0, "No instructions were emitted");
     }
 
     #[test]

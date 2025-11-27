@@ -28,10 +28,36 @@ pub fn lower_store(lowerer: &mut Lowerer, address: Value, value: Value) {
 /// Lower a syscall instruction.
 pub fn lower_syscall(lowerer: &mut Lowerer, number: i32, args: &[Value]) {
     // Load syscall number into a7
-    // TODO: Handle large constants properly
-    lowerer
-        .inst_buffer_mut()
-        .push_addi(Gpr::A7, Gpr::Zero, number);
+    // Handle large constants using lui + addi if needed
+    if number >= -2048 && number <= 2047 {
+        // Fits in 12-bit signed immediate
+        lowerer
+            .inst_buffer_mut()
+            .push_addi(Gpr::A7, Gpr::Zero, number);
+    } else {
+        // Use lui + addi sequence (same approach as iconst)
+        let number_u32 = number as u32;
+        let upper = (number_u32 >> 12) & 0xfffff;
+        let lower = number_u32 & 0xfff;
+
+        // Sign-extend lower 12 bits if the upper bit is set
+        let lower_signed = if (lower & 0x800) != 0 {
+            // Sign-extend: set upper bits to 1
+            lower | 0xfffff000
+        } else {
+            lower
+        } as i32;
+
+        // Load upper 20 bits
+        lowerer.inst_buffer_mut().push_lui(Gpr::A7, upper);
+
+        // Add lower 12 bits (sign-extended)
+        if lower_signed != 0 {
+            lowerer
+                .inst_buffer_mut()
+                .push_addi(Gpr::A7, Gpr::A7, lower_signed);
+        }
+    }
 
     // Load arguments into a0-a6
     for (i, arg) in args.iter().take(7).enumerate() {

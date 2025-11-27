@@ -69,7 +69,13 @@ mod tests {
     use lpc_lpir::{Block, Function, Signature, Type};
 
     use super::*;
-    use crate::Gpr;
+    use crate::{
+        backend::{
+            abi::Abi, frame, frame::FrameLayout, liveness::compute_liveness,
+            regalloc::allocate_registers, spill_reload::create_spill_reload_plan,
+        },
+        Gpr,
+    };
 
     fn create_test_function() -> Function {
         let sig = Signature::new(alloc::vec![Type::I32], alloc::vec![Type::I32]);
@@ -79,10 +85,33 @@ mod tests {
         func
     }
 
+    fn create_test_lowerer(func: Function) -> Lowerer {
+        let liveness = compute_liveness(&func);
+        let allocation = allocate_registers(&func, &liveness);
+        let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
+        let abi = Abi::compute_abi_info(
+            func.signature.params.len(),
+            func.signature.returns.len(),
+            true,
+        );
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
+        let frame_layout = frame::compute_frame_layout(
+            &allocation.used_callee_saved,
+            frame::FunctionCalls::None,
+            0,
+            0,
+            total_spill_slots as u32,
+            0,
+            abi.stack_args_size,
+            false,
+        );
+        Lowerer::new(func, allocation, spill_reload, frame_layout, abi)
+    }
+
     #[test]
     fn test_lower_jump_records_relocation() {
         let func = create_test_function();
-        let mut lowerer = Lowerer::new(func);
+        let mut lowerer = create_test_lowerer(func);
 
         // Lower a jump instruction
         lower_jump(&mut lowerer, 0);
@@ -109,10 +138,7 @@ mod tests {
             value: 1,
         });
 
-        let mut lowerer = Lowerer::new(func);
-
-        // Allocate register for condition value
-        lowerer.get_reg_for_value(v0);
+        let mut lowerer = create_test_lowerer(func);
 
         // Lower a branch instruction
         lower_br(&mut lowerer, v0, 0, 1);
@@ -150,7 +176,13 @@ mod fixup_tests {
     use lpc_lpir::{Block, Function, Signature, Type};
 
     use super::*;
-    use crate::Gpr;
+    use crate::{
+        backend::{
+            abi::Abi, frame, frame::FrameLayout, liveness::compute_liveness,
+            regalloc::allocate_registers, spill_reload::create_spill_reload_plan,
+        },
+        Gpr,
+    };
 
     fn create_test_function() -> Function {
         let sig = Signature::new(alloc::vec![Type::I32], alloc::vec![Type::I32]);
@@ -160,10 +192,33 @@ mod fixup_tests {
         func
     }
 
+    fn create_test_lowerer(func: Function) -> Lowerer {
+        let liveness = compute_liveness(&func);
+        let allocation = allocate_registers(&func, &liveness);
+        let spill_reload = create_spill_reload_plan(&func, &allocation, &liveness);
+        let abi = Abi::compute_abi_info(
+            func.signature.params.len(),
+            func.signature.returns.len(),
+            true,
+        );
+        let total_spill_slots = allocation.spill_slot_count + spill_reload.max_temp_spill_slots;
+        let frame_layout = frame::compute_frame_layout(
+            &allocation.used_callee_saved,
+            frame::FunctionCalls::None,
+            0,
+            0,
+            total_spill_slots as u32,
+            0,
+            abi.stack_args_size,
+            false,
+        );
+        Lowerer::new(func, allocation, spill_reload, frame_layout, abi)
+    }
+
     #[test]
     fn test_fixup_forward_jump() {
         let func = create_test_function();
-        let mut lowerer = Lowerer::new(func);
+        let mut lowerer = create_test_lowerer(func);
 
         // Initialize block addresses
         lowerer.block_addresses.resize(2, 0);
@@ -208,7 +263,7 @@ mod fixup_tests {
     #[test]
     fn test_fixup_backward_jump() {
         let func = create_test_function();
-        let mut lowerer = Lowerer::new(func);
+        let mut lowerer = create_test_lowerer(func);
 
         lowerer.block_addresses.resize(2, 0);
         lowerer.block_addresses[0] = 0;
@@ -266,8 +321,7 @@ mod fixup_tests {
             value: 1,
         });
 
-        let mut lowerer = Lowerer::new(func);
-        lowerer.get_reg_for_value(v0);
+        let mut lowerer = create_test_lowerer(func);
 
         lowerer.block_addresses.resize(2, 0);
         lowerer.block_addresses[0] = 0;

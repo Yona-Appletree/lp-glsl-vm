@@ -13,7 +13,10 @@ use alloc::vec::Vec;
 use lpc_lpir::{Block, Function, Inst as IrInst, Value};
 
 use crate::{
-    backend::{abi::Abi, frame::FrameLayout},
+    backend::{
+        abi::Abi, frame::FrameLayout, liveness::InstPoint, regalloc::RegisterAllocation,
+        spill_reload::SpillReloadPlan,
+    },
     inst_buffer::InstBuffer,
     Gpr, Inst,
 };
@@ -49,18 +52,16 @@ pub(crate) enum BranchType {
 pub struct Lowerer {
     /// The function being lowered.
     function: Function,
+    /// Pre-computed register allocation.
+    allocation: RegisterAllocation,
+    /// Spill/reload plan.
+    spill_reload: SpillReloadPlan,
     /// Frame layout for this function.
     frame_layout: FrameLayout,
     /// ABI information for this function.
     abi: Abi,
     /// Instruction buffer for accumulating RISC-V instructions.
     inst_buffer: InstBuffer,
-    /// Mapping from IR values to registers.
-    /// For now, we use a simple mapping. Later this will be replaced
-    /// with proper register allocation.
-    value_to_reg: Vec<Option<Gpr>>,
-    /// Next available register for temporary values.
-    next_temp_reg: usize,
     /// Map from block index to instruction index where block starts
     #[cfg_attr(test, allow(dead_code))]
     block_addresses: Vec<usize>,
@@ -70,39 +71,21 @@ pub struct Lowerer {
 }
 
 impl Lowerer {
-    /// Create a new lowerer for the given function.
-    pub fn new(function: Function) -> Self {
-        let num_params = function.signature.params.len();
-        let num_returns = function.signature.returns.len();
-
-        // Compute ABI information
-        let abi = Abi::compute_abi_info(num_params, num_returns, true);
-
-        // For now, compute a simple frame layout
-        // TODO: Properly compute frame layout based on actual register usage
-        let frame_layout = crate::backend::frame::compute_frame_layout(
-            &[], // No clobbered registers yet
-            crate::backend::frame::FunctionCalls::None,
-            0,                            // incoming_args_size
-            0,                            // tail_args_size
-            0,                            // stackslots_size
-            0,                            // fixed_frame_storage_size
-            (abi.stack_args_size as u32), // outgoing_args_size
-            false,                        // preserve_frame_pointers
-        );
-
-        // Estimate number of values (params + some for temporaries)
-        let estimated_values = num_params + 100;
-        let mut value_to_reg = Vec::with_capacity(estimated_values);
-        value_to_reg.resize(estimated_values, None);
-
+    /// Create a new lowerer with pre-computed allocation and frame layout.
+    pub fn new(
+        function: Function,
+        allocation: RegisterAllocation,
+        spill_reload: SpillReloadPlan,
+        frame_layout: FrameLayout,
+        abi: Abi,
+    ) -> Self {
         Self {
             function,
+            allocation,
+            spill_reload,
             frame_layout,
             abi,
             inst_buffer: InstBuffer::new(),
-            value_to_reg,
-            next_temp_reg: 0,
             block_addresses: Vec::new(),
             relocations: Vec::new(),
         }
@@ -147,12 +130,74 @@ impl Lowerer {
         self.block_addresses[block_idx] = block_start;
 
         // Handle block parameters (phi nodes)
-        // For now, we'll just assign registers to them
-        // TODO: Proper phi node handling
+        // For now, simplified handling - assume values are already in correct registers
+        // TODO: Handle phi nodes properly with predecessor tracking
+
+        // Reload spilled values at block entry (if any)
+        if let Some(reloads) = self.spill_reload.block_boundary.get(&block_idx) {
+            let reloads = reloads.clone();
+            for reload_op in reloads {
+                if let crate::backend::spill_reload::SpillReloadOp::Reload {
+                    value: _,
+                    reg,
+                    slot,
+                } = reload_op
+                {
+                    // Reload value from stack slot to register
+                    // Spill slots are in fixed_frame_storage area, starting at outgoing_args_size from SP
+                    let slot_offset = (slot * 4) as i32; // Each slot is 4 bytes
+                    let base_offset = self.frame_layout.outgoing_args_size as i32;
+                    let total_offset = base_offset + slot_offset;
+                    self.inst_buffer_mut().push_lw(reg, Gpr::Sp, total_offset);
+                }
+            }
+        }
 
         // Lower all instructions in the block (branches will record relocations)
-        for inst in &block.insts {
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
+            let point = InstPoint {
+                block: block_idx,
+                inst: inst_idx + 1, // +1 because 0 is block entry
+            };
+
+            // Insert reloads before this instruction (if any)
+            if let Some(reloads) = self.spill_reload.before.get(&point) {
+                let reloads = reloads.clone();
+                for reload_op in reloads {
+                    if let crate::backend::spill_reload::SpillReloadOp::Reload {
+                        value: _,
+                        reg,
+                        slot,
+                    } = reload_op
+                    {
+                        let slot_offset = (slot * 4) as i32;
+                        let base_offset = self.frame_layout.outgoing_args_size as i32;
+                        let total_offset = base_offset + slot_offset;
+                        self.inst_buffer_mut().push_lw(reg, Gpr::Sp, total_offset);
+                    }
+                }
+            }
+
+            // Lower the instruction
             self.lower_inst(inst);
+
+            // Insert spills after this instruction (if any)
+            if let Some(spills) = self.spill_reload.after.get(&point) {
+                let spills = spills.clone();
+                for spill_op in spills {
+                    if let crate::backend::spill_reload::SpillReloadOp::Spill {
+                        value: _,
+                        reg,
+                        slot,
+                    } = spill_op
+                    {
+                        let slot_offset = (slot * 4) as i32;
+                        let base_offset = self.frame_layout.outgoing_args_size as i32;
+                        let total_offset = base_offset + slot_offset;
+                        self.inst_buffer_mut().push_sw(Gpr::Sp, reg, total_offset);
+                    }
+                }
+            }
         }
     }
 
@@ -256,47 +301,33 @@ impl Lowerer {
         &self.abi
     }
 
-    /// Get a register for a value, allocating one if needed.
+    /// Get a register for a value from pre-computed allocation.
     pub(crate) fn get_reg_for_value(&mut self, value: Value) -> Gpr {
-        let idx = value.index() as usize;
-
-        // Ensure we have enough space
-        if idx >= self.value_to_reg.len() {
-            self.value_to_reg.resize(idx + 1, None);
+        // Look up from pre-computed allocation
+        if let Some(reg) = self.allocation.value_to_reg.get(&value) {
+            return *reg;
         }
 
-        // If we already have a register, return it
-        if let Some(reg) = self.value_to_reg[idx] {
-            return reg;
-        }
-
-        // Allocate a new register
-        // For now, use temporary registers t0-t6 (x5-x7, x28-x31)
-        // TODO: Proper register allocation
-        let temp_regs = [
-            Gpr::T0,
-            Gpr::T1,
-            Gpr::T2,
-            Gpr::T3,
-            Gpr::T4,
-            Gpr::T5,
-            Gpr::T6,
-        ];
-
-        let reg = temp_regs[self.next_temp_reg % temp_regs.len()];
-        self.next_temp_reg += 1;
-
-        self.value_to_reg[idx] = Some(reg);
-        reg
+        // If spilled, we need to reload it - but this should have been handled
+        // by spill/reload planning. For now, panic.
+        panic!(
+            "Value {} not found in register allocation (may be spilled)",
+            value.index()
+        );
     }
 
     /// Get the register for a value, panicking if not allocated.
     pub(crate) fn get_reg_for_value_required(&self, value: Value) -> Gpr {
-        let idx = value.index() as usize;
-        self.value_to_reg
-            .get(idx)
-            .and_then(|r| *r)
-            .unwrap_or_else(|| panic!("Value {} has no register allocated", value.index()))
+        self.allocation
+            .value_to_reg
+            .get(&value)
+            .copied()
+            .unwrap_or_else(|| {
+                panic!(
+                    "Value {} has no register allocated (may be spilled)",
+                    value.index()
+                )
+            })
     }
 
     /// Record a relocation that needs to be fixed up.
