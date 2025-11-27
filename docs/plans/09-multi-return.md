@@ -104,3 +104,4 @@
 - Investigate whether we want to gate the extra SP adjustment on `has_calls || outgoing_args_size > incoming_args_size`; copying Cranelift exactly might be simplest.
 
 This plan keeps all stack arithmetic inside `FrameLayout`, aligns our ABI semantics with Cranelift, and provides a roadmap for fixing the current multi-return regressions without yet touching executable code.
+

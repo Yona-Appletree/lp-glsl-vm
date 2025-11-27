@@ -88,8 +88,8 @@ impl super::Lowerer {
                     self.load_value_into_reg(code, *arg, temp_reg, allocation, frame_layout)?;
 
                     // Store argument to stack at SP + offset.
-                    // The offset is (idx - 8) * 4, which matches what the callee expects.
-                    // Since the caller's SP equals the callee's SP, both use the same offset.
+                    // Outgoing args are stored above the local frame at: local_frame_size + (idx-8)*4
+                    // This places them where the callee expects them at SP + (idx-8)*4
                     let storage_offset = offset.as_i32();
                     crate::debug!(
                         "[CALL] Storing stack arg {} (value {:?}) at SP + {} (offset={})",
