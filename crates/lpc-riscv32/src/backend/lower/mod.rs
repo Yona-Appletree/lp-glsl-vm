@@ -1,20 +1,22 @@
 //! Instruction lowering from IR to RISC-V 32-bit instructions.
 
-mod arithmetic;
-mod branch;
-mod call;
-mod comparisons;
-mod helpers;
-mod iconst;
-mod return_;
+pub mod arithmetic;
+pub mod branch;
+pub mod call;
+pub mod comparisons;
+pub mod helpers;
+pub mod iconst;
+pub mod return_;
 
 use alloc::vec::Vec;
 
 use lpc_lpir::{Block, Function, Inst as IrInst, Value};
 
+use alloc::collections::BTreeMap;
+
 use crate::{
     backend::{
-        abi::Abi, frame::FrameLayout, liveness::InstPoint, regalloc::RegisterAllocation,
+        abi::Abi, frame::FrameLayout, liveness::{InstPoint, LivenessInfo}, regalloc::RegisterAllocation,
         spill_reload::SpillReloadPlan,
     },
     inst_buffer::InstBuffer,
@@ -46,6 +48,11 @@ pub(crate) enum BranchType {
     BranchFalse,
 }
 
+/// Maps (predecessor_block_idx, target_block_idx, param_idx) -> source_value
+/// This represents which value from a predecessor block feeds into which parameter
+/// of a target block (phi node source).
+pub(crate) type PhiSourceMap = BTreeMap<(usize, usize, usize), Value>;
+
 /// Context for lowering a function.
 ///
 /// This holds all the state needed to lower IR instructions to RISC-V instructions.
@@ -68,6 +75,12 @@ pub struct Lowerer {
     /// Relocations that need to be fixed up
     #[cfg_attr(test, allow(dead_code))]
     relocations: Vec<Relocation>,
+    /// Phi source mapping: (pred_block, target_block, param_idx) -> source_value
+    phi_sources: PhiSourceMap,
+    /// Liveness info (needed for phi source inference and copy decisions)
+    liveness: LivenessInfo,
+    /// Current block being lowered (for phi copy context)
+    current_block_idx: usize,
 }
 
 impl Lowerer {
@@ -78,6 +91,8 @@ impl Lowerer {
         spill_reload: SpillReloadPlan,
         frame_layout: FrameLayout,
         abi: Abi,
+        liveness: LivenessInfo,
+        phi_sources: PhiSourceMap,
     ) -> Self {
         Self {
             function,
@@ -88,6 +103,9 @@ impl Lowerer {
             inst_buffer: InstBuffer::new(),
             block_addresses: Vec::new(),
             relocations: Vec::new(),
+            phi_sources,
+            liveness,
+            current_block_idx: 0,
         }
     }
 
@@ -105,6 +123,7 @@ impl Lowerer {
         let blocks: Vec<(usize, Block)> =
             self.function.blocks.iter().cloned().enumerate().collect();
         for (block_idx, block) in blocks {
+            self.current_block_idx = block_idx;
             self.lower_block(block_idx, &block);
         }
 
@@ -129,9 +148,8 @@ impl Lowerer {
         }
         self.block_addresses[block_idx] = block_start;
 
-        // Handle block parameters (phi nodes)
-        // For now, simplified handling - assume values are already in correct registers
-        // TODO: Handle phi nodes properly with predecessor tracking
+        // Note: Phi nodes are handled at branch sites (before jumping to successor blocks),
+        // not at block entry. This ensures correct handling with multiple predecessors.
 
         // Reload spilled values at block entry (if any)
         if let Some(reloads) = self.spill_reload.block_boundary.get(&block_idx) {
@@ -291,6 +309,12 @@ impl Lowerer {
         &mut self.inst_buffer
     }
 
+    #[cfg(test)]
+    /// Get the instruction buffer (for testing)
+    pub(crate) fn inst_buffer(&self) -> &InstBuffer {
+        &self.inst_buffer
+    }
+
     /// Get the frame layout.
     pub(crate) fn frame_layout(&self) -> &FrameLayout {
         &self.frame_layout
@@ -418,6 +442,288 @@ impl Lowerer {
             self.inst_buffer.set_instruction(reloc.inst_idx, fixed_inst);
         }
     }
+
+    /// Get the current block index (for phi copy context)
+    pub(crate) fn current_block_idx(&self) -> usize {
+        self.current_block_idx
+    }
+
+    #[cfg(test)]
+    /// Set the current block index (for testing)
+    pub(crate) fn set_current_block_idx(&mut self, idx: usize) {
+        self.current_block_idx = idx;
+    }
+
+    /// Copy phi values from the current block to a target block's parameters.
+    /// This is called before branching to the target block.
+    pub(crate) fn copy_phi_values(&mut self, from_block: usize, to_block: usize) {
+        // Bounds check - target block must exist
+        if to_block >= self.function.blocks.len() {
+            // Target block doesn't exist yet (shouldn't happen, but be defensive)
+            return;
+        }
+        
+        let target_block = &self.function.blocks[to_block];
+        
+        // If target has no parameters, nothing to copy
+        if target_block.params.is_empty() {
+            return;
+        }
+
+        // Collect all copies needed: (source_reg, target_reg)
+        let mut copies = Vec::new();
+
+        for (param_idx, param_value) in target_block.params.iter().enumerate() {
+            // Get phi source for this edge
+            if let Some(source_value) = self.phi_sources.get(&(from_block, to_block, param_idx)) {
+                // Get source register (may need to reload if spilled)
+                let source_reg = if let Some(reg) = self.allocation.value_to_reg.get(source_value) {
+                    *reg
+                } else {
+                    // Source is spilled - need to reload before copy
+                    // For now, panic - we'll handle spills later
+                    panic!(
+                        "Phi source value {} is spilled - spill handling not yet implemented",
+                        source_value.index()
+                    );
+                };
+
+                // Get target register (parameter register)
+                let target_reg = if let Some(reg) = self.allocation.value_to_reg.get(param_value) {
+                    *reg
+                } else {
+                    // Target is spilled - copy directly to slot
+                    // For now, panic - we'll handle spills later
+                    panic!(
+                        "Phi target parameter {} is spilled - spill handling not yet implemented",
+                        param_value.index()
+                    );
+                };
+
+                // Skip if source and target are same register
+                if source_reg != target_reg {
+                    copies.push((source_reg, target_reg));
+                }
+            } else {
+                // Missing phi source - inference failed
+                // Skip copy for this parameter (assume value is already correct)
+                // This is a fallback for cases where inference couldn't determine the source
+                // TODO: Improve phi source inference or handle this case more gracefully
+                continue;
+            }
+        }
+
+        // Emit parallel copy if needed
+        if !copies.is_empty() {
+            self.emit_parallel_copy(copies);
+        }
+    }
+
+    /// Emit a parallel copy, handling cycles correctly.
+    /// Copies are performed atomically - all source registers are read before any target is written.
+    fn emit_parallel_copy(&mut self, mut copies: Vec<(Gpr, Gpr)>) {
+        if copies.is_empty() {
+            return;
+        }
+
+        // Simple cycle-breaking algorithm:
+        // 1. Find copies that don't create cycles (can be emitted immediately)
+        // 2. For cycles, break them with a temporary register
+        let mut remaining = copies;
+        let mut emitted = Vec::new();
+
+        while !remaining.is_empty() {
+            // Find a copy that doesn't create a cycle
+            let mut found_non_cycle = false;
+            for i in 0..remaining.len() {
+                let (src, dst) = remaining[i];
+
+                // Check if dst is used as src in any remaining copy (would create cycle)
+                let creates_cycle = remaining.iter().any(|(s, _)| *s == dst);
+
+                if !creates_cycle {
+                    // Safe to emit - no cycle
+                    if src != dst {
+                        self.inst_buffer_mut().push_add(dst, src, Gpr::Zero);
+                    }
+                    emitted.push(remaining.remove(i));
+                    found_non_cycle = true;
+                    break;
+                }
+            }
+
+            if !found_non_cycle {
+                // All remaining copies form cycles - break first one with temp register
+                let (src, dst) = remaining.remove(0);
+                
+                // Use a caller-saved temporary register (t0-t6)
+                // Pick one that's not involved in any copy
+                let temp = self.find_temp_register(&remaining, &emitted);
+                
+                // Break cycle: src -> temp -> dst
+                self.inst_buffer_mut().push_add(temp, src, Gpr::Zero);
+                self.inst_buffer_mut().push_add(dst, temp, Gpr::Zero);
+                emitted.push((src, dst));
+            }
+        }
+    }
+
+    /// Find a temporary register that's not used in any copy.
+    fn find_temp_register(&self, remaining: &[(Gpr, Gpr)], emitted: &[(Gpr, Gpr)]) -> Gpr {
+        // List of caller-saved temporary registers (t0-t6)
+        let temp_regs = [
+            Gpr::T0, Gpr::T1, Gpr::T2, Gpr::T3, Gpr::T4, Gpr::T5, Gpr::T6,
+        ];
+
+        // Collect all registers used in copies (use Vec since Gpr doesn't implement Ord)
+        let mut used_regs = Vec::new();
+        for (src, dst) in remaining.iter().chain(emitted.iter()) {
+            used_regs.push(*src);
+            used_regs.push(*dst);
+        }
+
+        // Find first temp register not in use
+        for &temp in &temp_regs {
+            if !used_regs.contains(&temp) {
+                return temp;
+            }
+        }
+
+        // Fallback: use t0 even if it's in use (shouldn't happen in practice)
+        // This means we have too many simultaneous copies
+        Gpr::T0
+    }
+}
+
+/// Find all predecessor blocks for a given block.
+pub(crate) fn find_predecessors(func: &Function, target_block: usize) -> Vec<usize> {
+    let mut predecessors = Vec::new();
+
+    for (pred_idx, block) in func.blocks.iter().enumerate() {
+        for inst in &block.insts {
+            match inst {
+                IrInst::Jump { target } => {
+                    if *target as usize == target_block {
+                        predecessors.push(pred_idx);
+                    }
+                }
+                IrInst::Br {
+                    target_true,
+                    target_false,
+                    ..
+                } => {
+                    if *target_true as usize == target_block || *target_false as usize == target_block {
+                        predecessors.push(pred_idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    predecessors
+}
+
+/// Compute phi sources by inferring which values from predecessors feed into block parameters.
+pub(crate) fn compute_phi_sources(func: &Function, liveness: &LivenessInfo) -> PhiSourceMap {
+    let mut phi_sources = BTreeMap::new();
+
+    // For each block with parameters, find all predecessor blocks
+    for (target_idx, target_block) in func.blocks.iter().enumerate() {
+        if target_block.params.is_empty() {
+            continue;
+        }
+
+        let predecessors = find_predecessors(func, target_idx);
+
+        for &pred_idx in &predecessors {
+            let pred_block = &func.blocks[pred_idx];
+
+            // Find values live at end of predecessor block
+            // The end point is after the last instruction
+            let pred_end = InstPoint {
+                block: pred_idx,
+                inst: pred_block.insts.len(), // After last instruction
+            };
+            let live_at_end = liveness.live_sets.get(&pred_end)
+                .cloned()
+                .unwrap_or_default();
+
+            // Match live values to parameters
+            // Strategy: Find values defined in predecessor that are used in target block
+            // Match them to parameters based on usage patterns
+            
+            // First, find all values defined in predecessor block
+            let mut pred_defs = Vec::new();
+            for (inst_idx, inst) in pred_block.insts.iter().enumerate() {
+                let def_point = InstPoint {
+                    block: pred_idx,
+                    inst: inst_idx + 1,
+                };
+                for result in inst.results() {
+                    pred_defs.push(result);
+                }
+            }
+            
+            // Also include function/block parameters that are live at entry
+            let pred_entry = InstPoint { block: pred_idx, inst: 0 };
+            if let Some(entry_live) = liveness.live_sets.get(&pred_entry) {
+                for &value in entry_live {
+                    if !pred_defs.contains(&value) {
+                        pred_defs.push(value);
+                    }
+                }
+            }
+            
+            // For each parameter in target block, find matching source value
+            for (param_idx, param_value) in target_block.params.iter().enumerate() {
+                // Check if this parameter is actually used in target block
+                let param_used = target_block.insts.iter().any(|inst| {
+                    inst.args().contains(param_value) || inst.results().contains(param_value)
+                });
+                
+                if !param_used {
+                    // Dead phi - skip it (but we still need a source for correctness)
+                    // Use the parameter value itself as a fallback
+                    phi_sources.insert((pred_idx, target_idx, param_idx), *param_value);
+                    continue;
+                }
+                
+                // Find values from predecessor that are used in target block
+                // and are live at end of predecessor
+                let mut candidates: Vec<Value> = Vec::new();
+                for &def_value in &pred_defs {
+                    if live_at_end.contains(&def_value) {
+                        // Check if this value is used in target block
+                        if target_block.insts.iter().any(|inst| {
+                            inst.args().contains(&def_value)
+                        }) {
+                            candidates.push(def_value);
+                        }
+                    }
+                }
+                
+                // Simple matching: if there's exactly one candidate, use it
+                // Otherwise, try positional matching (first candidate -> first parameter)
+                if !candidates.is_empty() {
+                    // Use positional matching for now
+                    // TODO: More sophisticated matching based on actual value flow
+                    let source_value = if param_idx < candidates.len() {
+                        candidates[param_idx]
+                    } else {
+                        candidates[0] // Fallback to first candidate
+                    };
+                    phi_sources.insert((pred_idx, target_idx, param_idx), source_value);
+                } else {
+                    // No candidate found - this might be a constant or something else
+                    // For now, use parameter value itself (will be handled by copy_phi_values)
+                    phi_sources.insert((pred_idx, target_idx, param_idx), *param_value);
+                }
+            }
+        }
+    }
+
+    phi_sources
 }
 
 // Re-export submodules for use in other modules

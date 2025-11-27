@@ -6,6 +6,7 @@ pub mod liveness;
 pub mod lower;
 pub mod regalloc;
 pub mod spill_reload;
+pub mod tests;
 
 // Re-export for convenience
 pub use abi::Abi;
@@ -62,7 +63,11 @@ pub fn compile_function(func: Function) -> InstBuffer {
         false,                    // preserve_frame_pointers
     );
 
-    // Step 5: Lower function to RISC-V instructions
-    let lowerer = Lowerer::new(func, allocation, spill_reload, frame_layout, abi);
+    // Step 5: Compute phi sources (needed for phi node handling)
+    use lower::compute_phi_sources;
+    let phi_sources = compute_phi_sources(&func, &liveness);
+
+    // Step 6: Lower function to RISC-V instructions
+    let lowerer = Lowerer::new(func, allocation, spill_reload, frame_layout, abi, liveness, phi_sources);
     lowerer.lower_function()
 }

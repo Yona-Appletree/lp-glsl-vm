@@ -5,6 +5,12 @@ use crate::Gpr;
 
 /// Lower JUMP: jump to target block
 pub fn lower_jump(lowerer: &mut Lowerer, target: u32) {
+    let current_block = lowerer.current_block_idx();
+    let target_block = target as usize;
+
+    // Copy phi values before jumping
+    lowerer.copy_phi_values(current_block, target_block);
+
     let inst_idx = lowerer.inst_buffer_mut().instruction_count();
 
     // Emit JAL with placeholder offset (0)
@@ -28,6 +34,13 @@ pub fn lower_br(
     target_true: u32,
     target_false: u32,
 ) {
+    let current_block = lowerer.current_block_idx();
+    let target_true_block = target_true as usize;
+    let target_false_block = target_false as usize;
+
+    // Copy phi values for true target (before conditional branch)
+    lowerer.copy_phi_values(current_block, target_true_block);
+
     let condition_reg = lowerer.get_reg_for_value_required(condition);
 
     // Emit conditional branch for true target
@@ -46,6 +59,9 @@ pub fn lower_br(
         target_block: target_true,
         branch_type: BranchType::BranchTrue,
     });
+
+    // Copy phi values for false target (before unconditional jump)
+    lowerer.copy_phi_values(current_block, target_false_block);
 
     // Handle false target
     // For now, always emit a jump (we can optimize fall-through later)
@@ -105,7 +121,17 @@ mod tests {
             abi.stack_args_size,
             false,
         );
-        Lowerer::new(func, allocation, spill_reload, frame_layout, abi)
+        use crate::backend::lower::compute_phi_sources;
+        let phi_sources = compute_phi_sources(&func, &liveness);
+        Lowerer::new(
+            func,
+            allocation,
+            spill_reload,
+            frame_layout,
+            abi,
+            liveness,
+            phi_sources,
+        )
     }
 
     #[test]
@@ -129,6 +155,9 @@ mod tests {
     #[test]
     fn test_lower_br_records_relocations() {
         let mut func = create_test_function();
+        // Add second block for false target
+        func.blocks.push(Block::new());
+
         let block0 = &mut func.blocks[0];
 
         // Add a constant value for the condition
@@ -212,7 +241,17 @@ mod fixup_tests {
             abi.stack_args_size,
             false,
         );
-        Lowerer::new(func, allocation, spill_reload, frame_layout, abi)
+        use crate::backend::lower::compute_phi_sources;
+        let phi_sources = compute_phi_sources(&func, &liveness);
+        Lowerer::new(
+            func,
+            allocation,
+            spill_reload,
+            frame_layout,
+            abi,
+            liveness,
+            phi_sources,
+        )
     }
 
     #[test]
