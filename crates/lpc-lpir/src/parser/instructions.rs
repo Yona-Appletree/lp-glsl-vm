@@ -426,6 +426,58 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_branch_mixed_args() {
+        // CLIF format: one target with args, one without (parentheses optional)
+        let input = "brif v0, block1, block2(v1)";
+        let result = parse_branch(input);
+        assert!(result.is_ok(), "parse_branch failed: {:?}", result);
+        let (_, inst) = result.unwrap();
+        if let Inst::Br {
+            condition,
+            target_true,
+            args_true,
+            target_false,
+            args_false,
+        } = inst
+        {
+            assert_eq!(condition.index(), 0);
+            assert_eq!(target_true, 1);
+            assert_eq!(args_true.len(), 0, "block1 should have no args");
+            assert_eq!(target_false, 2);
+            assert_eq!(args_false.len(), 1);
+            assert_eq!(args_false[0].index(), 1);
+        } else {
+            panic!("Expected Br");
+        }
+    }
+
+    #[test]
+    fn test_parse_branch_mixed_args_reverse() {
+        // CLIF format: one target with args, one without (reversed)
+        let input = "brif v0, block1(v1), block2";
+        let result = parse_branch(input);
+        assert!(result.is_ok(), "parse_branch failed: {:?}", result);
+        let (_, inst) = result.unwrap();
+        if let Inst::Br {
+            condition,
+            target_true,
+            args_true,
+            target_false,
+            args_false,
+        } = inst
+        {
+            assert_eq!(condition.index(), 0);
+            assert_eq!(target_true, 1);
+            assert_eq!(args_true.len(), 1);
+            assert_eq!(args_true[0].index(), 1);
+            assert_eq!(target_false, 2);
+            assert_eq!(args_false.len(), 0, "block2 should have no args");
+        } else {
+            panic!("Expected Br");
+        }
+    }
+
+    #[test]
     fn test_parse_call() {
         let input = "call %func(v0, v1) -> v2";
         let result = parse_call(input);

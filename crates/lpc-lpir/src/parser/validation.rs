@@ -574,6 +574,32 @@ block0:
     }
 
     #[test]
+    fn test_validate_branch_missing_args() {
+        // Test that branch to block with parameters but no args provided fails
+        let input = r#"function %test() -> i32 {
+block0:
+    v0 = iconst 1
+    brif v0, block1, block2
+
+block1:
+    v1 = iconst 42
+    return v1
+
+block2(v2: i32):
+    return v2
+}"#;
+        let result = parse_function(input.trim());
+        assert!(result.is_err(), "Branch with missing args should fail");
+        let err = result.unwrap_err();
+        assert!(
+            err.message.contains("expects 1 parameters")
+                && err.message.contains("0 arguments provided"),
+            "Error should mention missing arguments: {}",
+            err.message
+        );
+    }
+
+    #[test]
     fn test_validate_all_validations_pass() {
         // Test that valid IR passes all validations
         let input = r#"function %test(i32) -> i32 {

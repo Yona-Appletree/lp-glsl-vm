@@ -468,53 +468,79 @@ impl Lowerer {
             return;
         }
 
-        let target = &self.function.blocks[target_block];
+        // Extract target block params first to avoid borrow conflicts
+        let target_params: Vec<lpc_lpir::Value> = self.function.blocks[target_block]
+            .params
+            .iter()
+            .copied()
+            .collect();
 
         // If target has no parameters, nothing to copy
-        if target.params.is_empty() {
+        if target_params.is_empty() {
             return;
         }
 
         // Collect all copies needed: (source_reg, target_reg)
+        // Also track direct stores to spill slots: (source_reg, target_slot)
         let mut copies = Vec::new();
+        let mut direct_stores = Vec::new(); // (source_reg, target_slot)
+        let mut reloads_needed = Vec::new(); // (source_value, temp_reg) - reloads to emit
 
-        for (param_idx, param_value) in target.params.iter().enumerate() {
+        for (param_idx, param_value) in target_params.iter().enumerate() {
             // Get the corresponding arg value
             if let Some(&source_value) = args.get(param_idx) {
-                // Get source register (may need to reload if spilled)
+                // Handle source (may be spilled)
                 let source_reg = if let Some(reg) = self.allocation.value_to_reg.get(&source_value) {
+                    // Source is in a register
                     *reg
                 } else {
-                    // Source is spilled - need to reload before copy
-                    // For now, panic - we'll handle spills later
-                    panic!(
-                        "Phi source value {} is spilled - spill handling not yet implemented",
-                        source_value.index()
-                    );
+                    // Source is spilled - reload to a temporary register
+                    let slot = self.allocation.value_to_slot.get(&source_value)
+                        .expect("Spilled value must have a slot");
+                    
+                    // Reload to a temporary register
+                    // Use a caller-saved register as temp (t0-t6)
+                    let temp_reg = self.find_temp_register(&copies, &[]);
+                    
+                    // Record reload to emit later (after we're done borrowing)
+                    reloads_needed.push((*slot, temp_reg));
+                    
+                    temp_reg
                 };
 
-                // Get target register (parameter register)
-                let target_reg = if let Some(reg) = self.allocation.value_to_reg.get(param_value) {
-                    *reg
+                // Handle target (may be spilled)
+                if let Some(target_reg) = self.allocation.value_to_reg.get(param_value) {
+                    // Target is in a register - normal copy
+                    if source_reg != *target_reg {
+                        copies.push((source_reg, *target_reg));
+                    }
                 } else {
-                    // Target is spilled - copy directly to slot
-                    // For now, panic - we'll handle spills later
-                    panic!(
-                        "Phi target parameter {} is spilled - spill handling not yet implemented",
-                        param_value.index()
-                    );
-                };
-
-                // Skip if source and target are same register
-                if source_reg != target_reg {
-                    copies.push((source_reg, target_reg));
+                    // Target is spilled - store directly to slot
+                    let slot = self.allocation.value_to_slot.get(param_value)
+                        .expect("Spilled parameter must have a slot");
+                    direct_stores.push((source_reg, *slot));
                 }
             }
         }
 
-        // Emit parallel copy if needed
+        // Now emit reloads (we're done with immutable borrows)
+        let base_offset = self.frame_layout.outgoing_args_size as i32;
+        for (slot, temp_reg) in reloads_needed {
+            let slot_offset = (slot * 4) as i32;
+            let total_offset = base_offset + slot_offset;
+            self.inst_buffer_mut().push_lw(temp_reg, Gpr::Sp, total_offset);
+        }
+
+        // Emit parallel copy for register-to-register copies
         if !copies.is_empty() {
             self.emit_parallel_copy(copies);
+        }
+
+        // Emit direct stores to spill slots
+        for (source_reg, target_slot) in direct_stores {
+            let slot_offset = (target_slot * 4) as i32;
+            let total_offset = base_offset + slot_offset;
+            self.inst_buffer_mut().push_sw(Gpr::Sp, source_reg, total_offset);
         }
     }
 
@@ -586,7 +612,8 @@ impl Lowerer {
 
     /// Emit a parallel copy, handling cycles correctly.
     /// Copies are performed atomically - all source registers are read before any target is written.
-    fn emit_parallel_copy(&mut self, mut copies: Vec<(Gpr, Gpr)>) {
+    #[cfg(test)]
+    pub(crate) fn emit_parallel_copy(&mut self, mut copies: Vec<(Gpr, Gpr)>) {
         if copies.is_empty() {
             return;
         }
@@ -603,14 +630,19 @@ impl Lowerer {
             for i in 0..remaining.len() {
                 let (src, dst) = remaining[i];
 
+                // Skip no-ops immediately
+                if src == dst {
+                    remaining.remove(i);
+                    found_non_cycle = true;
+                    break;
+                }
+
                 // Check if dst is used as src in any remaining copy (would create cycle)
                 let creates_cycle = remaining.iter().any(|(s, _)| *s == dst);
 
                 if !creates_cycle {
                     // Safe to emit - no cycle
-                    if src != dst {
-                        self.inst_buffer_mut().push_add(dst, src, Gpr::Zero);
-                    }
+                    self.inst_buffer_mut().push_add(dst, src, Gpr::Zero);
                     emitted.push(remaining.remove(i));
                     found_non_cycle = true;
                     break;
