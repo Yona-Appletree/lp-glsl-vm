@@ -127,6 +127,29 @@ impl Lowerer {
         }
     }
 
+    /// Compute the maximum outgoing args size needed for any call in this function.
+    fn compute_max_outgoing_args_size(&self) -> u32 {
+        let mut max_size = 0u32;
+
+        for block in &self.function.blocks {
+            for inst in &block.insts {
+                if let lpc_lpir::Inst::Call { args, .. } = inst {
+                    let num_args = args.len();
+                    if num_args > 8 {
+                        // Compute stack args size
+                        let num_stack_args = num_args - 8;
+                        let stack_size = (num_stack_args as u32) * 4;
+                        // Align to 16 bytes
+                        let aligned_size = (stack_size + 15) & !15;
+                        max_size = max_size.max(aligned_size);
+                    }
+                }
+            }
+        }
+
+        max_size
+    }
+
     /// Lower the entire function to RISC-V instructions.
     /// Returns both the instruction buffer and call relocations.
     pub fn lower_function(mut self) -> (InstBuffer, Vec<CallRelocation>) {
@@ -394,6 +417,7 @@ impl Lowerer {
             .collect();
 
         for (param_idx, param_value, arg_loc) in param_info {
+            // Skip parameters that aren't allocated (they're unused)
             // Get where this parameter should be stored (from register allocation)
             if let Some(&target_reg) = self.allocation.value_to_reg.get(&param_value) {
                 // Parameter goes to a register
@@ -406,29 +430,54 @@ impl Lowerer {
                         }
                     }
                     ArgLoc::Stack { offset } => {
-                        // Load from stack (caller's frame)
-                        // Stack args are at positive offsets from caller's SP
-                        // After prologue_frame_setup, our SP is 8 bytes lower than caller's SP
-                        // So stack args are at SP + 8 + offset
-                        // But we can also use FP which points to our frame base
-                        // Actually, FP points to setup area, so stack args are at FP + 8 + offset
-                        // But simpler: use SP + (setup_area_size + offset)
+                        // Load from stack (caller's outgoing args area)
+                        // Stack args are stored by caller at SP+offset (relative to caller's SP after clobber save)
+                        // We load parameters AFTER prologue_frame_setup but BEFORE clobber_save
+                        // At this point: SP_callee = SP_caller - setup_area_size
+                        // So stack args are at: SP_callee + setup_area_size + offset
                         let actual_offset = self.frame_layout.setup_area_size as i32 + offset;
                         self.inst_buffer_mut()
                             .push_lw(target_reg, Gpr::Sp, actual_offset);
                     }
                 }
-            } else if let Some(_slot) = self.allocation.value_to_slot.get(&param_value) {
-                // Parameter is spilled - this is complex because we need to store after clobber_save
-                // For now, we'll handle this by loading to a temp and storing after clobber_save
-                // TODO: Implement proper handling of spilled parameters
-                // For now, panic to catch this case during development
-                panic!(
-                    "Spilled function parameters not yet fully implemented (param {} spilled to \
-                     slot {})",
-                    param_idx, _slot
-                );
+            } else if let Some(&slot) = self.allocation.value_to_slot.get(&param_value) {
+                // Parameter is spilled - load from stack arg to spill slot
+                // Use a temp register to load from stack, then store to spill slot
+                // Get frame layout values before mutable borrow
+                let setup_area_size = self.frame_layout.setup_area_size;
+                let outgoing_args_size = self.frame_layout.outgoing_args_size;
+                let clobber_size = self.frame_layout.clobber_size;
+                let fixed_frame_storage_size = self.frame_layout.fixed_frame_storage_size;
+
+                let temp_reg = Gpr::T0;
+                match arg_loc {
+                    ArgLoc::Register(src_reg) => {
+                        // Copy from argument register to temp
+                        self.inst_buffer_mut()
+                            .push_add(temp_reg, src_reg, Gpr::Zero);
+                    }
+                    ArgLoc::Stack { offset } => {
+                        // Load from stack to temp
+                        // Same calculation as above - only setup_area_size has been applied
+                        let actual_offset = setup_area_size as i32 + offset;
+                        self.inst_buffer_mut()
+                            .push_lw(temp_reg, Gpr::Sp, actual_offset);
+                    }
+                }
+                // Store temp to spill slot
+                // Spill slots are in fixed_frame_storage area, which is after outgoing_args_size
+                // After clobber save, SP points to bottom of outgoing args
+                // So spill slots are at SP + outgoing_args_size + slot_offset
+                // But we're before clobber save, so SP is higher by (clobber_size + fixed_frame_storage_size + outgoing_args_size)
+                // So we need to add that adjustment
+                let slot_offset = (slot * 4) as i32;
+                let base_offset = outgoing_args_size as i32;
+                let sp_adjustment = clobber_size + fixed_frame_storage_size;
+                let adjusted_offset = base_offset + slot_offset + sp_adjustment as i32;
+                self.inst_buffer_mut()
+                    .push_sw(Gpr::Sp, temp_reg, adjusted_offset);
             }
+            // If parameter is not allocated, it's unused - skip loading it
         }
     }
 
@@ -447,18 +496,61 @@ impl Lowerer {
         );
     }
 
-    /// Get the register for a value, panicking if not allocated.
-    pub(crate) fn get_reg_for_value_required(&self, value: Value) -> Gpr {
-        self.allocation
-            .value_to_reg
-            .get(&value)
-            .copied()
-            .unwrap_or_else(|| {
-                panic!(
-                    "Value {} has no register allocated (may be spilled)",
-                    value.index()
-                )
-            })
+    /// Get the register for a value, loading from stack if it's an unallocated parameter.
+    pub(crate) fn get_reg_for_value_required(&mut self, value: Value) -> Gpr {
+        // First check if it's allocated to a register
+        if let Some(reg) = self.allocation.value_to_reg.get(&value) {
+            return *reg;
+        }
+
+        // Check if it's a parameter that wasn't allocated (shouldn't happen, but handle it)
+        let entry_block_params = &self.function.blocks[0].params;
+        if let Some(param_idx) = entry_block_params.iter().position(|&p| p == value) {
+            // This is a parameter - load it from stack/register on-demand
+            let num_params = entry_block_params.len();
+            let has_return_area = self.abi.uses_return_area;
+            let arg_locs = Abi::compute_arg_locs(num_params, has_return_area);
+            let arg_loc = &arg_locs[param_idx];
+
+            // Use a temporary register to load the parameter
+            let temp_reg = Gpr::T0;
+            match arg_loc {
+                ArgLoc::Register(src_reg) => {
+                    // Copy from argument register to temp
+                    self.inst_buffer_mut()
+                        .push_add(temp_reg, *src_reg, Gpr::Zero);
+                }
+                ArgLoc::Stack { offset } => {
+                    // Load from stack to temp
+                    // Stack args are stored by caller at SP+offset (relative to caller's SP after clobber save)
+                    // At function entry, FP points to our setup area (SP after prologue_frame_setup)
+                    // Caller's SP = FP + setup_area_size
+                    // But wait, stack args are at caller's SP + offset, where caller's SP is before our prologue
+                    // Actually, when we enter, caller's SP is still valid (it hasn't changed)
+                    // Our prologue adjusts SP by -setup_area_size, so caller's SP = our SP + setup_area_size
+                    // After clobber_save, our SP is further adjusted, so caller's SP = our SP + setup_area_size + (clobber_size + fixed_frame_storage_size + outgoing_args_size)
+                    // But actually, we should use FP to access stack args
+                    // FP points to setup area, which is at SP_caller - setup_area_size
+                    // So SP_caller = FP + setup_area_size
+                    // Stack args are at SP_caller + offset = FP + setup_area_size + offset
+                    // But wait, FP is set to SP after prologue, so FP = SP_caller - setup_area_size
+                    // So SP_caller = FP + setup_area_size
+                    // Stack args are at SP_caller + offset = FP + setup_area_size + offset
+                    // But after clobber_save, FP still points to the same place (setup area)
+                    // So we can use FP + setup_area_size + offset to access stack args
+                    let actual_offset = self.frame_layout.setup_area_size as i32 + offset;
+                    self.inst_buffer_mut()
+                        .push_lw(temp_reg, Gpr::S0, actual_offset); // Use FP (s0) instead of SP
+                }
+            }
+            return temp_reg;
+        }
+
+        // Not a parameter and not allocated - this is an error
+        panic!(
+            "Value {} has no register allocated (may be spilled)",
+            value.index()
+        )
     }
 
     /// Record a relocation that needs to be fixed up.

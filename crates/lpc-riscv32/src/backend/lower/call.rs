@@ -22,10 +22,8 @@ pub fn lower_call(lowerer: &mut Lowerer, callee: &str, args: &[Value], results: 
     let arg_regs: Vec<(usize, Gpr)> = args
         .iter()
         .enumerate()
+        .take(8) // Only first 8 args go in registers
         .map(|(i, arg_value)| {
-            if i >= 8 {
-                panic!("Stack args not yet implemented (arg index {})", i);
-            }
             let src_reg = lowerer
                 .allocation
                 .value_to_reg
@@ -56,6 +54,40 @@ pub fn lower_call(lowerer: &mut Lowerer, callee: &str, args: &[Value], results: 
                 .inst_buffer_mut()
                 .push_add(target_reg, src_reg, Gpr::Zero);
         }
+    }
+
+    // Step 1b: Store stack arguments (args[8..])
+    // Stack args go in the outgoing args area, which is at the bottom of the frame
+    // The offset is relative to SP after clobber save (SP points to bottom of outgoing args)
+    for (i, arg_value) in args.iter().enumerate().skip(8) {
+        // Get source register or handle spilled value
+        let src_reg = if let Some(reg) = lowerer.allocation.value_to_reg.get(arg_value) {
+            *reg
+        } else if let Some(slot) = lowerer.allocation.value_to_slot.get(arg_value) {
+            // Value is spilled - reload it to a temp register first
+            let temp_reg = Gpr::T0;
+            let slot_offset = (*slot * 4) as i32;
+            let base_offset = lowerer.frame_layout.outgoing_args_size as i32;
+            let total_offset = base_offset + slot_offset;
+            lowerer
+                .inst_buffer_mut()
+                .push_lw(temp_reg, Gpr::Sp, total_offset);
+            temp_reg
+        } else {
+            panic!(
+                "Argument value {} not allocated to register or slot",
+                arg_value.index()
+            );
+        };
+
+        // Compute stack offset (in outgoing args area)
+        // Stack args start at offset 0 in the outgoing args area
+        let stack_idx = i - 8;
+        let offset = (stack_idx * 4) as i32;
+
+        // Store to outgoing args area (at SP + offset)
+        // SP already points to the bottom of outgoing args area after clobber save
+        lowerer.inst_buffer_mut().push_sw(Gpr::Sp, src_reg, offset);
     }
 
     // Step 2: Emit call instruction
