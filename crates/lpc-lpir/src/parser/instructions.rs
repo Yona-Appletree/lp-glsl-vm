@@ -102,7 +102,19 @@ pub(crate) fn parse_const(input: &str) -> IResult<&str, Inst> {
 pub(crate) fn parse_jump(input: &str) -> IResult<&str, Inst> {
     let (input, _) = terminated(tag("jump"), blank)(input)?;
     let (input, target) = terminated(parse_block_index, blank)(input)?;
-    Ok((input, Inst::Jump { target }))
+    // Parse optional args in parentheses: (v1, v2, ...)
+    let (input, args) = opt(delimited(
+        terminated(char('('), blank),
+        separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
+        terminated(char(')'), blank),
+    ))(input)?;
+    Ok((
+        input,
+        Inst::Jump {
+            target,
+            args: args.unwrap_or_default(),
+        },
+    ))
 }
 
 /// Parse a branch instruction (brif)
@@ -111,14 +123,28 @@ pub(crate) fn parse_branch(input: &str) -> IResult<&str, Inst> {
     let (input, condition) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(char(','), blank)(input)?;
     let (input, target_true) = terminated(parse_block_index, blank)(input)?;
+    // Parse optional args for true target: (v1, v2, ...)
+    let (input, args_true) = opt(delimited(
+        terminated(char('('), blank),
+        separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
+        terminated(char(')'), blank),
+    ))(input)?;
     let (input, _) = terminated(char(','), blank)(input)?;
     let (input, target_false) = terminated(parse_block_index, blank)(input)?;
+    // Parse optional args for false target: (v1, v2, ...)
+    let (input, args_false) = opt(delimited(
+        terminated(char('('), blank),
+        separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
+        terminated(char(')'), blank),
+    ))(input)?;
     Ok((
         input,
         Inst::Br {
             condition,
             target_true,
+            args_true: args_true.unwrap_or_default(),
             target_false,
+            args_false: args_false.unwrap_or_default(),
         },
     ))
 }
@@ -326,8 +352,25 @@ mod tests {
         let result = parse_jump(input);
         assert!(result.is_ok(), "parse_jump failed: {:?}", result);
         let (_, inst) = result.unwrap();
-        if let Inst::Jump { target } = inst {
+        if let Inst::Jump { target, args } = inst {
             assert_eq!(target, 1);
+            assert_eq!(args.len(), 0);
+        } else {
+            panic!("Expected Jump");
+        }
+    }
+
+    #[test]
+    fn test_parse_jump_with_args() {
+        let input = "jump block3(v1, v2)";
+        let result = parse_jump(input);
+        assert!(result.is_ok(), "parse_jump failed: {:?}", result);
+        let (_, inst) = result.unwrap();
+        if let Inst::Jump { target, args } = inst {
+            assert_eq!(target, 3);
+            assert_eq!(args.len(), 2);
+            assert_eq!(args[0].index(), 1);
+            assert_eq!(args[1].index(), 2);
         } else {
             panic!("Expected Jump");
         }
@@ -341,12 +384,42 @@ mod tests {
         let (_, inst) = result.unwrap();
         if let Inst::Br {
             target_true,
+            args_true,
             target_false,
+            args_false,
             ..
         } = inst
         {
             assert_eq!(target_true, 1);
+            assert_eq!(args_true.len(), 0);
             assert_eq!(target_false, 2);
+            assert_eq!(args_false.len(), 0);
+        } else {
+            panic!("Expected Br");
+        }
+    }
+
+    #[test]
+    fn test_parse_branch_with_args() {
+        let input = "brif v0, block1(v1), block2(v2)";
+        let result = parse_branch(input);
+        assert!(result.is_ok(), "parse_branch failed: {:?}", result);
+        let (_, inst) = result.unwrap();
+        if let Inst::Br {
+            condition,
+            target_true,
+            args_true,
+            target_false,
+            args_false,
+        } = inst
+        {
+            assert_eq!(condition.index(), 0);
+            assert_eq!(target_true, 1);
+            assert_eq!(args_true.len(), 1);
+            assert_eq!(args_true[0].index(), 1);
+            assert_eq!(target_false, 2);
+            assert_eq!(args_false.len(), 1);
+            assert_eq!(args_false[0].index(), 2);
         } else {
             panic!("Expected Br");
         }

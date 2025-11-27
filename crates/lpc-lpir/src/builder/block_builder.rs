@@ -111,18 +111,28 @@ impl<'a> BlockBuilder<'a> {
     // Control flow instructions
 
     /// Jump to target block.
-    pub fn jump(&mut self, target: usize) {
+    pub fn jump(&mut self, target: usize, args: &[Value]) {
         self.push_inst(Inst::Jump {
             target: target as u32,
+            args: args.to_vec(),
         });
     }
 
     /// Conditional branch: if condition, jump to target_true, else target_false
-    pub fn br(&mut self, condition: Value, target_true: usize, target_false: usize) {
+    pub fn br(
+        &mut self,
+        condition: Value,
+        target_true: usize,
+        args_true: &[Value],
+        target_false: usize,
+        args_false: &[Value],
+    ) {
         self.push_inst(Inst::Br {
             condition,
             target_true: target_true as u32,
+            args_true: args_true.to_vec(),
             target_false: target_false as u32,
+            args_false: args_false.to_vec(),
         });
     }
 

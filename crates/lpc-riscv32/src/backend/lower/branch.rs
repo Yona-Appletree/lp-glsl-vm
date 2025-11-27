@@ -4,12 +4,11 @@ use super::{BranchType, Lowerer, Relocation};
 use crate::Gpr;
 
 /// Lower JUMP: jump to target block
-pub fn lower_jump(lowerer: &mut Lowerer, target: u32) {
-    let current_block = lowerer.current_block_idx();
+pub fn lower_jump(lowerer: &mut Lowerer, target: u32, args: &[lpc_lpir::Value]) {
     let target_block = target as usize;
 
-    // Copy phi values before jumping
-    lowerer.copy_phi_values(current_block, target_block);
+    // Copy explicit args to target block parameters
+    lowerer.copy_args_to_params(args, target_block);
 
     let inst_idx = lowerer.inst_buffer_mut().instruction_count();
 
@@ -32,14 +31,15 @@ pub fn lower_br(
     lowerer: &mut Lowerer,
     condition: lpc_lpir::Value,
     target_true: u32,
+    args_true: &[lpc_lpir::Value],
     target_false: u32,
+    args_false: &[lpc_lpir::Value],
 ) {
-    let current_block = lowerer.current_block_idx();
     let target_true_block = target_true as usize;
     let target_false_block = target_false as usize;
 
-    // Copy phi values for true target (before conditional branch)
-    lowerer.copy_phi_values(current_block, target_true_block);
+    // Copy explicit args for true target (before conditional branch)
+    lowerer.copy_args_to_params(args_true, target_true_block);
 
     let condition_reg = lowerer.get_reg_for_value_required(condition);
 
@@ -60,8 +60,8 @@ pub fn lower_br(
         branch_type: BranchType::BranchTrue,
     });
 
-    // Copy phi values for false target (before unconditional jump)
-    lowerer.copy_phi_values(current_block, target_false_block);
+    // Copy explicit args for false target (before unconditional jump)
+    lowerer.copy_args_to_params(args_false, target_false_block);
 
     // Handle false target
     // For now, always emit a jump (we can optimize fall-through later)
@@ -140,7 +140,7 @@ mod tests {
         let mut lowerer = create_test_lowerer(func);
 
         // Lower a jump instruction
-        lower_jump(&mut lowerer, 0);
+        lower_jump(&mut lowerer, 0, &[]);
 
         // Check that relocation was recorded
         assert_eq!(lowerer.relocations().len(), 1);
@@ -170,7 +170,7 @@ mod tests {
         let mut lowerer = create_test_lowerer(func);
 
         // Lower a branch instruction
-        lower_br(&mut lowerer, v0, 0, 1);
+        lower_br(&mut lowerer, v0, 0, &[], 1, &[]);
 
         // Check that two relocations were recorded (true and false targets)
         assert_eq!(lowerer.relocations().len(), 2);
@@ -367,7 +367,7 @@ mod fixup_tests {
         lowerer.block_addresses[1] = 10;
 
         // Lower a branch
-        lower_br(&mut lowerer, v0, 1, 0);
+        lower_br(&mut lowerer, v0, 1, &[], 0, &[]);
 
         // Fix up relocations
         lowerer.fixup_relocations();

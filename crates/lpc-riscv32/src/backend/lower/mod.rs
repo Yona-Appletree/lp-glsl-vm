@@ -258,15 +258,17 @@ impl Lowerer {
             IrInst::Iconst { result, value } => {
                 iconst::lower_iconst(self, *result, *value);
             }
-            IrInst::Jump { target } => {
-                branch::lower_jump(self, *target);
+            IrInst::Jump { target, args } => {
+                branch::lower_jump(self, *target, args);
             }
             IrInst::Br {
                 condition,
                 target_true,
+                args_true,
                 target_false,
+                args_false,
             } => {
-                branch::lower_br(self, *condition, *target_true, *target_false);
+                branch::lower_br(self, *condition, *target_true, args_true, *target_false, args_false);
             }
             IrInst::Call {
                 callee,
@@ -454,8 +456,71 @@ impl Lowerer {
         self.current_block_idx = idx;
     }
 
+    /// Copy explicit args to target block's parameters.
+    /// This is called before branching to the target block.
+    pub(crate) fn copy_args_to_params(
+        &mut self,
+        args: &[lpc_lpir::Value],
+        target_block: usize,
+    ) {
+        // Bounds check - target block must exist
+        if target_block >= self.function.blocks.len() {
+            return;
+        }
+
+        let target = &self.function.blocks[target_block];
+
+        // If target has no parameters, nothing to copy
+        if target.params.is_empty() {
+            return;
+        }
+
+        // Collect all copies needed: (source_reg, target_reg)
+        let mut copies = Vec::new();
+
+        for (param_idx, param_value) in target.params.iter().enumerate() {
+            // Get the corresponding arg value
+            if let Some(&source_value) = args.get(param_idx) {
+                // Get source register (may need to reload if spilled)
+                let source_reg = if let Some(reg) = self.allocation.value_to_reg.get(&source_value) {
+                    *reg
+                } else {
+                    // Source is spilled - need to reload before copy
+                    // For now, panic - we'll handle spills later
+                    panic!(
+                        "Phi source value {} is spilled - spill handling not yet implemented",
+                        source_value.index()
+                    );
+                };
+
+                // Get target register (parameter register)
+                let target_reg = if let Some(reg) = self.allocation.value_to_reg.get(param_value) {
+                    *reg
+                } else {
+                    // Target is spilled - copy directly to slot
+                    // For now, panic - we'll handle spills later
+                    panic!(
+                        "Phi target parameter {} is spilled - spill handling not yet implemented",
+                        param_value.index()
+                    );
+                };
+
+                // Skip if source and target are same register
+                if source_reg != target_reg {
+                    copies.push((source_reg, target_reg));
+                }
+            }
+        }
+
+        // Emit parallel copy if needed
+        if !copies.is_empty() {
+            self.emit_parallel_copy(copies);
+        }
+    }
+
     /// Copy phi values from the current block to a target block's parameters.
     /// This is called before branching to the target block.
+    /// DEPRECATED: Use copy_args_to_params with explicit args instead.
     pub(crate) fn copy_phi_values(&mut self, from_block: usize, to_block: usize) {
         // Bounds check - target block must exist
         if to_block >= self.function.blocks.len() {
@@ -602,7 +667,7 @@ pub(crate) fn find_predecessors(func: &Function, target_block: usize) -> Vec<usi
     for (pred_idx, block) in func.blocks.iter().enumerate() {
         for inst in &block.insts {
             match inst {
-                IrInst::Jump { target } => {
+                IrInst::Jump { target, .. } => {
                     if *target as usize == target_block {
                         predecessors.push(pred_idx);
                     }

@@ -87,12 +87,20 @@ pub enum Inst {
 
     // Control flow
     /// Jump to block
-    Jump { target: u32 },
+    Jump {
+        target: u32,
+        /// Values passed to target block parameters
+        args: Vec<Value>,
+    },
     /// Conditional branch: if condition, jump to target_true, else target_false
     Br {
         condition: Value,
         target_true: u32,
+        /// Values passed to target_true block parameters
+        args_true: Vec<Value>,
         target_false: u32,
+        /// Values passed to target_false block parameters
+        args_false: Vec<Value>,
     },
     /// Function call: results = callee(args...)
     Call {
@@ -169,10 +177,19 @@ impl Inst {
             | Inst::IcmpLe { arg1, arg2, .. }
             | Inst::IcmpGt { arg1, arg2, .. }
             | Inst::IcmpGe { arg1, arg2, .. } => vec![*arg1, *arg2],
-            Inst::Iconst { .. } | Inst::Fconst { .. } | Inst::Jump { .. } | Inst::Halt => {
-                Vec::new()
+            Inst::Iconst { .. } | Inst::Fconst { .. } | Inst::Halt => Vec::new(),
+            Inst::Jump { args, .. } => args.clone(),
+            Inst::Br {
+                condition,
+                args_true,
+                args_false,
+                ..
+            } => {
+                let mut all_args = vec![*condition];
+                all_args.extend(args_true);
+                all_args.extend(args_false);
+                all_args
             }
-            Inst::Br { condition, .. } => vec![*condition],
             Inst::Call { args, .. } => args.clone(),
             Inst::Syscall { args, .. } => args.clone(),
             Inst::Return { values } => values.clone(),
@@ -292,21 +309,50 @@ impl fmt::Display for Inst {
                 let f64_value = f64::from_bits(*value_bits);
                 write!(f, "v{} = fconst {}", result.index(), f64_value)
             }
-            Inst::Jump { target } => {
-                write!(f, "jump block{}", target)
+            Inst::Jump { target, args } => {
+                write!(f, "jump block{}", target)?;
+                if !args.is_empty() {
+                    write!(f, "(")?;
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "v{}", arg.index())?;
+                    }
+                    write!(f, ")")?;
+                }
+                Ok(())
             }
             Inst::Br {
                 condition,
                 target_true,
+                args_true,
                 target_false,
+                args_false,
             } => {
-                write!(
-                    f,
-                    "brif v{}, block{}, block{}",
-                    condition.index(),
-                    target_true,
-                    target_false
-                )
+                write!(f, "brif v{}, block{}", condition.index(), target_true)?;
+                if !args_true.is_empty() {
+                    write!(f, "(")?;
+                    for (i, arg) in args_true.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "v{}", arg.index())?;
+                    }
+                    write!(f, ")")?;
+                }
+                write!(f, ", block{}", target_false)?;
+                if !args_false.is_empty() {
+                    write!(f, "(")?;
+                    for (i, arg) in args_false.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "v{}", arg.index())?;
+                    }
+                    write!(f, ")")?;
+                }
+                Ok(())
             }
             Inst::Call {
                 callee,

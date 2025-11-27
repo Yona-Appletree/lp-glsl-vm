@@ -30,7 +30,7 @@ mod tests {
 function %test() -> i32 {
 block0:
     v1 = iconst 42
-    jump block1
+    jump block1(v1)
 
 block1(v2: i32):
     return v2
@@ -56,11 +56,11 @@ block0(v0: i32):
 
 block1:
     v1 = iconst 10
-    jump block3
+    jump block3(v1)
 
 block2:
     v2 = iconst 20
-    jump block3
+    jump block3(v2)
 
 block3(v3: i32):
     return v3
@@ -170,7 +170,7 @@ block3:
 function %test() -> i32 {
 block0:
     v1 = iconst 42
-    jump block1
+    jump block1(v1)
 
 block1(v2: i32):
     return v2
@@ -258,7 +258,7 @@ block1:
 function %test() -> i32 {
 block0:
     v1 = iconst 42
-    jump block1
+    jump block1(v1)
 
 block1(v2: i32):
     return v2
@@ -295,7 +295,8 @@ block1(v2: i32):
             lowerer.set_current_block_idx(0);
 
             // Lower jump - should copy phi values before jumping
-            lower_jump(&mut lowerer, 1);
+            let v1 = lpc_lpir::Value::new(1);
+            lower_jump(&mut lowerer, 1, &[v1]);
 
             // Should have at least 2 instructions: copy + jump
             let insts = lowerer.inst_buffer().instructions();
@@ -346,7 +347,7 @@ block1:
             );
 
             lowerer.set_current_block_idx(0);
-            lower_jump(&mut lowerer, 1);
+            lower_jump(&mut lowerer, 1, &[]);
 
             // Should have exactly 1 instruction (just the jump, no copies)
             let insts = lowerer.inst_buffer().instructions();
@@ -364,11 +365,11 @@ block0(v0: i32):
 
 block1:
     v1 = iconst 10
-    jump block3
+    jump block3(v1)
 
 block2:
     v2 = iconst 20
-    jump block3
+    jump block3(v2)
 
 block3(v3: i32):
     return v3
@@ -403,7 +404,7 @@ block3(v3: i32):
 
             lowerer.set_current_block_idx(0);
             let v0 = lpc_lpir::Value::new(0);
-            lower_br(&mut lowerer, v0, 1, 2);
+            lower_br(&mut lowerer, v0, 1, &[], 2, &[]);
 
             // Should have instructions: copy for block1, branch, copy for block2, jump
             let insts = lowerer.inst_buffer().instructions();
@@ -440,7 +441,7 @@ block0:
     v17 = iconst 16
     v18 = iconst 17
     v19 = iconst 18
-    jump block1
+    jump block1(v1)
 
 block1(v20: i32):
     return v20
@@ -513,11 +514,11 @@ block1(v20: i32):
 function %test(i32) -> i32 {
 block0(v0: i32):
     v1 = iconst 0
-    jump block1
+    jump block1(v1)
 
 block1(v2: i32):  // i = phi(0 from block0, v3 from block1)
     v3 = iadd v2, v0
-    brif v3, block1, block2
+    brif v3, block1(v3), block2
 
 block2:
     return v2
@@ -542,11 +543,11 @@ block0(v0: i32):
 
 block1:
     v1 = iconst 10
-    jump block3
+    jump block3(v1)
 
 block2:
     v2 = iconst 20
-    jump block3
+    jump block3(v2)
 
 block3(v3: i32):  // v3 = phi(v1 from block1, v2 from block2)
     return v3
@@ -579,11 +580,11 @@ block0(v0: i32):
 
 block1:
     v1 = iconst 10
-    jump block3
+    jump block3(v1)
 
 block2:
     v2 = iconst 20
-    jump block3
+    jump block3(v2)
 
 block3(v3: i32):
     return v3
