@@ -689,8 +689,11 @@ pub(crate) fn find_predecessors(func: &Function, target_block: usize) -> Vec<usi
     predecessors
 }
 
-/// Compute phi sources by inferring which values from predecessors feed into block parameters.
-pub(crate) fn compute_phi_sources(func: &Function, liveness: &LivenessInfo) -> PhiSourceMap {
+/// Compute phi sources by reading explicit arguments from Jump/Br instructions.
+/// 
+/// With explicit SSA, values passed to block parameters are explicitly specified
+/// in Jump/Br instruction arguments, so we can directly read them instead of inferring.
+pub(crate) fn compute_phi_sources(func: &Function, _liveness: &LivenessInfo) -> PhiSourceMap {
     let mut phi_sources = BTreeMap::new();
 
     // For each block with parameters, find all predecessor blocks
@@ -703,86 +706,51 @@ pub(crate) fn compute_phi_sources(func: &Function, liveness: &LivenessInfo) -> P
 
         for &pred_idx in &predecessors {
             let pred_block = &func.blocks[pred_idx];
-
-            // Find values live at end of predecessor block
-            // The end point is after the last instruction
-            let pred_end = InstPoint {
-                block: pred_idx,
-                inst: pred_block.insts.len(), // After last instruction
-            };
-            let live_at_end = liveness.live_sets.get(&pred_end)
-                .cloned()
-                .unwrap_or_default();
-
-            // Match live values to parameters
-            // Strategy: Find values defined in predecessor that are used in target block
-            // Match them to parameters based on usage patterns
             
-            // First, find all values defined in predecessor block
-            let mut pred_defs = Vec::new();
-            for (inst_idx, inst) in pred_block.insts.iter().enumerate() {
-                let def_point = InstPoint {
-                    block: pred_idx,
-                    inst: inst_idx + 1,
-                };
-                for result in inst.results() {
-                    pred_defs.push(result);
-                }
-            }
-            
-            // Also include function/block parameters that are live at entry
-            let pred_entry = InstPoint { block: pred_idx, inst: 0 };
-            if let Some(entry_live) = liveness.live_sets.get(&pred_entry) {
-                for &value in entry_live {
-                    if !pred_defs.contains(&value) {
-                        pred_defs.push(value);
+            // Find the instruction that branches to target_block
+            // It should be the last instruction in the predecessor block
+            if let Some(last_inst) = pred_block.insts.last() {
+                let args = match last_inst {
+                    IrInst::Jump { target, args } if *target as usize == target_idx => {
+                        Some(args.clone())
                     }
-                }
-            }
-            
-            // For each parameter in target block, find matching source value
-            for (param_idx, param_value) in target_block.params.iter().enumerate() {
-                // Check if this parameter is actually used in target block
-                let param_used = target_block.insts.iter().any(|inst| {
-                    inst.args().contains(param_value) || inst.results().contains(param_value)
-                });
-                
-                if !param_used {
-                    // Dead phi - skip it (but we still need a source for correctness)
-                    // Use the parameter value itself as a fallback
-                    phi_sources.insert((pred_idx, target_idx, param_idx), *param_value);
-                    continue;
-                }
-                
-                // Find values from predecessor that are used in target block
-                // and are live at end of predecessor
-                let mut candidates: Vec<Value> = Vec::new();
-                for &def_value in &pred_defs {
-                    if live_at_end.contains(&def_value) {
-                        // Check if this value is used in target block
-                        if target_block.insts.iter().any(|inst| {
-                            inst.args().contains(&def_value)
-                        }) {
-                            candidates.push(def_value);
+                    IrInst::Br {
+                        target_true,
+                        args_true,
+                        target_false,
+                        args_false,
+                        ..
+                    } => {
+                        if *target_true as usize == target_idx {
+                            Some(args_true.clone())
+                        } else if *target_false as usize == target_idx {
+                            Some(args_false.clone())
+                        } else {
+                            None
                         }
                     }
-                }
-                
-                // Simple matching: if there's exactly one candidate, use it
-                // Otherwise, try positional matching (first candidate -> first parameter)
-                if !candidates.is_empty() {
-                    // Use positional matching for now
-                    // TODO: More sophisticated matching based on actual value flow
-                    let source_value = if param_idx < candidates.len() {
-                        candidates[param_idx]
-                    } else {
-                        candidates[0] // Fallback to first candidate
-                    };
-                    phi_sources.insert((pred_idx, target_idx, param_idx), source_value);
+                    _ => None,
+                };
+
+                if let Some(passed_args) = args {
+                    // Map the passed arguments to block parameters by position
+                    // The i-th argument passed corresponds to the i-th parameter
+                    for (param_idx, param_value) in target_block.params.iter().enumerate() {
+                        if param_idx < passed_args.len() {
+                            // Direct mapping: arg[param_idx] -> param[param_idx]
+                            phi_sources.insert((pred_idx, target_idx, param_idx), passed_args[param_idx]);
+                        } else {
+                            // Not enough arguments passed - this shouldn't happen in valid IR
+                            // but handle gracefully by using the parameter itself
+                            phi_sources.insert((pred_idx, target_idx, param_idx), *param_value);
+                        }
+                    }
                 } else {
-                    // No candidate found - this might be a constant or something else
-                    // For now, use parameter value itself (will be handled by copy_phi_values)
-                    phi_sources.insert((pred_idx, target_idx, param_idx), *param_value);
+                    // No matching branch found - this shouldn't happen if find_predecessors is correct
+                    // but handle gracefully by using parameters themselves
+                    for (param_idx, param_value) in target_block.params.iter().enumerate() {
+                        phi_sources.insert((pred_idx, target_idx, param_idx), *param_value);
+                    }
                 }
             }
         }

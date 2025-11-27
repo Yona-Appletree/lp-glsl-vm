@@ -84,11 +84,11 @@ let module = parse_module(ir)?;
 ```
 
 Key features demonstrated:
+
 - **Branching**: `brif v2, block1(v0), block2(v0, v1)` conditionally branches and passes values to target blocks
 - **Multiple blocks**: Three blocks with different control flow paths
-- **Block parameters**: 
+- **Block parameters**:
   - `block1(v3: i32)` receives `v0` from the branch
   - `block2(v4: i32, v5: i32)` receives `v0` and `v1` from the branch
 - **Value scoping**: Values defined in `block0` (`v0`, `v1`) must be passed as parameters to `block1` and `block2` since they're used there
 - **Recursive calls**: `call %fib(v7) -> v9` calls the same function recursively with computed values
-

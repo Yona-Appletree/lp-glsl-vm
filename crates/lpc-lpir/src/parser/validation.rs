@@ -15,7 +15,8 @@ pub fn validate_block_indices(func: &Function) -> Result<(), String> {
                     if *target as usize >= num_blocks {
                         return Err(alloc::format!(
                             "Jump to block{} but function only has {} blocks",
-                            target, num_blocks
+                            target,
+                            num_blocks
                         ));
                     }
                 }
@@ -27,13 +28,15 @@ pub fn validate_block_indices(func: &Function) -> Result<(), String> {
                     if *target_true as usize >= num_blocks {
                         return Err(alloc::format!(
                             "Branch to block{} but function only has {} blocks",
-                            target_true, num_blocks
+                            target_true,
+                            num_blocks
                         ));
                     }
                     if *target_false as usize >= num_blocks {
                         return Err(alloc::format!(
                             "Branch to block{} but function only has {} blocks",
-                            target_false, num_blocks
+                            target_false,
+                            num_blocks
                         ));
                     }
                 }
@@ -105,7 +108,8 @@ pub fn validate_return_values(func: &Function) -> Result<(), String> {
             if let Inst::Return { values } = inst {
                 if values.len() != expected_return_count {
                     return Err(alloc::format!(
-                        "Return instruction in block{} returns {} values, but function signature expects {}",
+                        "Return instruction in block{} returns {} values, but function signature \
+                         expects {}",
                         block_idx,
                         values.len(),
                         expected_return_count
@@ -154,7 +158,8 @@ pub fn validate_entry_block(func: &Function) -> Result<(), String> {
         if actual_param_count != expected_param_count {
             return Err(alloc::format!(
                 "Entry block has {} parameters, but function signature expects {}",
-                actual_param_count, expected_param_count
+                actual_param_count,
+                expected_param_count
             ));
         }
     }
@@ -236,8 +241,8 @@ pub fn validate_value_scoping(func: &Function) -> Result<(), String> {
                         // Value is defined in a different block - this is an error
                         // (If it were defined in the same block, it would be in available)
                         return Err(alloc::format!(
-                            "Value {} used in block{} but defined in block{}. \
-                             Values must be passed as block parameters.",
+                            "Value {} used in block{} but defined in block{}. Values must be \
+                             passed as block parameters.",
                             arg_value.index(),
                             block_idx,
                             def_block
@@ -328,17 +333,24 @@ mod tests {
     fn test_validate_cross_block_usage_direct() {
         // Test validation directly with a manually constructed function
         use alloc::vec;
-        use crate::{block::Block, function::Function, inst::Inst, signature::Signature, types::Type, value::Value};
-        
+
+        use crate::{
+            block::Block, function::Function, inst::Inst, signature::Signature, types::Type,
+            value::Value,
+        };
+
         let mut func = Function::new(Signature {
             params: vec![Type::I32],
             returns: vec![Type::I32],
         });
-        
+
         // block0: defines v1
         let mut block0 = Block::new();
         block0.params.push(Value::new(0)); // v0 parameter
-        block0.push_inst(Inst::Iconst { result: Value::new(1), value: 42 });
+        block0.push_inst(Inst::Iconst {
+            result: Value::new(1),
+            value: 42,
+        });
         block0.push_inst(Inst::Br {
             condition: Value::new(0),
             target_true: 1,
@@ -347,17 +359,21 @@ mod tests {
             args_false: Vec::new(),
         });
         func.add_block(block0);
-        
+
         // block1: uses v1 (defined in block0) - should fail
         let mut block1 = Block::new();
-        block1.push_inst(Inst::Return { values: vec![Value::new(1)] });
+        block1.push_inst(Inst::Return {
+            values: vec![Value::new(1)],
+        });
         func.add_block(block1);
-        
+
         // block2: uses v1 (defined in block0) - should fail
         let mut block2 = Block::new();
-        block2.push_inst(Inst::Return { values: vec![Value::new(1)] });
+        block2.push_inst(Inst::Return {
+            values: vec![Value::new(1)],
+        });
         func.add_block(block2);
-        
+
         let result = validate_value_scoping(&func);
         assert!(result.is_err(), "Should fail validation, got: {:?}", result);
         let err_msg = result.unwrap_err();
@@ -384,10 +400,14 @@ block2:
         // Note: parse_function will call validate_value_scoping internally
         // If validation fails, parse_function will return an error
         let result = parse_function(input.trim());
-        assert!(result.is_err(), "parse_function should fail due to validation error");
+        assert!(
+            result.is_err(),
+            "parse_function should fail due to validation error"
+        );
         let err = result.unwrap_err();
         assert!(
-            err.message.contains("Value 1 used in block") && err.message.contains("but defined in block0"),
+            err.message.contains("Value 1 used in block")
+                && err.message.contains("but defined in block0"),
             "Error should mention cross-block usage: {}",
             err.message
         );
@@ -405,10 +425,7 @@ block1(v1: i32, v2: i32):
     return v1
 }"#;
         let result = parse_function(input.trim());
-        assert!(
-            result.is_err(),
-            "Jump with wrong arg count should fail"
-        );
+        assert!(result.is_err(), "Jump with wrong arg count should fail");
         let err = result.unwrap_err();
         assert!(
             err.message.contains("expects 2 parameters")
@@ -427,14 +444,10 @@ block0:
     jump block5
 }"#;
         let result = parse_function(input.trim());
-        assert!(
-            result.is_err(),
-            "Jump to non-existent block should fail"
-        );
+        assert!(result.is_err(), "Jump to non-existent block should fail");
         let err = result.unwrap_err();
         assert!(
-            err.message.contains("block5")
-                && err.message.contains("only has 1 blocks"),
+            err.message.contains("block5") && err.message.contains("only has 1 blocks"),
             "Error should mention invalid block index: {}",
             err.message
         );
@@ -449,14 +462,10 @@ block0:
     return v0
 }"#;
         let result = parse_function(input.trim());
-        assert!(
-            result.is_err(),
-            "Return with wrong value count should fail"
-        );
+        assert!(result.is_err(), "Return with wrong value count should fail");
         let err = result.unwrap_err();
         assert!(
-            err.message.contains("returns 1 values")
-                && err.message.contains("expects 2"),
+            err.message.contains("returns 1 values") && err.message.contains("expects 2"),
             "Error should mention return count mismatch: {}",
             err.message
         );
@@ -472,10 +481,7 @@ block0:
     return v0
 }"#;
         let result = parse_function(input.trim());
-        assert!(
-            result.is_err(),
-            "Duplicate value definition should fail"
-        );
+        assert!(result.is_err(), "Duplicate value definition should fail");
         let err = result.unwrap_err();
         assert!(
             err.message.contains("Value 0 defined multiple times")
@@ -493,13 +499,11 @@ block0:
     v0 = iconst 42
 }"#;
         let result = parse_function(input.trim());
-        assert!(
-            result.is_err(),
-            "Block without terminator should fail"
-        );
+        assert!(result.is_err(), "Block without terminator should fail");
         let err = result.unwrap_err();
         assert!(
-            err.message.contains("does not end with a terminating instruction"),
+            err.message
+                .contains("does not end with a terminating instruction"),
             "Error should mention missing terminator: {}",
             err.message
         );
@@ -513,10 +517,7 @@ block0(v0: i32):
     return v0
 }"#;
         let result = parse_function(input.trim());
-        assert!(
-            result.is_err(),
-            "Entry block param mismatch should fail"
-        );
+        assert!(result.is_err(), "Entry block param mismatch should fail");
         let err = result.unwrap_err();
         assert!(
             err.message.contains("Entry block has 1 parameters")
@@ -543,10 +544,7 @@ block2:
     return v4
 }"#;
         let result = parse_function(input.trim());
-        assert!(
-            result.is_err(),
-            "Branch with wrong arg count should fail"
-        );
+        assert!(result.is_err(), "Branch with wrong arg count should fail");
         let err = result.unwrap_err();
         assert!(
             err.message.contains("expects 2 parameters")
@@ -563,14 +561,13 @@ block2:
 block0:
 }"#;
         let result = parse_function(input.trim());
-        assert!(
-            result.is_err(),
-            "Empty block should fail"
-        );
+        assert!(result.is_err(), "Empty block should fail");
         let err = result.unwrap_err();
         assert!(
             err.message.contains("is empty")
-                || err.message.contains("does not end with a terminating instruction"),
+                || err
+                    .message
+                    .contains("does not end with a terminating instruction"),
             "Error should mention empty block: {}",
             err.message
         );
@@ -598,4 +595,3 @@ block2(v3: i32):
         );
     }
 }
-
