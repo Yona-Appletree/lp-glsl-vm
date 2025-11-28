@@ -28,8 +28,3 @@ critical-section = "1.2.0"
 version = "1.11"
 default-features = false
 
-[profile.release]
-opt-level = "s"
-codegen-units = 1
-panic = "abort"
-

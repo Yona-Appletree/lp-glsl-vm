@@ -48,7 +48,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::arithmetic(Opcode::Iadd, result, arg1, arg2));
+        let _ = self.build(InstData::arithmetic(Opcode::Iadd, result, arg1, arg2));
         result
     }
 
@@ -59,7 +59,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::arithmetic(Opcode::Isub, result, arg1, arg2));
+        let _ = self.build(InstData::arithmetic(Opcode::Isub, result, arg1, arg2));
         result
     }
 
@@ -70,7 +70,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::arithmetic(Opcode::Imul, result, arg1, arg2));
+        let _ = self.build(InstData::arithmetic(Opcode::Imul, result, arg1, arg2));
         result
     }
 
@@ -81,7 +81,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::arithmetic(Opcode::Idiv, result, arg1, arg2));
+        let _ = self.build(InstData::arithmetic(Opcode::Idiv, result, arg1, arg2));
         result
     }
 
@@ -92,7 +92,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::arithmetic(Opcode::Irem, result, arg1, arg2));
+        let _ = self.build(InstData::arithmetic(Opcode::Irem, result, arg1, arg2));
         result
     }
 
@@ -105,7 +105,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::comparison(Opcode::IcmpEq, result, arg1, arg2));
+        let _ = self.build(InstData::comparison(Opcode::IcmpEq, result, arg1, arg2));
         result
     }
 
@@ -116,7 +116,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::comparison(Opcode::IcmpNe, result, arg1, arg2));
+        let _ = self.build(InstData::comparison(Opcode::IcmpNe, result, arg1, arg2));
         result
     }
 
@@ -127,7 +127,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::comparison(Opcode::IcmpLt, result, arg1, arg2));
+        let _ = self.build(InstData::comparison(Opcode::IcmpLt, result, arg1, arg2));
         result
     }
 
@@ -138,7 +138,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::comparison(Opcode::IcmpLe, result, arg1, arg2));
+        let _ = self.build(InstData::comparison(Opcode::IcmpLe, result, arg1, arg2));
         result
     }
 
@@ -149,7 +149,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::comparison(Opcode::IcmpGt, result, arg1, arg2));
+        let _ = self.build(InstData::comparison(Opcode::IcmpGt, result, arg1, arg2));
         result
     }
 
@@ -160,7 +160,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::comparison(Opcode::IcmpGe, result, arg1, arg2));
+        let _ = self.build(InstData::comparison(Opcode::IcmpGe, result, arg1, arg2));
         result
     }
 
@@ -173,7 +173,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::constant(result, Immediate::I64(value)));
+        let _ = self.build(InstData::constant(result, Immediate::I64(value)));
         result
     }
 
@@ -184,7 +184,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::constant(
+        let _ = self.build(InstData::constant(
             result,
             Immediate::F32Bits(value.to_bits()),
         ));
@@ -198,7 +198,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let (inst, dfg) = self.build(InstData::jump(target, args));
+        let _ = self.build(InstData::jump(target, args));
     }
 
     /// Conditional branch: if condition, jump to target_true, else target_false
@@ -212,7 +212,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     ) where
         Self: Sized,
     {
-        let (inst, dfg) = self.build(InstData::branch(
+        let _ = self.build(InstData::branch(
             condition,
             target_true,
             args_true,
@@ -226,7 +226,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let (inst, dfg) = self.build(InstData::return_(values));
+        let _ = self.build(InstData::return_(values));
     }
 
     /// Halt execution
@@ -234,7 +234,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let (inst, dfg) = self.build(InstData::halt());
+        let _ = self.build(InstData::halt());
     }
 
     // Memory instructions
@@ -246,7 +246,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let (inst, dfg) = self.build(InstData::load(result, address, ty));
+        let _ = self.build(InstData::load(result, address, ty));
         result
     }
 
@@ -255,7 +255,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let (inst, dfg) = self.build(InstData::store(address, value, ty));
+        let _ = self.build(InstData::store(address, value, ty));
     }
 
     // Call instructions
@@ -270,7 +270,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let (inst, dfg) = self.build(InstData::call(callee, args, results.clone()));
+        let _ = self.build(InstData::call(callee, args, results.clone()));
         results
     }
 
@@ -279,7 +279,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let (inst, dfg) = self.build(InstData::syscall(number, args));
+        let _ = self.build(InstData::syscall(number, args));
     }
 }
 

@@ -120,7 +120,7 @@ mod tests {
     use super::*;
     use crate::{
         builder::traits::InstBuilder,
-        dfg::{InstData, Opcode},
+        dfg::Opcode,
         signature::Signature,
         types::Type,
         value::Value,

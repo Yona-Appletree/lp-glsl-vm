@@ -30,7 +30,11 @@ mod verifier;
 
 pub use analysis::{ControlFlowGraph, DominatorTree};
 pub use block::BlockData;
-pub use builder::function_builder::FunctionBuilder;
+pub use builder::{
+    function_builder::FunctionBuilder,
+    traits::{InstBuilder, InstBuilderBase, InstInserterBase},
+    InsertBuilder, ReplaceBuilder,
+};
 pub use dfg::{BlockArgs, Immediate, InstData, Opcode, DFG};
 pub use entity::{Block as BlockEntity, EntityRef, Inst as InstEntity};
 pub use entity_map::PrimaryMap;

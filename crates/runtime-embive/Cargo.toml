@@ -11,10 +11,5 @@ test = false
 critical-section = { version = "1.2.0", features = ["restore-state-bool"] }
 linked_list_allocator = "0.10"
 
-[profile.release]
-opt-level = "s"
-codegen-units = 1
-panic = "abort"
-
 [target.riscv32imac-unknown-none-elf]
 

@@ -17,10 +17,5 @@ riscv-shared = { path = "../../crates/riscv-shared" }
 
 [build-dependencies]
 
-[profile.release]
-opt-level = "s"
-codegen-units = 1
-panic = "abort"
-
 [target.riscv32imac-unknown-none-elf]
 
