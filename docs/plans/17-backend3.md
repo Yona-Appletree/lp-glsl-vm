@@ -169,32 +169,128 @@ enum LoweredBlock {
 **Input**: `VCode<MachInst>` + `regalloc2::Output`
 **Output**: `InstBuffer` (machine code)
 
+**Architecture**: Streaming emission with label-based branch resolution (inspired by Cranelift's MachBuffer).
+
 **Key Steps**:
 
-1. **Initialize Emission State**: Track SP offsets, block positions, relocations
-2. **Compute Frame Layout**: Calculate frame size from regalloc spills + ABI requirements
-3. **Generate Prologue**: Frame setup, callee-saved saves
-4. **Emit Instructions**: Iterate blocks, apply allocations, insert edits
-5. **Block Layout Optimization**: Reorder blocks (cold sinking, fallthrough optimization)
-6. **Branch Resolution**: Resolve two-dest branches, simplify branches
-7. **Generate Epilogue**: Callee-saved restores, frame cleanup, return
-8. **Fix Relocations**: Resolve function call addresses and other relocations
+1. **Compute Emission Order**: Determine final block order (cold blocks at end) BEFORE emission
+2. **Initialize Emission State**: Track SP offsets, labels, relocations
+3. **Compute Frame Layout**: Calculate frame size from regalloc spills + ABI requirements
+4. **Generate Prologue**: Frame setup, callee-saved saves (at entry block)
+5. **Emit Blocks in Order**: For each block in emission order:
+   - Bind block label to current offset
+   - Emit block alignment (if needed)
+   - Emit instructions and edits (apply allocations, insert moves/spills/reloads)
+   - Emit branches (using labels, resolve incrementally)
+   - Emit epilogue at return instructions (not at end)
+6. **Final Branch Resolution**: Resolve any remaining forward references
+7. **Fix External Relocations**: Resolve function call addresses and other external relocations
+
+**Label-Based Branch Resolution**:
+
+- Each block gets a `MachLabel` (essentially a block index)
+- Labels are bound to code offsets as blocks are emitted
+- Branches reference labels (not offsets)
+- Branch targets resolved incrementally:
+  - If label already bound: compute offset and patch branch immediately
+  - If label not yet bound: record fixup, resolve when label is bound
+- Two-dest branches converted to single-dest during emission:
+  - If one target is fallthrough: emit conditional branch to other target
+  - Otherwise: emit inverted conditional + unconditional (or optimize later)
 
 **Emission State Tracking**:
 
 ```rust
 struct EmitState {
     /// Current stack pointer offset (for SP-relative addressing)
+    /// This tracks the offset from the original SP (before prologue) to the current SP.
+    /// Negative values mean SP has been decremented (stack grows down).
+    /// Updated as instructions that modify SP are emitted.
     sp_offset: i32,
-    /// Block start offsets (for branch target computation)
-    block_offsets: Vec<CodeOffset>,
-    /// Relocations to fix up (position, type, target)
-    relocations: Vec<Reloc>,
+
+    /// Label offsets: maps MachLabel (block index) to code offset
+    /// UNKNOWN_LABEL_OFFSET if label not yet bound
+    label_offsets: Vec<CodeOffset>,
+
+    /// Pending fixups: branches waiting for labels to be bound
+    pending_fixups: Vec<PendingFixup>,
+
+    /// External relocations (function calls, etc.)
+    external_relocations: Vec<Reloc>,
+
     /// Prologue/epilogue state
     frame_size: u32,
     clobbered_callee_saved: Vec<RealReg>,
 }
+
+struct PendingFixup {
+    /// Offset in buffer where branch instruction is
+    branch_offset: CodeOffset,
+    /// Label this branch targets
+    target_label: MachLabel,
+    /// Branch type (for patching)
+    branch_type: BranchType,
+}
+
+/// Label representing a block (essentially a block index)
+type MachLabel = BlockIndex;
+
+/// Special offset value meaning "label not yet bound"
+const UNKNOWN_LABEL_OFFSET: CodeOffset = CodeOffset::MAX;
 ```
+
+**SP Offset Tracking Details**:
+
+The `sp_offset` field tracks the current stack pointer offset relative to the function's entry SP (before prologue). This is used to compute SP-relative addresses for:
+
+- **Spill slots**: Stack slots allocated by register allocation
+- **Frame slots**: ABI-required frame slots (incoming args, outgoing args, return area)
+- **Callee-saved register saves**: Where callee-saved registers are stored
+
+**SP Offset Lifecycle**:
+
+1. **Initial State**: `sp_offset = 0` (at function entry, before prologue)
+
+2. **Prologue**:
+
+   - After setup area (save FP + RA): `sp_offset = -8`
+   - After full frame allocation: `sp_offset = -(frame_size)`
+   - After callee-saved saves: `sp_offset` unchanged (saves use positive offsets)
+
+3. **During Instruction Emission**:
+
+   - `sp_offset` remains constant (SP doesn't change during function body)
+   - Stack-relative loads/stores use `sp_offset` to compute addresses
+
+4. **Epilogue** (at each return):
+   - Restore callee-saved: `sp_offset` unchanged
+   - Restore SP: `sp_offset = 0`
+   - Restore FP + RA: `sp_offset = 0`
+
+**Stack Slot Offset Computation**:
+
+```rust
+impl EmitState {
+    /// Compute the SP-relative offset for a stack slot
+    /// Stack slots are allocated above the frame (negative offsets from SP)
+    fn compute_stack_slot_offset(&self, slot: StackSlot, frame_layout: &FrameLayout) -> i32 {
+        // Stack slots are allocated in the frame, above the setup area
+        // Offset is negative (stack grows down)
+        let slot_offset_in_frame = frame_layout.compute_slot_offset(slot);
+        self.sp_offset + slot_offset_in_frame
+    }
+
+    /// Compute offset for a spill slot (from regalloc)
+    fn compute_spill_offset(&self, spill_slot: SpillSlot, frame_layout: &FrameLayout) -> i32 {
+        // Spill slots are allocated after callee-saved area
+        let spill_offset_in_frame = frame_layout.spill_area_start +
+            (spill_slot.index() * 4) as i32;
+        self.sp_offset + spill_offset_in_frame
+    }
+}
+```
+
+**Note**: `sp_offset` is maintained throughout emission and doesn't change during the function body (only during prologue/epilogue). This simplifies offset computation for stack-relative addressing.
 
 ## Key Components
 
@@ -550,6 +646,8 @@ impl ABIMachineSpec for Riscv32ABI {
 
 **File**: `crates/lpc-codegen/src/backend3/emit.rs` (ISA-agnostic, uses ISA-specific MachInst trait)
 
+**Architecture**: Streaming emission with label-based branch resolution. Blocks are emitted in final optimized order, and branches use labels that are resolved incrementally as blocks are emitted.
+
 ```rust
 /// Emit VCode to machine code
 impl VCode<MachInst> {
@@ -560,43 +658,86 @@ impl VCode<MachInst> {
         let mut state = EmitState::new();
         let mut buffer = InstBuffer::new();
 
-        // 1. Compute frame layout from regalloc results
+        // 1. Compute emission order (cold blocks at end) BEFORE emission
+        let block_order = self.compute_emission_order();
+
+        // 2. Initialize label offsets (all unknown initially)
+        state.label_offsets.resize(self.num_blocks(), UNKNOWN_LABEL_OFFSET);
+
+        // 3. Compute frame layout from regalloc results
         let frame_layout = self.compute_frame_layout(regalloc);
         state.frame_size = frame_layout.total_size;
         state.clobbered_callee_saved = frame_layout.clobbered_regs.clone();
 
-        // 2. Generate prologue
-        self.gen_prologue(&mut buffer, &mut state, &frame_layout);
-
-        // 3. Emit blocks (with layout optimization)
-        let block_order = self.compute_emission_order(); // Reorder for optimization
+        // 4. Emit blocks in final order
         for block_idx in block_order {
-            state.block_offsets[block_idx] = buffer.instruction_count();
+            // Bind label for this block
+            let label = MachLabel::from_block(block_idx);
+            let block_start = buffer.cur_offset();
+            state.bind_label(label, block_start);
 
-            // Emit block start (alignment, if needed)
-            if let Some(align) = self.block_metadata[block_idx].alignment {
-                self.emit_block_align(&mut buffer, align, &mut state);
+            // Resolve any pending fixups that targeted this label
+            state.resolve_pending_fixups(&mut buffer, label, block_start);
+
+            // Is this the entry block? Emit prologue
+            if block_idx == self.entry {
+                self.gen_prologue(&mut buffer, &mut state, &frame_layout);
+            }
+
+            // Emit block alignment (if needed)
+            // For RISC-V 32, blocks are naturally 4-byte aligned (instruction size)
+            // Some blocks (e.g., indirect branch targets) may need additional alignment
+            // For now, we use natural alignment (no padding needed)
+            // Future: add alignment support if needed for performance
+            let aligned_offset = I::align_basic_block(buffer.cur_offset());
+            while buffer.cur_offset() < aligned_offset {
+                // Emit NOPs to align (if alignment > 4 bytes)
+                let nop = I::gen_nop(1);
+                buffer.emit(nop);
+            }
+
+            // Emit block start instruction (if needed)
+            // Some ISAs emit special instructions at block start (e.g., for CFI)
+            // RISC-V 32 doesn't need this, but trait allows it
+            if let Some(block_start) = I::gen_block_start(
+                self.block_metadata[block_idx].is_indirect_target,
+                false, // forward edge CFI not needed for RISC-V 32
+            ) {
+                buffer.emit(block_start);
             }
 
             // Emit instructions and edits
             for inst_or_edit in regalloc.block_insts_and_edits(&self, block_idx) {
                 match inst_or_edit {
                     InstOrEdit::Inst(inst_idx) => {
+                        let inst = &self.insts[inst_idx];
+
+                        // If this is a return, emit epilogue instead of return instruction
+                        if inst.is_term() == MachTerminator::Ret {
+                            self.gen_epilogue(&mut buffer, &mut state, &frame_layout);
+                            continue;
+                        }
+
                         // Apply register allocations to operands
-                        let mut inst = self.insts[inst_idx].clone();
+                        let mut inst = inst.clone();
                         inst.apply_allocations(&regalloc.allocs[inst_idx]);
 
-                        // Handle relocations
+                        // Handle branches (resolve labels)
+                        if let Some(branch_info) = inst.get_branch_info() {
+                            self.emit_branch(&mut buffer, &mut state, inst, branch_info);
+                        } else {
+                            // Regular instruction - emit directly
+                            buffer.emit(inst.to_physical(&mut state));
+                        }
+
+                        // Handle external relocations (function calls, etc.)
                         if let Some(reloc) = self.find_reloc(inst_idx) {
-                            state.relocations.push(Reloc {
-                                offset: buffer.instruction_count(),
+                            state.external_relocations.push(Reloc {
+                                offset: buffer.cur_offset(),
                                 kind: reloc.kind,
                                 target: reloc.target.clone(),
                             });
                         }
-
-                        // Emit instruction
-                        buffer.emit(inst.to_physical(&mut state));
                     }
                     InstOrEdit::Edit(edit) => {
                         self.emit_edit(&mut buffer, edit, &mut state);
@@ -605,13 +746,72 @@ impl VCode<MachInst> {
             }
         }
 
-        // 4. Generate epilogue
-        self.gen_epilogue(&mut buffer, &mut state, &frame_layout);
+        // 5. Resolve any remaining forward references (should be none if order is correct)
+        state.resolve_all_pending_fixups(&mut buffer);
 
-        // 5. Fix relocations
-        self.fix_relocations(&mut buffer, &state);
+        // 6. Fix external relocations (function calls, etc.)
+        self.fix_external_relocations(&mut buffer, &state);
 
         buffer
+    }
+
+    fn emit_branch(
+        &self,
+        buffer: &mut InstBuffer,
+        state: &mut EmitState,
+        mut branch: MachInst,
+        branch_info: BranchInfo,
+    ) {
+        match branch_info {
+            BranchInfo::TwoDest { target_true, target_false } => {
+                // Convert two-dest branch to single-dest
+                let true_label = MachLabel::from_block(target_true);
+                let false_label = MachLabel::from_block(target_false);
+                let current_offset = buffer.cur_offset();
+
+                // Check which target is fallthrough (next block)
+                let true_offset = state.get_label_offset(true_label);
+                let false_offset = state.get_label_offset(false_label);
+
+                // Determine if one target is fallthrough
+                // (Simplified: assume false is fallthrough if it's next block)
+                // In practice, need to check block order
+                let (target_label, invert) = if false_offset == current_offset + 4 {
+                    (true_label, false)
+                } else {
+                    (false_label, true)
+                };
+
+                // Invert condition if needed
+                if invert {
+                    branch.invert_condition();
+                }
+
+                // Emit branch with label target
+                let branch_offset = buffer.cur_offset();
+                buffer.emit_branch_with_label(branch, target_label);
+
+                // Try to resolve immediately, or record fixup
+                state.resolve_or_record_fixup(
+                    buffer,
+                    branch_offset,
+                    target_label,
+                    BranchType::Conditional,
+                );
+            }
+            BranchInfo::OneDest { target } => {
+                let target_label = MachLabel::from_block(target);
+                let branch_offset = buffer.cur_offset();
+                buffer.emit_branch_with_label(branch, target_label);
+
+                state.resolve_or_record_fixup(
+                    buffer,
+                    branch_offset,
+                    target_label,
+                    BranchType::Unconditional,
+                );
+            }
+        }
     }
 
     fn compute_frame_layout(&self, regalloc: &regalloc2::Output) -> FrameLayout {
@@ -632,6 +832,67 @@ impl VCode<MachInst> {
             abi_size,
             clobbered_regs: clobbered,
         }
+    }
+
+    fn compute_clobbered_callee_saved(&self, regalloc: &regalloc2::Output) -> Vec<RealReg> {
+        // Algorithm (inspired by Cranelift):
+        // 1. Collect all registers that are written to (defs) in regalloc results
+        // 2. Add registers that are targets of moves (from edits)
+        // 3. Add explicitly clobbered registers from instruction clobber lists
+        // 4. Filter to only callee-saved registers
+
+        use regalloc2::PRegSet;
+        let mut clobbered = PRegSet::default();
+
+        // 1. Add all registers that are targets of moves (from edits)
+        // These represent register-to-register moves inserted by regalloc
+        for (_, edit) in &regalloc.edits {
+            if let Edit::Move { to, .. } = edit {
+                if let Some(preg) = to.as_reg() {
+                    clobbered.add(preg);
+                }
+            }
+        }
+
+        // 2. Add all registers that are defs (written to) in instructions
+        for (inst_idx, range) in self.operand_ranges.iter() {
+            let operands = &self.operands[range.clone()];
+            let allocs = &regalloc.allocs[range];
+
+            for (operand, alloc) in operands.iter().zip(allocs.iter()) {
+                // Only consider defs (writes)
+                if operand.kind() == OperandKind::Def {
+                    if let Some(preg) = alloc.as_reg() {
+                        clobbered.add(preg);
+                    }
+                }
+            }
+
+            // 3. Add explicitly clobbered registers from instruction clobber lists
+            // (if instruction has explicit clobber list and is included in clobbers)
+            if let Some(&inst_clobbered) = self.clobbers.get(&InsnIndex::new(inst_idx)) {
+                if self.insts[inst_idx].is_included_in_clobbers() {
+                    clobbered.union_from(inst_clobbered);
+                }
+            }
+        }
+
+        // 4. Filter to only callee-saved registers
+        let callee_saved = self.abi.machine_env().callee_saved_gprs();
+        let mut clobbered_callee_saved = Vec::new();
+
+        for preg in clobbered.iter() {
+            if let Some(real_reg) = preg.as_reg() {
+                // Check if this is a callee-saved register
+                if callee_saved.contains(&real_reg) {
+                    clobbered_callee_saved.push(real_reg);
+                }
+            }
+        }
+
+        // Sort for consistent ordering (affects frame layout)
+        clobbered_callee_saved.sort();
+        clobbered_callee_saved
     }
 
     fn gen_prologue(
@@ -765,9 +1026,9 @@ impl VCode<MachInst> {
         }
     }
 
-    fn fix_relocations(&self, buffer: &mut InstBuffer, state: &EmitState) {
-        // Resolve function call addresses
-        for reloc in &state.relocations {
+    fn fix_external_relocations(&self, buffer: &mut InstBuffer, state: &EmitState) {
+        // Resolve external relocations (function calls, etc.)
+        for reloc in &state.external_relocations {
             match reloc.kind {
                 RelocKind::FunctionCall => {
                     // Look up function address
@@ -780,18 +1041,166 @@ impl VCode<MachInst> {
         }
     }
 }
+
+/// Emission state for streaming label-based emission
+impl EmitState {
+    /// Bind a label to the current code offset
+    fn bind_label(&mut self, label: MachLabel, offset: CodeOffset) {
+        self.label_offsets[label.index()] = offset;
+    }
+
+    /// Get the offset for a label, or UNKNOWN_LABEL_OFFSET if not yet bound
+    fn get_label_offset(&self, label: MachLabel) -> CodeOffset {
+        self.label_offsets[label.index()]
+    }
+
+    /// Resolve or record a fixup for a branch
+    /// If label is already bound, patch immediately. Otherwise, record for later.
+    fn resolve_or_record_fixup(
+        &mut self,
+        buffer: &mut InstBuffer,
+        branch_offset: CodeOffset,
+        target_label: MachLabel,
+        branch_type: BranchType,
+    ) {
+        let target_offset = self.get_label_offset(target_label);
+        if target_offset != UNKNOWN_LABEL_OFFSET {
+            // Label already bound - patch immediately
+            buffer.patch_branch(branch_offset, target_offset, branch_type);
+        } else {
+            // Label not yet bound - record fixup
+            self.pending_fixups.push(PendingFixup {
+                branch_offset,
+                target_label,
+                branch_type,
+            });
+        }
+    }
+
+    /// Resolve all pending fixups for a newly-bound label
+    fn resolve_pending_fixups(
+        &mut self,
+        buffer: &mut InstBuffer,
+        label: MachLabel,
+        label_offset: CodeOffset,
+    ) {
+        // Find all fixups targeting this label
+        let mut i = 0;
+        while i < self.pending_fixups.len() {
+            if self.pending_fixups[i].target_label == label {
+                let fixup = self.pending_fixups.remove(i);
+                buffer.patch_branch(
+                    fixup.branch_offset,
+                    label_offset,
+                    fixup.branch_type,
+                );
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// Resolve all remaining pending fixups (should be none if emission order is correct)
+    fn resolve_all_pending_fixups(&mut self, buffer: &mut InstBuffer) {
+        for fixup in &self.pending_fixups {
+            let target_offset = self.get_label_offset(fixup.target_label);
+            if target_offset != UNKNOWN_LABEL_OFFSET {
+                buffer.patch_branch(
+                    fixup.branch_offset,
+                    target_offset,
+                    fixup.branch_type,
+                );
+            } else {
+                // This shouldn't happen if emission order is correct
+                panic!("Unresolved label fixup: label {:?} not bound", fixup.target_label);
+            }
+        }
+        self.pending_fixups.clear();
+    }
+}
 ```
 
 **Key Features**:
 
-- **Emission State Tracking**: Tracks SP offsets, block positions, relocations
+- **Streaming Emission**: Blocks emitted in final optimized order
+- **Label-Based Branches**: Branches use labels, resolved incrementally as blocks are emitted
+- **Emission State Tracking**: Tracks SP offsets, label offsets, pending fixups
 - **Frame Layout Computation**: Calculated from regalloc spills + ABI requirements
-- **Prologue Generation**: Setup area → SP adjustment → callee-saved saves
-- **Epilogue Generation**: Callee-saved restores → SP restore → return
-- **Block Layout Optimization**: Cold block sinking, fallthrough optimization
+- **Prologue Generation**: Emitted at entry block (setup area → SP adjustment → callee-saved saves)
+- **Epilogue Generation**: Emitted at each return instruction (callee-saved restores → SP restore → return)
+- **Block Layout Optimization**: Cold block sinking (computed before emission)
 - **Edit Emission**: Moves, spills, reloads inserted between instructions
-- **Branch Resolution**: Two-dest branches resolved, branches simplified
-- **Relocation Fixup**: Function calls and other relocations resolved
+- **Branch Resolution**: Two-dest branches converted to single-dest during emission
+- **External Relocation Fixup**: Function calls and other external relocations resolved after emission
+
+**InstBuffer Enhancements Needed**:
+
+The current `InstBuffer` needs enhancements for label-based emission:
+
+```rust
+impl InstBuffer {
+    /// Get current code offset (in bytes)
+    fn cur_offset(&self) -> CodeOffset { ... }
+
+    /// Emit a branch instruction with a label target (not yet resolved offset)
+    /// The instruction will be patched later when the label is bound
+    fn emit_branch_with_label(&mut self, branch: MachInst, label: MachLabel) { ... }
+
+    /// Patch a branch instruction at the given offset with the computed target offset
+    fn patch_branch(&mut self, offset: CodeOffset, target_offset: CodeOffset, branch_type: BranchType) { ... }
+}
+```
+
+**Branch Range Limits** (RISC-V 32):
+
+- **Conditional branches** (BEQ, BNE, etc.): ±4KB range (12-bit signed offset × 2 bytes)
+- **Unconditional jumps** (JAL): ±1MB range (20-bit signed offset × 2 bytes)
+
+**Assumption**: Functions are < 4KB for now. If larger functions are needed later, veneer/island insertion can be added (similar to Cranelift's MachBuffer).
+
+**Note**: Since we emit blocks in final order, most branches will be backward (to already-emitted blocks), making immediate resolution possible. Forward branches (to not-yet-emitted blocks) are handled via pending fixups that resolve when the target block is emitted.
+
+### Block Alignment
+
+**Purpose**: Some blocks may need alignment for performance or correctness (e.g., indirect branch targets).
+
+**RISC-V 32 Alignment**:
+
+- Instructions are naturally 4-byte aligned (instruction size)
+- No special alignment requirements for most blocks
+- Indirect branch targets may benefit from alignment (optional, deferred)
+
+**Implementation**:
+
+The `MachInst` trait provides:
+
+```rust
+trait MachInst {
+    /// Align a basic block offset. Default: no alignment (returns offset unchanged)
+    fn align_basic_block(offset: CodeOffset) -> CodeOffset {
+        offset
+    }
+
+    /// Generate a block start instruction (if needed). Default: None
+    fn gen_block_start(
+        is_indirect_branch_target: bool,
+        is_forward_edge_cfi_enabled: bool,
+    ) -> Option<Self> {
+        None
+    }
+
+    /// Generate a NOP instruction of given size (in instructions, not bytes)
+    fn gen_nop(size: usize) -> Self;
+}
+```
+
+**For RISC-V 32**:
+
+- `align_basic_block()`: Returns offset unchanged (natural 4-byte alignment)
+- `gen_block_start()`: Returns `None` (no special block start instruction)
+- `gen_nop()`: Generates `ADDI x0, x0, 0` (NOP instruction)
+
+**Future**: If alignment is needed (e.g., 8-byte or 16-byte alignment for indirect branches), implement `align_basic_block()` to return the next aligned offset, and emit NOPs to pad.
 
 ## Implementation Phases
 
@@ -1102,60 +1511,171 @@ impl VCode {
 
 **File**: `crates/lpc-codegen/src/backend3/branch.rs` (ISA-agnostic)
 
-**Purpose**: Resolve two-dest branches and optimize branch sequences.
+**Purpose**: Resolve two-dest branches to single-dest branches during emission, and perform basic branch optimizations.
 
-**Two-Dest Branches**:
+**Two-Dest Branch Representation**:
 
 During lowering, conditional branches are represented with two targets:
 
 - `Branch { kind, rs1, rs2, target_true, target_false }`
 
-During emission, these are resolved to single-dest branches:
+This allows the emitter to decide which target should be fallthrough based on block layout.
 
-- If `target_false` is fallthrough: emit conditional branch to `target_true`
-- Otherwise: emit inverted conditional branch to `target_false`, then fallthrough to `target_true`
+**Two-Dest to Single-Dest Conversion**:
 
-**Branch Simplification**:
+During emission, two-dest branches are converted to single-dest branches. The algorithm:
 
-- **Empty Block Elimination**: Remove empty blocks, redirect branches
-- **Fallthrough Optimization**: Arrange blocks so branches can fall through
-- **Unconditional Branch Elimination**: Remove unnecessary jumps
+1. **Determine Fallthrough Target**: Check which target (if any) is the next block in emission order
+2. **Emit Branch**:
+   - If one target is fallthrough: emit conditional branch to the other target
+   - If neither is fallthrough: emit inverted conditional to one target, then unconditional to the other (or optimize later)
+   - If both are fallthrough: eliminate branch (shouldn't happen)
 
-**Implementation**:
+**Fallthrough Detection Algorithm**:
 
 ```rust
-impl VCode {
-    fn resolve_branch(
-        &self,
-        branch: &MachInst,
-        state: &EmitState,
-    ) -> Vec<MachInst> {
-        match branch {
-            MachInst::Branch { kind, rs1, rs2, target_true, target_false } => {
-                let true_offset = state.block_offsets[*target_true];
-                let false_offset = state.block_offsets[*target_false];
-                let current_offset = state.current_offset;
+fn determine_fallthrough(
+    current_block: BlockIndex,
+    emission_order: &[BlockIndex],
+    target_true: BlockIndex,
+    target_false: BlockIndex,
+) -> Option<BlockIndex> {
+    // Find current block's position in emission order
+    let current_pos = emission_order.iter()
+        .position(|&b| b == current_block)?;
 
-                // Determine which target is fallthrough
-                let (target, invert) = if false_offset == current_offset + 4 {
-                    (*target_true, false)
-                } else {
-                    (*target_false, true)
+    // Check if next block is one of our targets
+    if current_pos + 1 < emission_order.len() {
+        let next_block = emission_order[current_pos + 1];
+        if next_block == target_false {
+            return Some(target_false);
+        } else if next_block == target_true {
+            return Some(target_true);
+        }
+    }
+
+    None
+}
+```
+
+**Implementation** (integrated into emission):
+
+```rust
+impl VCode<MachInst> {
+    fn emit_branch(
+        &self,
+        buffer: &mut InstBuffer,
+        state: &mut EmitState,
+        mut branch: MachInst,
+        branch_info: BranchInfo,
+        emission_order: &[BlockIndex],
+        current_block: BlockIndex,
+    ) {
+        match branch_info {
+            BranchInfo::TwoDest { target_true, target_false } => {
+                // Determine which target (if any) is fallthrough
+                let fallthrough = determine_fallthrough(
+                    current_block,
+                    emission_order,
+                    target_true,
+                    target_false,
+                );
+
+                let (target_label, invert) = match fallthrough {
+                    Some(ft) if ft == target_false => {
+                        // False is fallthrough, branch to true
+                        (MachLabel::from_block(target_true), false)
+                    }
+                    Some(ft) if ft == target_true => {
+                        // True is fallthrough, branch to false (invert condition)
+                        (MachLabel::from_block(target_false), true)
+                    }
+                    None => {
+                        // Neither is fallthrough - emit inverted branch to false,
+                        // then unconditional to true (or optimize later)
+                        // For now, just branch to true (false will need separate jump)
+                        (MachLabel::from_block(target_true), false)
+                    }
                 };
 
-                // Emit conditional branch
-                vec![MachInst::Branch {
-                    kind: if invert { kind.invert() } else { *kind },
-                    rs1: *rs1,
-                    rs2: *rs2,
-                    target,
-                }]
+                // Invert condition if needed
+                if invert {
+                    branch.invert_condition();
+                }
+
+                // Emit branch with label target
+                let branch_offset = buffer.cur_offset();
+                buffer.emit_branch_with_label(branch, target_label);
+
+                // Resolve or record fixup
+                state.resolve_or_record_fixup(
+                    buffer,
+                    branch_offset,
+                    target_label,
+                    BranchType::Conditional,
+                );
+
+                // If neither target was fallthrough, emit unconditional jump to other target
+                if fallthrough.is_none() {
+                    let other_target = if target_label == MachLabel::from_block(target_true) {
+                        target_false
+                    } else {
+                        target_true
+                    };
+                    let jump_label = MachLabel::from_block(other_target);
+                    let jump_offset = buffer.cur_offset();
+                    buffer.emit_branch_with_label(
+                        MachInst::Jal { rd: zero, imm: 0 }, // Placeholder
+                        jump_label,
+                    );
+                    state.resolve_or_record_fixup(
+                        buffer,
+                        jump_offset,
+                        jump_label,
+                        BranchType::Unconditional,
+                    );
+                }
             }
-            // ...
+            BranchInfo::OneDest { target } => {
+                // Unconditional branch - emit directly
+                let target_label = MachLabel::from_block(target);
+                let branch_offset = buffer.cur_offset();
+                buffer.emit_branch_with_label(branch, target_label);
+
+                state.resolve_or_record_fixup(
+                    buffer,
+                    branch_offset,
+                    target_label,
+                    BranchType::Unconditional,
+                );
+            }
         }
     }
 }
 ```
+
+**Basic Branch Simplification** (Initial Implementation):
+
+For the initial implementation, we keep it simple:
+
+1. **Two-Dest Resolution**: Convert to single-dest as described above
+2. **Fallthrough Optimization**: Handled by block emission order (cold blocks at end)
+3. **No Empty Block Elimination**: Deferred (see deferred features)
+4. **No Branch Threading**: Deferred (see deferred features)
+
+**Future Optimizations** (Deferred):
+
+- **Empty Block Elimination**: Remove blocks that only contain unconditional branches
+- **Branch Threading**: Redirect labels through unconditional jumps
+- **Unnecessary Jump Elimination**: Remove jumps to immediately following blocks
+- **Branch Inversion**: Optimize condition inversion based on branch probabilities
+
+**Branch Range Validation**:
+
+- Conditional branches: ±4KB (12-bit signed offset × 2 bytes)
+- Unconditional jumps: ±1MB (20-bit signed offset × 2 bytes)
+- Currently assuming functions < 4KB
+- If out of range detected, panic (veneers deferred to later)
 
 ## File Structure
 
