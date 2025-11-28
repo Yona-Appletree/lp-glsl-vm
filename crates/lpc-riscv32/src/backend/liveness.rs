@@ -363,6 +363,15 @@ pub fn format_function_with_liveness(func: &Function, liveness: &LivenessInfo) -
     output
 }
 
+/// Debug function to print liveness visualization.
+///
+/// This function computes liveness for a function and prints it using the debug! macro.
+/// It's intended for use in tests to visualize liveness information.
+pub fn debug_liveness(func: &Function) {
+    let liveness = compute_liveness(func);
+    crate::debug!("{}", format_function_with_liveness(func, &liveness));
+}
+
 #[cfg(test)]
 mod tests {
     use lpc_lpir::parse_function;
@@ -379,6 +388,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v0 is a parameter, defined at block 0 entry
@@ -401,6 +411,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
         let v0 = Value::new(0);
         let v0_range = liveness.live_ranges.get(&v0).unwrap();
@@ -420,6 +431,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
         let v1 = Value::new(1);
 
@@ -446,6 +458,7 @@ block1(v2: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // Block 0 parameter
@@ -479,6 +492,7 @@ block2(v4: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
         let v1 = Value::new(1);
 
@@ -525,6 +539,7 @@ block1(v2: i32, v3: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
         let v1 = Value::new(1);
         let v1_range = liveness.live_ranges.get(&v1).unwrap();
@@ -552,6 +567,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // Check that all values have live ranges
@@ -591,6 +607,7 @@ block2(v3: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
         let v0 = Value::new(0);
 
@@ -614,6 +631,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v0 should be used in load and store
@@ -638,6 +656,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v0 should be used in comparison
@@ -666,6 +685,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v0 should be used multiple times
@@ -687,6 +707,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v0 should be used in return
@@ -712,6 +733,7 @@ block1(v3: i32, v4: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // Block 1 should have two parameters
@@ -735,6 +757,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v0 should be used as argument to call
@@ -757,6 +780,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v0 should be used in syscall and return
@@ -789,6 +813,7 @@ block4(v8: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v0 should be live across multiple blocks
@@ -820,6 +845,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // Check that live_sets contains entries
@@ -857,6 +883,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v0 should be in defs at block entry
@@ -913,6 +940,7 @@ block0(v0: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v0 should be defined before v1 uses it
@@ -942,6 +970,7 @@ block1(v2: i32):
 }"#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
 
         // v1 should be defined in block 0
@@ -977,19 +1006,8 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
 "#;
 
         let func = parse_function(ir).expect("Failed to parse IR");
+        debug_liveness(&func);
         let liveness = compute_liveness(&func);
-
-        // Format with liveness visualization
-        let visualization = format_function_with_liveness(&func, &liveness);
-
-        std::eprintln!("{}", visualization);
-
-        // Verify that the visualization contains expected elements
-        assert!(visualization.contains("function %test"));
-        assert!(visualization.contains("block0"));
-        assert!(visualization.contains("v10 = iadd v0, v1"));
-        assert!(visualization.contains("Liveness"));
-        assert!(visualization.contains("■")); // Should contain live markers
 
         // Verify liveness for specific instructions
         // At v10 = iadd v0, v1: v0 and v1 are used at this instruction

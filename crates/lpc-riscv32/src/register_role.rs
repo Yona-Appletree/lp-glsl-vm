@@ -29,18 +29,13 @@ pub trait RegisterRole {
     ///
     /// Saved registers are callee-saved and must be preserved
     /// across function calls.
-    fn is_saved(&self) -> bool;
+    fn is_callee_saved(&self) -> bool;
 
     /// Check if this register is caller-saved.
     ///
     /// Caller-saved registers include argument registers (a0-a7),
     /// temporary registers (t0-t6), and the return address (ra).
     fn is_caller_saved(&self) -> bool;
-
-    /// Check if this register is callee-saved.
-    ///
-    /// Callee-saved registers include saved registers (s0-s11).
-    fn is_callee_saved(&self) -> bool;
 }
 
 impl RegisterRole for Gpr {
@@ -63,7 +58,7 @@ impl RegisterRole for Gpr {
         )
     }
 
-    fn is_saved(&self) -> bool {
+    fn is_callee_saved(&self) -> bool {
         matches!(
             *self,
             Gpr::S0
@@ -84,11 +79,6 @@ impl RegisterRole for Gpr {
     fn is_caller_saved(&self) -> bool {
         // Caller-saved: argument registers, temporary registers, and return address
         self.is_argument_register() || self.is_temporary() || *self == Gpr::Ra
-    }
-
-    fn is_callee_saved(&self) -> bool {
-        // Callee-saved: saved registers
-        self.is_saved()
     }
 }
 
@@ -126,11 +116,11 @@ mod tests {
 
     #[test]
     fn test_saved_registers() {
-        assert!(Gpr::S0.is_saved());
-        assert!(Gpr::S1.is_saved());
-        assert!(Gpr::S11.is_saved());
-        assert!(!Gpr::A0.is_saved());
-        assert!(!Gpr::T0.is_saved());
+        assert!(Gpr::S0.is_callee_saved());
+        assert!(Gpr::S1.is_callee_saved());
+        assert!(Gpr::S11.is_callee_saved());
+        assert!(!Gpr::A0.is_callee_saved());
+        assert!(!Gpr::T0.is_callee_saved());
     }
 
     #[test]
@@ -157,13 +147,13 @@ mod tests {
         // Special registers should not match any category
         assert!(!Gpr::Zero.is_argument_register());
         assert!(!Gpr::Zero.is_temporary());
-        assert!(!Gpr::Zero.is_saved());
+        assert!(!Gpr::Zero.is_callee_saved());
         assert!(!Gpr::Zero.is_caller_saved());
         assert!(!Gpr::Zero.is_callee_saved());
 
         assert!(!Gpr::Sp.is_argument_register());
         assert!(!Gpr::Sp.is_temporary());
-        assert!(!Gpr::Sp.is_saved());
+        assert!(!Gpr::Sp.is_callee_saved());
         assert!(!Gpr::Sp.is_caller_saved());
         assert!(!Gpr::Sp.is_callee_saved());
     }
