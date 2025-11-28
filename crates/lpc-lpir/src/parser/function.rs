@@ -11,7 +11,6 @@ use nom::{
 
 use super::{
     block::parse_block,
-    inst_converter::inst_to_inst_data,
     primitives::{parse_function_name, parse_type},
     whitespace::blank,
 };
@@ -81,8 +80,7 @@ pub(crate) fn parse_function_internal(input: &str, anon_counter: usize) -> IResu
         function.append_block(block_entity);
 
         // Add instructions to the block
-        for inst in insts {
-            let inst_data = inst_to_inst_data(inst);
+        for inst_data in insts {
             let inst_entity = function.create_inst(inst_data);
             function.append_inst(inst_entity, block_entity);
         }

@@ -16,12 +16,13 @@ use super::{
 };
 use crate::{
     condcodes::{FloatCC, IntCC},
-    inst::Inst,
+    dfg::{Immediate, InstData, Opcode},
+    entity::{Block, EntityRef},
     trapcode::TrapCode,
 };
 
 /// Parse an arithmetic instruction (iadd, isub, imul, idiv, irem)
-pub(crate) fn parse_arithmetic(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_arithmetic(input: &str) -> IResult<&str, InstData> {
     let (input, result) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(tag("="), blank)(input)?;
     let (input, op) = terminated(
@@ -38,16 +39,16 @@ pub(crate) fn parse_arithmetic(input: &str) -> IResult<&str, Inst> {
     let (input, _) = terminated(char(','), blank)(input)?;
     let (input, arg2) = terminated(parse_value, blank)(input)?;
 
-    let inst = match op {
-        "iadd" => Inst::Iadd { result, arg1, arg2 },
-        "isub" => Inst::Isub { result, arg1, arg2 },
-        "imul" => Inst::Imul { result, arg1, arg2 },
-        "idiv" => Inst::Idiv { result, arg1, arg2 },
-        "irem" => Inst::Irem { result, arg1, arg2 },
+    let opcode = match op {
+        "iadd" => Opcode::Iadd,
+        "isub" => Opcode::Isub,
+        "imul" => Opcode::Imul,
+        "idiv" => Opcode::Idiv,
+        "irem" => Opcode::Irem,
         _ => unreachable!(),
     };
 
-    Ok((input, inst))
+    Ok((input, InstData::arithmetic(opcode, result, arg1, arg2)))
 }
 
 /// Parse an integer condition code
@@ -166,7 +167,7 @@ fn parse_trap_code(input: &str) -> IResult<&str, TrapCode> {
 }
 
 /// Parse a comparison instruction (icmp with condition code)
-pub(crate) fn parse_comparison(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_comparison(input: &str) -> IResult<&str, InstData> {
     let (input, result) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(tag("="), blank)(input)?;
     let (input, (_, cond, arg1, _, arg2)) = tuple((
@@ -179,17 +180,12 @@ pub(crate) fn parse_comparison(input: &str) -> IResult<&str, Inst> {
 
     Ok((
         input,
-        Inst::Icmp {
-            result,
-            cond,
-            arg1,
-            arg2,
-        },
+        InstData::comparison(Opcode::Icmp { cond }, result, arg1, arg2),
     ))
 }
 
 /// Parse a floating point comparison instruction (fcmp with condition code)
-pub(crate) fn parse_fcmp(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_fcmp(input: &str) -> IResult<&str, InstData> {
     let (input, result) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(tag("="), blank)(input)?;
     let (input, _) = terminated(tag("fcmp"), blank)(input)?;
@@ -200,17 +196,12 @@ pub(crate) fn parse_fcmp(input: &str) -> IResult<&str, Inst> {
 
     Ok((
         input,
-        Inst::Fcmp {
-            result,
-            cond,
-            arg1,
-            arg2,
-        },
+        InstData::comparison(Opcode::Fcmp { cond }, result, arg1, arg2),
     ))
 }
 
 /// Parse a constant instruction (iconst, fconst)
-pub(crate) fn parse_const(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_const(input: &str) -> IResult<&str, InstData> {
     let (input, result) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(tag("="), blank)(input)?;
     let (input, op) = terminated(alt((tag("iconst"), tag("fconst"))), blank)(input)?;
@@ -218,19 +209,19 @@ pub(crate) fn parse_const(input: &str) -> IResult<&str, Inst> {
     match op {
         "iconst" => {
             let (input, value) = terminated(integer, blank)(input)?;
-            Ok((input, Inst::Iconst { result, value }))
+            Ok((input, InstData::constant(result, Immediate::I64(value))))
         }
         "fconst" => {
             let (input, value) = terminated(float, blank)(input)?;
             let value_bits = value.to_bits();
-            Ok((input, Inst::Fconst { result, value_bits }))
+            Ok((input, InstData::constant(result, Immediate::F32Bits(value_bits))))
         }
         _ => unreachable!(),
     }
 }
 
 /// Parse a jump instruction
-pub(crate) fn parse_jump(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_jump(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("jump"), blank)(input)?;
     let (input, target) = terminated(parse_block_index, blank)(input)?;
     // Parse optional args in parentheses: (v1, v2, ...)
@@ -239,17 +230,13 @@ pub(crate) fn parse_jump(input: &str) -> IResult<&str, Inst> {
         separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
         terminated(char(')'), blank),
     ))(input)?;
-    Ok((
-        input,
-        Inst::Jump {
-            target,
-            args: args.unwrap_or_default(),
-        },
-    ))
+    let args = args.unwrap_or_default();
+    let target_block = Block::from_index(target as usize);
+    Ok((input, InstData::jump(target_block, args)))
 }
 
 /// Parse a branch instruction (brif)
-pub(crate) fn parse_branch(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_branch(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("brif"), blank)(input)?;
     let (input, condition) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(char(','), blank)(input)?;
@@ -268,20 +255,18 @@ pub(crate) fn parse_branch(input: &str) -> IResult<&str, Inst> {
         separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
         terminated(char(')'), blank),
     ))(input)?;
+    let args_true = args_true.unwrap_or_default();
+    let args_false = args_false.unwrap_or_default();
+    let target_true_block = Block::from_index(target_true as usize);
+    let target_false_block = Block::from_index(target_false as usize);
     Ok((
         input,
-        Inst::Br {
-            condition,
-            target_true,
-            args_true: args_true.unwrap_or_default(),
-            target_false,
-            args_false: args_false.unwrap_or_default(),
-        },
+        InstData::branch(condition, target_true_block, args_true, target_false_block, args_false),
     ))
 }
 
 /// Parse a call instruction
-pub(crate) fn parse_call(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_call(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("call"), blank)(input)?;
     let (input, callee) = terminated(parse_function_name, blank)(input)?;
     let (input, args) = delimited(
@@ -301,16 +286,12 @@ pub(crate) fn parse_call(input: &str) -> IResult<&str, Inst> {
 
     Ok((
         input,
-        Inst::Call {
-            callee,
-            args,
-            results: results.unwrap_or_default(),
-        },
+        InstData::call(callee, args, results.unwrap_or_default()),
     ))
 }
 
 /// Parse a syscall instruction
-pub(crate) fn parse_syscall(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_syscall(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("syscall"), blank)(input)?;
     let (input, number) = terminated(integer, blank)(input)?;
     let (input, args) = delimited(
@@ -320,15 +301,12 @@ pub(crate) fn parse_syscall(input: &str) -> IResult<&str, Inst> {
     )(input)?;
     Ok((
         input,
-        Inst::Syscall {
-            number: number as i32,
-            args,
-        },
+        InstData::syscall(number as i32, args),
     ))
 }
 
 /// Parse a load instruction
-pub(crate) fn parse_load(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_load(input: &str) -> IResult<&str, InstData> {
     let (input, result) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(tag("="), blank)(input)?;
     // Check if it's "load" using peek to avoid consuming input if it's not
@@ -338,65 +316,61 @@ pub(crate) fn parse_load(input: &str) -> IResult<&str, Inst> {
     let (input, address) = terminated(parse_value, blank)(input)?;
     Ok((
         input,
-        Inst::Load {
-            result,
-            address,
-            ty,
-        },
+        InstData::load(result, address, ty),
     ))
 }
 
 /// Parse a store instruction
-pub(crate) fn parse_store(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_store(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("store"), char('.'))(input)?;
     let (input, ty) = terminated(parse_type, blank)(input)?;
     let (input, address) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(char(','), blank)(input)?;
     let (input, value) = terminated(parse_value, blank)(input)?;
-    Ok((input, Inst::Store { address, value, ty }))
+    Ok((input, InstData::store(address, value, ty)))
 }
 
 /// Parse a return instruction
-pub(crate) fn parse_return(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_return(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("return"), blank)(input)?;
     // Parse space-separated values (Cranelift format)
     // Values are separated by spaces, not commas
     let (input, values) = many0(terminated(parse_value, blank))(input)?;
-    Ok((input, Inst::Return { values }))
+    Ok((input, InstData::return_(values)))
 }
 
 /// Parse a halt instruction
-pub(crate) fn parse_halt(input: &str) -> IResult<&str, Inst> {
-    map(terminated(tag("halt"), blank), |_| Inst::Halt)(input)
+pub(crate) fn parse_halt(input: &str) -> IResult<&str, InstData> {
+    map(terminated(tag("halt"), blank), |_| InstData::halt())(input)
 }
 
 /// Parse a trap instruction
-pub(crate) fn parse_trap(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_trap(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("trap"), blank)(input)?;
     let (input, code) = parse_trap_code(input)?;
-    Ok((input, Inst::Trap { code }))
+    Ok((input, InstData::trap(code)))
 }
 
 /// Parse a trapz instruction (trap if condition is zero)
-pub(crate) fn parse_trapz(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_trapz(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("trapz"), blank)(input)?;
     let (input, condition) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(char(','), blank)(input)?;
     let (input, code) = parse_trap_code(input)?;
-    Ok((input, Inst::Trapz { condition, code }))
+    Ok((input, InstData::trapz(condition, code)))
 }
 
 /// Parse a trapnz instruction (trap if condition is non-zero)
-pub(crate) fn parse_trapnz(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_trapnz(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("trapnz"), blank)(input)?;
     let (input, condition) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(char(','), blank)(input)?;
     let (input, code) = parse_trap_code(input)?;
-    Ok((input, Inst::Trapnz { condition, code }))
+    Ok((input, InstData::trapnz(condition, code)))
 }
 
 /// Parse any instruction
-pub(crate) fn parse_instruction(input: &str) -> IResult<&str, Inst> {
+pub(crate) fn parse_instruction(input: &str) -> IResult<&str, InstData> {
     // Order matters: more specific patterns first
     // Instructions that don't start with "v0 = " come first
     alt((
@@ -429,16 +403,17 @@ mod tests {
         let input = "v0 = iconst 42";
         let result = parse_const(input);
         assert!(result.is_ok(), "parse_const failed: {:?}", result);
-        let (remaining, inst) = result.unwrap();
+        let (remaining, inst_data) = result.unwrap();
         assert_eq!(
             remaining, "",
             "Should consume all input, got: {:?}",
             remaining
         );
-        if let Inst::Iconst { value, .. } = inst {
+        assert_eq!(inst_data.opcode, Opcode::Iconst);
+        if let Some(Immediate::I64(value)) = inst_data.imm {
             assert_eq!(value, 42);
         } else {
-            panic!("Expected Iconst, got: {:?}", inst);
+            panic!("Expected I64 immediate, got: {:?}", inst_data.imm);
         }
     }
 
@@ -447,13 +422,15 @@ mod tests {
         let input = "v0 = fconst 3.14";
         let result = parse_const(input);
         assert!(result.is_ok(), "parse_const failed: {:?}", result);
-        let (remaining, inst) = result.unwrap();
+        let (remaining, inst_data) = result.unwrap();
         assert_eq!(remaining, "", "Should consume all input");
-        assert!(matches!(inst, Inst::Fconst { .. }));
+        assert_eq!(inst_data.opcode, Opcode::Fconst);
         // Verify it's f32 (value_bits is u32)
-        if let Inst::Fconst { value_bits, .. } = inst {
+        if let Some(Immediate::F32Bits(value_bits)) = inst_data.imm {
             let f32_value = f32::from_bits(value_bits);
             assert!((f32_value - 3.14f32).abs() < 0.01);
+        } else {
+            panic!("Expected F32Bits immediate, got: {:?}", inst_data.imm);
         }
     }
 
@@ -462,9 +439,9 @@ mod tests {
         let input = "v0 = iconst 42";
         let result = parse_instruction(input);
         assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
-        let (remaining, inst) = result.unwrap();
+        let (remaining, inst_data) = result.unwrap();
         assert_eq!(remaining, "", "Should consume all input");
-        assert!(matches!(inst, Inst::Iconst { .. }));
+        assert_eq!(inst_data.opcode, Opcode::Iconst);
     }
 
     #[test]
@@ -472,8 +449,8 @@ mod tests {
         let input = "v0 = iadd v1, v2";
         let result = parse_instruction(input);
         assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        assert!(matches!(inst, Inst::Iadd { .. }));
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Iadd);
     }
 
     #[test]
@@ -481,12 +458,9 @@ mod tests {
         let input = "return";
         let result = parse_return(input);
         assert!(result.is_ok());
-        let (_, inst) = result.unwrap();
-        if let Inst::Return { values } = inst {
-            assert_eq!(values.len(), 0);
-        } else {
-            panic!("Expected Return");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Return);
+        assert_eq!(inst_data.args.len(), 0);
     }
 
     #[test]
@@ -494,12 +468,9 @@ mod tests {
         let input = "return v0 v1";
         let result = parse_return(input);
         assert!(result.is_ok());
-        let (_, inst) = result.unwrap();
-        if let Inst::Return { values } = inst {
-            assert_eq!(values.len(), 2);
-        } else {
-            panic!("Expected Return with 2 values");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Return);
+        assert_eq!(inst_data.args.len(), 2);
     }
 
     #[test]
@@ -507,8 +478,11 @@ mod tests {
         let input = "v0 = icmp eq v1, v2";
         let result = parse_comparison(input);
         assert!(result.is_ok(), "parse_comparison failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        assert!(matches!(inst, Inst::Icmp { cond: crate::condcodes::IntCC::Equal, .. }));
+        let (_, inst_data) = result.unwrap();
+        match &inst_data.opcode {
+            Opcode::Icmp { cond } => assert_eq!(*cond, crate::condcodes::IntCC::Equal),
+            _ => panic!("Expected Icmp opcode"),
+        }
     }
 
     #[test]
@@ -524,13 +498,13 @@ mod tests {
         let input = "jump block1";
         let result = parse_jump(input);
         assert!(result.is_ok(), "parse_jump failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        if let Inst::Jump { target, args } = inst {
-            assert_eq!(target, 1);
-            assert_eq!(args.len(), 0);
-        } else {
-            panic!("Expected Jump");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Jump);
+        assert!(inst_data.block_args.is_some());
+        let block_args = inst_data.block_args.as_ref().unwrap();
+        assert_eq!(block_args.targets.len(), 1);
+        assert_eq!(block_args.targets[0].0.index(), 1);
+        assert_eq!(block_args.targets[0].1.len(), 0);
     }
 
     #[test]
@@ -538,15 +512,15 @@ mod tests {
         let input = "jump block3(v1, v2)";
         let result = parse_jump(input);
         assert!(result.is_ok(), "parse_jump failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        if let Inst::Jump { target, args } = inst {
-            assert_eq!(target, 3);
-            assert_eq!(args.len(), 2);
-            assert_eq!(args[0].index(), 1);
-            assert_eq!(args[1].index(), 2);
-        } else {
-            panic!("Expected Jump");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Jump);
+        assert!(inst_data.block_args.is_some());
+        let block_args = inst_data.block_args.as_ref().unwrap();
+        assert_eq!(block_args.targets.len(), 1);
+        assert_eq!(block_args.targets[0].0.index(), 3);
+        assert_eq!(block_args.targets[0].1.len(), 2);
+        assert_eq!(block_args.targets[0].1[0].index(), 1);
+        assert_eq!(block_args.targets[0].1[1].index(), 2);
     }
 
     #[test]
@@ -554,22 +528,15 @@ mod tests {
         let input = "brif v0, block1, block2";
         let result = parse_branch(input);
         assert!(result.is_ok(), "parse_branch failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        if let Inst::Br {
-            target_true,
-            args_true,
-            target_false,
-            args_false,
-            ..
-        } = inst
-        {
-            assert_eq!(target_true, 1);
-            assert_eq!(args_true.len(), 0);
-            assert_eq!(target_false, 2);
-            assert_eq!(args_false.len(), 0);
-        } else {
-            panic!("Expected Br");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Br);
+        assert!(inst_data.block_args.is_some());
+        let block_args = inst_data.block_args.as_ref().unwrap();
+        assert_eq!(block_args.targets.len(), 2);
+        assert_eq!(block_args.targets[0].0.index(), 1);
+        assert_eq!(block_args.targets[0].1.len(), 0);
+        assert_eq!(block_args.targets[1].0.index(), 2);
+        assert_eq!(block_args.targets[1].1.len(), 0);
     }
 
     #[test]
@@ -577,25 +544,18 @@ mod tests {
         let input = "brif v0, block1(v1), block2(v2)";
         let result = parse_branch(input);
         assert!(result.is_ok(), "parse_branch failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        if let Inst::Br {
-            condition,
-            target_true,
-            args_true,
-            target_false,
-            args_false,
-        } = inst
-        {
-            assert_eq!(condition.index(), 0);
-            assert_eq!(target_true, 1);
-            assert_eq!(args_true.len(), 1);
-            assert_eq!(args_true[0].index(), 1);
-            assert_eq!(target_false, 2);
-            assert_eq!(args_false.len(), 1);
-            assert_eq!(args_false[0].index(), 2);
-        } else {
-            panic!("Expected Br");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Br);
+        assert_eq!(inst_data.args[0].index(), 0);
+        assert!(inst_data.block_args.is_some());
+        let block_args = inst_data.block_args.as_ref().unwrap();
+        assert_eq!(block_args.targets.len(), 2);
+        assert_eq!(block_args.targets[0].0.index(), 1);
+        assert_eq!(block_args.targets[0].1.len(), 1);
+        assert_eq!(block_args.targets[0].1[0].index(), 1);
+        assert_eq!(block_args.targets[1].0.index(), 2);
+        assert_eq!(block_args.targets[1].1.len(), 1);
+        assert_eq!(block_args.targets[1].1[0].index(), 2);
     }
 
     #[test]
@@ -604,24 +564,15 @@ mod tests {
         let input = "brif v0, block1, block2(v1)";
         let result = parse_branch(input);
         assert!(result.is_ok(), "parse_branch failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        if let Inst::Br {
-            condition,
-            target_true,
-            args_true,
-            target_false,
-            args_false,
-        } = inst
-        {
-            assert_eq!(condition.index(), 0);
-            assert_eq!(target_true, 1);
-            assert_eq!(args_true.len(), 0, "block1 should have no args");
-            assert_eq!(target_false, 2);
-            assert_eq!(args_false.len(), 1);
-            assert_eq!(args_false[0].index(), 1);
-        } else {
-            panic!("Expected Br");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Br);
+        assert!(inst_data.block_args.is_some());
+        let block_args = inst_data.block_args.as_ref().unwrap();
+        assert_eq!(block_args.targets[0].0.index(), 1);
+        assert_eq!(block_args.targets[0].1.len(), 0, "block1 should have no args");
+        assert_eq!(block_args.targets[1].0.index(), 2);
+        assert_eq!(block_args.targets[1].1.len(), 1);
+        assert_eq!(block_args.targets[1].1[0].index(), 1);
     }
 
     #[test]
@@ -630,24 +581,15 @@ mod tests {
         let input = "brif v0, block1(v1), block2";
         let result = parse_branch(input);
         assert!(result.is_ok(), "parse_branch failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        if let Inst::Br {
-            condition,
-            target_true,
-            args_true,
-            target_false,
-            args_false,
-        } = inst
-        {
-            assert_eq!(condition.index(), 0);
-            assert_eq!(target_true, 1);
-            assert_eq!(args_true.len(), 1);
-            assert_eq!(args_true[0].index(), 1);
-            assert_eq!(target_false, 2);
-            assert_eq!(args_false.len(), 0, "block2 should have no args");
-        } else {
-            panic!("Expected Br");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Br);
+        assert!(inst_data.block_args.is_some());
+        let block_args = inst_data.block_args.as_ref().unwrap();
+        assert_eq!(block_args.targets[0].0.index(), 1);
+        assert_eq!(block_args.targets[0].1.len(), 1);
+        assert_eq!(block_args.targets[0].1[0].index(), 1);
+        assert_eq!(block_args.targets[1].0.index(), 2);
+        assert_eq!(block_args.targets[1].1.len(), 0, "block2 should have no args");
     }
 
     #[test]
@@ -655,24 +597,20 @@ mod tests {
         let input = "call %func(v0, v1) -> v2";
         let result = parse_call(input);
         assert!(result.is_ok(), "parse_call failed: {:?}", result);
-        let (remaining, inst) = result.unwrap();
+        let (remaining, inst_data) = result.unwrap();
         assert_eq!(
             remaining, "",
             "Should consume all input, got: {:?}",
             remaining
         );
-        if let Inst::Call {
-            callee,
-            args,
-            results,
-        } = inst
-        {
-            assert_eq!(callee, "func");
-            assert_eq!(args.len(), 2);
-            assert_eq!(results.len(), 1, "Expected 1 result, got: {:?}", results);
-        } else {
-            panic!("Expected Call");
+        match &inst_data.opcode {
+            Opcode::Call { callee } => {
+                assert_eq!(callee, "func");
+            }
+            _ => panic!("Expected Call opcode"),
         }
+        assert_eq!(inst_data.args.len(), 2);
+        assert_eq!(inst_data.results.len(), 1, "Expected 1 result, got: {:?}", inst_data.results);
     }
 
     #[test]
@@ -680,12 +618,8 @@ mod tests {
         let input = "call %func(v0)";
         let result = parse_call(input);
         assert!(result.is_ok(), "parse_call failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        if let Inst::Call { results, .. } = inst {
-            assert_eq!(results.len(), 0);
-        } else {
-            panic!("Expected Call");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.results.len(), 0);
     }
 
     #[test]
@@ -693,13 +627,14 @@ mod tests {
         let input = "syscall 1(v0, v1)";
         let result = parse_syscall(input);
         assert!(result.is_ok(), "parse_syscall failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        if let Inst::Syscall { number, args } = inst {
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Syscall);
+        if let Some(Immediate::I32(number)) = inst_data.imm {
             assert_eq!(number, 1);
-            assert_eq!(args.len(), 2);
         } else {
-            panic!("Expected Syscall");
+            panic!("Expected I32 immediate");
         }
+        assert_eq!(inst_data.args.len(), 2);
     }
 
     #[test]
@@ -707,12 +642,9 @@ mod tests {
         let input = "v0 = load.i32 v1";
         let result = parse_load(input);
         assert!(result.is_ok(), "parse_load failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        if let Inst::Load { ty, .. } = inst {
-            assert_eq!(ty, crate::Type::I32);
-        } else {
-            panic!("Expected Load");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Load);
+        assert_eq!(inst_data.ty, Some(crate::Type::I32));
     }
 
     #[test]
@@ -720,12 +652,9 @@ mod tests {
         let input = "store.i32 v0, v1";
         let result = parse_store(input);
         assert!(result.is_ok(), "parse_store failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        if let Inst::Store { ty, .. } = inst {
-            assert_eq!(ty, crate::Type::I32);
-        } else {
-            panic!("Expected Store");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Store);
+        assert_eq!(inst_data.ty, Some(crate::Type::I32));
     }
 
     #[test]
@@ -733,8 +662,8 @@ mod tests {
         let input = "halt";
         let result = parse_halt(input);
         assert!(result.is_ok(), "parse_halt failed: {:?}", result);
-        let (_, inst) = result.unwrap();
-        assert!(matches!(inst, Inst::Halt));
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Halt);
     }
 
     #[test]
@@ -778,25 +707,21 @@ mod tests {
         let input = "call %helper(v10) -> v11\n        v12 = iconst 100";
         let result = parse_call(input);
         assert!(result.is_ok(), "parse_call failed: {:?}", result);
-        let (remaining, inst) = result.unwrap();
+        let (remaining, inst_data) = result.unwrap();
         // Should consume the call and whitespace, leaving the next instruction
         assert!(
             remaining.trim_start().starts_with("v12"),
             "Should leave next instruction, got: {:?}",
             remaining
         );
-        if let Inst::Call {
-            callee,
-            args,
-            results,
-        } = inst
-        {
-            assert_eq!(callee, "helper");
-            assert_eq!(args.len(), 1);
-            assert_eq!(results.len(), 1);
-        } else {
-            panic!("Expected Call instruction");
+        match &inst_data.opcode {
+            Opcode::Call { callee } => {
+                assert_eq!(callee, "helper");
+            }
+            _ => panic!("Expected Call opcode"),
         }
+        assert_eq!(inst_data.args.len(), 1);
+        assert_eq!(inst_data.results.len(), 1);
     }
 
     #[test]
@@ -805,13 +730,16 @@ mod tests {
         let input = "call %helper(v10) -> v11\n        v12 = iconst 100";
         let result = parse_instruction(input);
         assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
-        let (remaining, inst) = result.unwrap();
+        let (remaining, inst_data) = result.unwrap();
         assert!(
             remaining.trim_start().starts_with("v12"),
             "Should leave next instruction, got: {:?}",
             remaining
         );
-        assert!(matches!(inst, Inst::Call { .. }));
+        match inst_data.opcode {
+            Opcode::Call { .. } => {}
+            _ => panic!("Expected Call opcode"),
+        }
     }
 
     #[test]
@@ -820,24 +748,20 @@ mod tests {
         let input = "call %func(v0, v1) -> v2, v3, v4";
         let result = parse_call(input);
         assert!(result.is_ok(), "parse_call failed: {:?}", result);
-        let (remaining, inst) = result.unwrap();
+        let (remaining, inst_data) = result.unwrap();
         assert_eq!(
             remaining, "",
             "Should consume all input, got: {:?}",
             remaining
         );
-        if let Inst::Call {
-            callee,
-            args,
-            results,
-        } = inst
-        {
-            assert_eq!(callee, "func");
-            assert_eq!(args.len(), 2);
-            assert_eq!(results.len(), 3, "Expected 3 results, got: {:?}", results);
-        } else {
-            panic!("Expected Call");
+        match &inst_data.opcode {
+            Opcode::Call { callee } => {
+                assert_eq!(callee, "func");
+            }
+            _ => panic!("Expected Call opcode"),
         }
+        assert_eq!(inst_data.args.len(), 2);
+        assert_eq!(inst_data.results.len(), 3, "Expected 3 results, got: {:?}", inst_data.results);
     }
 
     #[test]
@@ -846,12 +770,13 @@ mod tests {
         let input = "call %helper(v10) -> v11, v12, v13";
         let result = parse_instruction(input);
         assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
-        let (remaining, inst) = result.unwrap();
+        let (remaining, inst_data) = result.unwrap();
         assert_eq!(remaining, "", "Should consume all input");
-        if let Inst::Call { results, .. } = inst {
-            assert_eq!(results.len(), 3, "Expected 3 results, got: {:?}", results);
-        } else {
-            panic!("Expected Call instruction");
+        match inst_data.opcode {
+            Opcode::Call { .. } => {
+                assert_eq!(inst_data.results.len(), 3, "Expected 3 results, got: {:?}", inst_data.results);
+            }
+            _ => panic!("Expected Call opcode"),
         }
     }
 
@@ -861,12 +786,9 @@ mod tests {
         let input = "return v0 v1 v2 v3";
         let result = parse_return(input);
         assert!(result.is_ok());
-        let (_, inst) = result.unwrap();
-        if let Inst::Return { values } = inst {
-            assert_eq!(values.len(), 4, "Expected 4 values, got: {:?}", values);
-        } else {
-            panic!("Expected Return with 4 values");
-        }
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Return);
+        assert_eq!(inst_data.args.len(), 4, "Expected 4 values, got: {:?}", inst_data.args);
     }
 
     #[test]
@@ -875,13 +797,10 @@ mod tests {
         let input = "return v0 v1 v2 v3 v4";
         let result = parse_instruction(input);
         assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
-        let (remaining, inst) = result.unwrap();
+        let (remaining, inst_data) = result.unwrap();
         assert_eq!(remaining, "", "Should consume all input");
-        if let Inst::Return { values } = inst {
-            assert_eq!(values.len(), 5, "Expected 5 values, got: {:?}", values);
-        } else {
-            panic!("Expected Return instruction");
-        }
+        assert_eq!(inst_data.opcode, Opcode::Return);
+        assert_eq!(inst_data.args.len(), 5, "Expected 5 values, got: {:?}", inst_data.args);
     }
 
     #[test]

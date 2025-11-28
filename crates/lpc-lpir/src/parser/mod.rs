@@ -3,7 +3,6 @@
 mod block;
 mod error;
 mod function;
-mod inst_converter;
 mod instructions;
 mod module;
 mod primitives;

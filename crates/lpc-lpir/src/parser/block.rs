@@ -48,7 +48,7 @@ fn parse_block_params(input: &str) -> IResult<&str, Vec<crate::value::Value>> {
 /// Returns (params, instructions) tuple
 pub(crate) fn parse_block(
     input: &str,
-) -> IResult<&str, (Vec<crate::value::Value>, Vec<crate::inst::Inst>)> {
+) -> IResult<&str, (Vec<crate::value::Value>, Vec<crate::dfg::InstData>)> {
     let (input, _) = blank(input)?;
     let (input, _block_index) = terminated(parse_block_index, blank)(input)?;
     let (input, params) = opt(parse_block_params)(input)?;
@@ -167,8 +167,8 @@ mod tests {
         assert!(result.is_ok(), "parse_block failed: {:?}", result);
         let (_remaining, (_params, insts)) = result.unwrap();
         assert_eq!(insts.len(), 2, "Expected 2 instructions");
-        assert!(matches!(insts[0], crate::inst::Inst::Iconst { .. }));
-        assert!(matches!(insts[1], crate::inst::Inst::Return { .. }));
+        assert_eq!(insts[0].opcode, crate::dfg::Opcode::Iconst);
+        assert_eq!(insts[1].opcode, crate::dfg::Opcode::Return);
     }
 
     #[test]
@@ -281,7 +281,10 @@ mod tests {
         );
         assert_eq!(insts.len(), 6, "Expected 6 instructions");
         // Verify the call instruction is parsed correctly
-        assert!(matches!(insts[2], crate::inst::Inst::Call { .. }));
+        match insts[2].opcode {
+            crate::dfg::Opcode::Call { .. } => {}
+            _ => panic!("Expected Call opcode"),
+        }
     }
 
     #[test]
@@ -318,13 +321,14 @@ mod tests {
         );
         assert_eq!(insts.len(), 14, "Expected 14 instructions");
         // Verify call is at the right position
-        assert!(
-            matches!(insts[10], crate::inst::Inst::Call { .. }),
-            "Expected call instruction at position 9"
-        );
+        match insts[10].opcode {
+            crate::dfg::Opcode::Call { .. } => {}
+            _ => panic!("Expected call instruction at position 10"),
+        }
         // Verify instructions after call are parsed
-        assert!(
-            matches!(insts[11], crate::inst::Inst::Iconst { .. }),
+        assert_eq!(
+            insts[11].opcode,
+            crate::dfg::Opcode::Iconst,
             "Expected iconst after call"
         );
     }
