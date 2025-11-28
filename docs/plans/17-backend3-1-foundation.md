@@ -64,9 +64,12 @@ pub struct VCode<I: MachInst> {
     /// Relocations (function calls, etc.)
     relocations: Vec<VCodeReloc>,
 
+    /// Source locations for each instruction (for debugging)
+    /// One RelSourceLoc per instruction, parallel to `insts` array
+    srclocs: Vec<RelSourceLoc>,
+
     // Optional fields (deferred):
     // vreg_types: Vec<Type>,  // VReg types (add if needed for validation)
-    // srclocs: Vec<RelSourceLoc>,  // Source locations (deferred)
     // debug_value_labels: Vec<(VReg, InsnIndex, InsnIndex, u32)>,  // Debug info (deferred)
 }
 ```
@@ -93,14 +96,13 @@ Comparing with Cranelift's VCode, here's what we include vs. defer:
 
 **Deferred (Optional for Initial Implementation)**:
 - ❌ `vreg_types`: VReg types (for type checking) - **Add if needed for validation**
-- ❌ `srclocs`: Source locations per instruction - **Deferred** (see notes)
 - ❌ `debug_tags`: Debug tags - **Deferred** (not needed initially)
 - ❌ `user_stack_maps`: Stack maps for safepoints - **Deferred** (GC not needed)
 - ❌ `debug_value_labels`: Value labels for debug info - **Deferred** (debug info later)
 - ❌ `facts`: Proof-carrying code facts - **Deferred** (advanced feature)
 - ❌ `emit_info`: ISA-specific emission info - **May need** (for instruction encoding)
 
-**Recommendation**: Start with the included fields. Add `vreg_types` if we need type validation, and `emit_info` if needed for RISC-V-specific emission details. All other fields can be added later if needed.
+**Note**: `srclocs` is included for debugging support. See source location tracking section below.
 
 ### 2. Block lowering order (ISA-agnostic)
 
@@ -134,7 +136,42 @@ Comparing with Cranelift's VCode, here's what we include vs. defer:
 - Create virtual registers for values
 - Build VCode structure
 - Handle edge blocks (phi moves)
+- Track source locations from IR instructions
 - Uses MachInst trait (implemented by RISC-V 32 MachInst)
+
+**Source Location Tracking During Lowering**:
+
+When lowering an IR instruction, capture its source location:
+
+```rust
+impl Lower {
+    fn lower_inst(&mut self, inst: InstEntity) {
+        // Get source location from IR instruction
+        let ir_srcloc = self.func.srcloc(inst);
+        
+        // Convert to RelSourceLoc (relative to function's base source location)
+        let base_srcloc = self.func.base_srcloc();
+        let rel_srcloc = RelSourceLoc::from_base_offset(base_srcloc, ir_srcloc);
+        
+        // Lower the instruction
+        let mach_inst = match inst_data.opcode {
+            Opcode::Iadd => {
+                // ... create MachInst ...
+            }
+            // ...
+        };
+        
+        // Push instruction with source location
+        self.vcode.push(mach_inst, rel_srcloc);
+    }
+}
+```
+
+**Handling Synthetic Instructions**:
+
+For instructions created during lowering (e.g., constant materialization, phi moves):
+- If they correspond to an IR instruction: use that instruction's source location
+- If they're truly synthetic (no IR equivalent): use `RelSourceLoc::default()`
 
 **See**: Main plan for Lowering details (`17-backend3.md`)
 

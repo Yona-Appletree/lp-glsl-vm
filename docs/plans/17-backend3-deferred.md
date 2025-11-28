@@ -34,9 +34,9 @@ This document tracks features and optimizations that are **not** part of the ini
 ## Debugging and Diagnostics
 
 ### Debug Information
-- **Source Location Tracking**: Track source locations through compilation
 - **Debug Tags**: Emit debug metadata for debugging tools
 - **Value Label Ranges**: Track where values are live in machine code
+- **DWARF Debug Info**: Generate DWARF debug sections for debugging tools
 
 ### Unwind Information
 - **Exception Handling**: Generate unwind info for exception handling
@@ -48,6 +48,12 @@ This document tracks features and optimizations that are **not** part of the ini
 - **Rematerialization**: Recompute values instead of spilling
 - **Coalescing**: Merge related virtual registers
 - **Live Range Splitting**: Split live ranges for better allocation
+
+### Clobber Computation Optimization
+- **Dead Write Elimination**: The current algorithm saves all callee-saved registers that are written to, even if the value is dead (never read). Could optimize by:
+  - Only saving callee-saved registers that are live across calls
+  - Skipping saves for dead writes to callee-saved registers
+  - This would reduce prologue/epilogue overhead for functions that write to callee-saved registers but don't use the values
 
 ## Other Features
 

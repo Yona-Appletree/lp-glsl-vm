@@ -35,6 +35,10 @@ struct EmitState {
     /// Prologue/epilogue state
     frame_size: u32,
     clobbered_callee_saved: Vec<RealReg>,
+
+    /// Current source location (for debugging)
+    /// Tracks the current source location being emitted
+    cur_srcloc: Option<RelSourceLoc>,
 }
 
 struct PendingFixup {
@@ -148,6 +152,20 @@ impl EmitState {
             }
         }
         self.pending_fixups.clear();
+    }
+
+    /// Start a new source location range
+    fn start_srcloc(&mut self, srcloc: RelSourceLoc) {
+        // For now, just track it. In the future, could emit debug info.
+        self.cur_srcloc = Some(srcloc);
+        // TODO: Could call buffer.start_srcloc() if InstBuffer supports it
+    }
+
+    /// End the current source location range
+    fn end_srcloc(&mut self) {
+        // For now, just clear it. In the future, could emit debug info.
+        self.cur_srcloc = None;
+        // TODO: Could call buffer.end_srcloc() if InstBuffer supports it
     }
 }
 ```
@@ -358,6 +376,59 @@ impl VCode<MachInst> {
 - Iterate blocks and instructions
 - Record relocations
 - Streaming label-based emission
+- Track source locations for debugging
+
+**Source Location Tracking During Emission**:
+
+Track the current source location and update when it changes:
+
+```rust
+impl VCode<MachInst> {
+    fn emit(&self, regalloc: &regalloc2::Output) -> InstBuffer {
+        let mut state = EmitState::new();
+        let mut buffer = InstBuffer::new();
+        let mut cur_srcloc: Option<RelSourceLoc> = None;
+        
+        // ... emission loop ...
+        
+        for inst_or_edit in regalloc.block_insts_and_edits(&self, block_idx) {
+            match inst_or_edit {
+                InstOrEdit::Inst(inst_idx) => {
+                    // Update source location if it changed
+                    let inst_srcloc = self.srclocs[inst_idx.index()];
+                    if cur_srcloc != Some(inst_srcloc) {
+                        if cur_srcloc.is_some() {
+                            // End previous source location range
+                            state.end_srcloc();
+                        }
+                        if !inst_srcloc.is_default() {
+                            // Start new source location range
+                            state.start_srcloc(inst_srcloc);
+                            cur_srcloc = Some(inst_srcloc);
+                        } else {
+                            cur_srcloc = None;
+                        }
+                    }
+                    
+                    // Emit instruction...
+                }
+                InstOrEdit::Edit(_) => {
+                    // Edits don't have source locations (they're synthetic)
+                }
+            }
+        }
+        
+        // ...
+    }
+}
+```
+
+**Debugging Support**:
+
+Source locations can be used for:
+- Error messages: "Error at instruction X (source location Y)"
+- Debug output: Print source locations when dumping VCode
+- Future: DWARF debug info generation
 
 **See**: Main plan for emission details (`17-backend3.md`)
 

@@ -14,7 +14,9 @@ This document tracks the big remaining questions and open issues for backend3 im
 3. Add explicitly clobbered registers from instruction clobber lists
 4. Filter to only callee-saved registers
 
-**Status**: ✅ Resolved - Algorithm documented in plan
+**Note**: Current algorithm saves all callee-saved registers that are written to, even if the value is dead (never read). This is correct but potentially suboptimal. Optimization opportunities are documented in deferred features.
+
+**Status**: ✅ Resolved - Algorithm documented in plan, optimization deferred
 
 ---
 
@@ -110,14 +112,20 @@ This document tracks the big remaining questions and open issues for backend3 im
 
 **Question**: Do we need source location tracking, and if so, how?
 
-**Answer**: Decision - **Deferred for initial implementation**
-- Not needed for correctness
-- Can be added later if debugging/error reporting requires it
-- Would add `srclocs: Vec<RelSourceLoc>` field to VCode
-- Track through lowering, emit during code generation
-- See deferred features document for details
+**Answer**: **Yes, we need it for debugging the compiler**
+- Add `srclocs: Vec<RelSourceLoc>` field to VCode (one per instruction)
+- During lowering: Capture source location from IR instruction, convert to RelSourceLoc
+- During emission: Track current source location, update when it changes
+- Use for error messages and debug output
+- Synthetic instructions (edits, constant materialization) use default/empty source location
 
-**Status**: ✅ Resolved - Decision: Defer to later
+**Implementation**:
+- VCode stores `srclocs: Vec<RelSourceLoc>` parallel to `insts` array
+- VCodeBuilder::push() takes RelSourceLoc parameter
+- Lowering: Get source location from IR instruction via `func.srcloc(inst)`
+- Emission: Track current source location, call start_srcloc()/end_srcloc() when it changes
+
+**Status**: ✅ Resolved - Implementation plan added to Phase 1 and Phase 3
 
 ---
 

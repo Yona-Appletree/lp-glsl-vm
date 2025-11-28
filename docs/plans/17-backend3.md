@@ -173,18 +173,26 @@ enum LoweredBlock {
 
 **Key Steps**:
 
-1. **Compute Emission Order**: Determine final block order (cold blocks at end) BEFORE emission
-2. **Initialize Emission State**: Track SP offsets, labels, relocations
-3. **Compute Frame Layout**: Calculate frame size from regalloc spills + ABI requirements
-4. **Generate Prologue**: Frame setup, callee-saved saves (at entry block)
-5. **Emit Blocks in Order**: For each block in emission order:
-   - Bind block label to current offset
+1. **Reserve Labels**: Reserve label space for all blocks in InstBuffer
+2. **Register Constants**: Register constants with InstBuffer (if constant pool supported)
+3. **Compute Emission Order**: Determine final block order (cold blocks at end) BEFORE emission
+4. **Compute Clobbers and Function Calls**: Determine which callee-saved registers are clobbered and track function call types
+5. **Compute Frame Layout**: Calculate frame size from regalloc spills + ABI requirements + function calls
+6. **Initialize Emission State**: Create emission state with ABI information, track SP offsets, labels, relocations
+7. **Emit Blocks in Order**: For each block in emission order:
+   - Call block start hook (if needed for emission state)
    - Emit block alignment (if needed)
-   - Emit instructions and edits (apply allocations, insert moves/spills/reloads)
+   - Generate prologue (if entry block)
+   - Bind block label to current offset
+   - Emit block start instruction (if needed, e.g., for indirect targets)
+   - For each instruction/edit in block:
+     - Update source location tracking (if changed)
+     - If return instruction: emit epilogue instead of return
+     - Otherwise: apply allocations, emit instruction
+     - Emit edits (moves, spills, reloads)
    - Emit branches (using labels, resolve incrementally)
-   - Emit epilogue at return instructions (not at end)
-6. **Final Branch Resolution**: Resolve any remaining forward references
-7. **Fix External Relocations**: Resolve function call addresses and other external relocations
+8. **Final Branch Resolution**: Resolve any remaining forward references
+9. **Fix External Relocations**: Resolve function call addresses and other external relocations
 
 **Label-Based Branch Resolution**:
 
@@ -221,6 +229,25 @@ struct EmitState {
     /// Prologue/epilogue state
     frame_size: u32,
     clobbered_callee_saved: Vec<RealReg>,
+}
+
+impl EmitState {
+    /// Create new emission state with ABI information
+    fn new(abi: &Callee<I::ABIMachineSpec>) -> Self {
+        EmitState {
+            sp_offset: 0,
+            label_offsets: Vec::new(),
+            pending_fixups: Vec::new(),
+            external_relocations: Vec::new(),
+            frame_size: 0,
+            clobbered_callee_saved: Vec::new(),
+        }
+    }
+
+    /// Called when starting a new block (hook for emission state updates)
+    fn on_new_block(&mut self) {
+        // For now, no-op. Future: could track block-level state if needed.
+    }
 }
 
 struct PendingFixup {
@@ -635,34 +662,31 @@ impl VCode<MachInst> {
         self,
         regalloc: &regalloc2::Output,
     ) -> InstBuffer {
-        let mut state = EmitState::new();
         let mut buffer = InstBuffer::new();
 
-        // 1. Compute emission order (cold blocks at end) BEFORE emission
+        // 1. Reserve labels for all blocks
+        buffer.reserve_labels_for_blocks(self.num_blocks());
+
+        // 2. Register constants with buffer (if constant pool supported)
+        // This allows the buffer to handle constant references during emission
+        buffer.register_constants(&self.constants);
+
+        // 3. Compute emission order (cold blocks at end) BEFORE emission
         let block_order = self.compute_emission_order();
 
-        // 2. Initialize label offsets (all unknown initially)
-        state.label_offsets.resize(self.num_blocks(), UNKNOWN_LABEL_OFFSET);
-
-        // 3. Compute frame layout from regalloc results
+        // 4. Compute frame layout from regalloc results
         let frame_layout = self.compute_frame_layout(regalloc);
+
+        // 5. Initialize emission state with ABI information
+        let mut state = EmitState::new(&self.abi);
+        state.label_offsets.resize(self.num_blocks(), UNKNOWN_LABEL_OFFSET);
         state.frame_size = frame_layout.total_size;
         state.clobbered_callee_saved = frame_layout.clobbered_regs.clone();
 
-        // 4. Emit blocks in final order
+        // 6. Emit blocks in final order
         for block_idx in block_order {
-            // Bind label for this block
-            let label = MachLabel::from_block(block_idx);
-            let block_start = buffer.cur_offset();
-            state.bind_label(label, block_start);
-
-            // Resolve any pending fixups that targeted this label
-            state.resolve_pending_fixups(&mut buffer, label, block_start);
-
-            // Is this the entry block? Emit prologue
-            if block_idx == self.entry {
-                self.gen_prologue(&mut buffer, &mut state, &frame_layout);
-            }
+            // Call block start hook (if needed for emission state)
+            state.on_new_block();
 
             // Emit block alignment (if needed)
             // For RISC-V 32, blocks are naturally 4-byte aligned (instruction size)
@@ -672,9 +696,25 @@ impl VCode<MachInst> {
             let aligned_offset = I::align_basic_block(buffer.cur_offset());
             while buffer.cur_offset() < aligned_offset {
                 // Emit NOPs to align (if alignment > 4 bytes)
-                let nop = I::gen_nop(1);
-                buffer.emit(nop);
+                let nop = I::gen_nop((aligned_offset - buffer.cur_offset()) as usize);
+                nop.emit(&mut buffer, &self.emit_info, &mut state);
             }
+
+            // Is this the entry block? Emit prologue
+            if block_idx == self.entry {
+                buffer.start_srcloc(Default::default());
+                self.gen_prologue(&mut buffer, &mut state, &frame_layout);
+                buffer.end_srcloc();
+            }
+
+            // Bind label for this block
+            let label = MachLabel::from_block(block_idx);
+            let block_start_offset = buffer.cur_offset();
+            state.bind_label(label, block_start_offset);
+            buffer.bind_label(label);
+
+            // Resolve any pending fixups that targeted this label
+            state.resolve_pending_fixups(&mut buffer, label, block_start_offset);
 
             // Emit block start instruction (if needed)
             // Some ISAs emit special instructions at block start (e.g., for CFI)
@@ -683,7 +723,7 @@ impl VCode<MachInst> {
                 self.block_metadata[block_idx].is_indirect_target,
                 false, // forward edge CFI not needed for RISC-V 32
             ) {
-                buffer.emit(block_start);
+                block_start.emit(&mut buffer, &self.emit_info, &mut state);
             }
 
             // Emit instructions and edits
@@ -726,10 +766,10 @@ impl VCode<MachInst> {
             }
         }
 
-        // 5. Resolve any remaining forward references (should be none if order is correct)
+        // 7. Resolve any remaining forward references (should be none if order is correct)
         state.resolve_all_pending_fixups(&mut buffer);
 
-        // 6. Fix external relocations (function calls, etc.)
+        // 8. Fix external relocations (function calls, etc.)
         self.fix_external_relocations(&mut buffer, &state);
 
         buffer
@@ -798,11 +838,12 @@ impl VCode<MachInst> {
         // 1. Count spill slots from regalloc
         let spill_slots = regalloc.spill_slots().len();
 
-        // 2. Compute ABI requirements (incoming args, outgoing args, return area)
-        let abi_size = self.abi.compute_frame_size();
+        // 2. Compute clobbers and function calls (function calls affect frame layout)
+        let (clobbered, function_calls) = self.compute_clobbers_and_function_calls(regalloc);
 
-        // 3. Determine clobbered callee-saved registers
-        let clobbered = self.compute_clobbered_callee_saved(regalloc);
+        // 3. Compute ABI requirements (incoming args, outgoing args, return area)
+        // Function calls affect outgoing args area size
+        let abi_size = self.abi.compute_frame_size(function_calls);
 
         // 4. Compute total frame size
         FrameLayout {
@@ -814,15 +855,17 @@ impl VCode<MachInst> {
         }
     }
 
-    fn compute_clobbered_callee_saved(&self, regalloc: &regalloc2::Output) -> Vec<RealReg> {
+    fn compute_clobbers_and_function_calls(&self, regalloc: &regalloc2::Output) -> (Vec<RealReg>, FunctionCalls) {
         // Algorithm (inspired by Cranelift):
         // 1. Collect all registers that are written to (defs) in regalloc results
         // 2. Add registers that are targets of moves (from edits)
         // 3. Add explicitly clobbered registers from instruction clobber lists
         // 4. Filter to only callee-saved registers
+        // 5. Track function call types (affects frame layout)
 
         use regalloc2::PRegSet;
         let mut clobbered = PRegSet::default();
+        let mut function_calls = FunctionCalls::None;
 
         // 1. Add all registers that are targets of moves (from edits)
         // These represent register-to-register moves inserted by regalloc
@@ -835,9 +878,13 @@ impl VCode<MachInst> {
         }
 
         // 2. Add all registers that are defs (written to) in instructions
+        // Also track function call types
         for (inst_idx, range) in self.operand_ranges.iter() {
             let operands = &self.operands[range.clone()];
             let allocs = &regalloc.allocs[range];
+
+            // Track function calls (affects frame layout, e.g., outgoing args area)
+            function_calls.update(self.insts[inst_idx].call_type());
 
             for (operand, alloc) in operands.iter().zip(allocs.iter()) {
                 // Only consider defs (writes)
@@ -872,7 +919,13 @@ impl VCode<MachInst> {
 
         // Sort for consistent ordering (affects frame layout)
         clobbered_callee_saved.sort();
-        clobbered_callee_saved
+        (clobbered_callee_saved, function_calls)
+    }
+
+    fn compute_clobbered_callee_saved(&self, regalloc: &regalloc2::Output) -> Vec<RealReg> {
+        // Convenience wrapper that extracts just the clobbered registers
+        let (clobbered_regs, _) = self.compute_clobbers_and_function_calls(regalloc);
+        clobbered_regs
     }
 
     fn gen_prologue(
