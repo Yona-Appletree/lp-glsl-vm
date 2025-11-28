@@ -21,6 +21,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/lpc-riscv32/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/lpc-riscv32/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/runtime-embive/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-lpir/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/apps/esp32c3-jit-test/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>

@@ -39,7 +39,7 @@ impl FunctionBuilder {
     }
 
     /// Create a new block with parameters (for phi nodes).
-    pub fn create_block_with_params(&mut self, params: Vec<Value>) -> BlockEntity {
+    pub fn block_with_params(&mut self, params: Vec<Value>) -> BlockEntity {
         let block = self.function.create_block_with_params(params);
         self.function.append_block(block);
         block
