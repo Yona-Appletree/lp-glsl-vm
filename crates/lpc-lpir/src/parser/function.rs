@@ -45,7 +45,11 @@ pub(crate) fn parse_signature(input: &str) -> IResult<&str, Signature> {
 
 /// Parse a function (internal, used by module parser)
 /// The module parser handles leading whitespace before calling this
-pub(crate) fn parse_function_internal(input: &str) -> IResult<&str, Function> {
+/// If no name is provided, a temporary name will be generated (module parser will replace it)
+pub(crate) fn parse_function_internal(
+    input: &str,
+    anon_counter: usize,
+) -> IResult<&str, Function> {
     let (input, _) = terminated(tag("function"), blank)(input)?;
     let (input, name) = opt(terminated(parse_function_name, blank))(input)?;
     let (input, signature) = parse_signature(input)?;
@@ -55,6 +59,9 @@ pub(crate) fn parse_function_internal(input: &str) -> IResult<&str, Function> {
 
     // Allow whitespace before closing brace
     let (input, _) = terminated(char('}'), blank)(input)?;
+
+    // Generate a name if none was provided (module parser will replace with proper anon name)
+    let name = name.unwrap_or_else(|| alloc::format!("temp_anon_{}", anon_counter));
 
     Ok((
         input,
@@ -94,7 +101,7 @@ mod tests {
     #[test]
     fn test_parse_function_internal_minimal() {
         let input = "function %test() -> i32 {\nblock0:\n    v0 = iconst 42\n    return v0\n}";
-        let result = parse_function_internal(input);
+        let result = parse_function_internal(input, 0);
         assert!(
             result.is_ok(),
             "parse_function_internal failed: {:?}",
@@ -140,7 +147,7 @@ block0:
     v1 = iconst 2
     return v0 v1
 }"#;
-        let result = parse_function_internal(input);
+        let result = parse_function_internal(input, 0);
         assert!(
             result.is_ok(),
             "parse_function_internal failed: {:?}",

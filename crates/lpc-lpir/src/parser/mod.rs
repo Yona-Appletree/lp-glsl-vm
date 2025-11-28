@@ -46,7 +46,7 @@ pub fn parse_module(input: &str) -> Result<Module, ParseError> {
 pub fn parse_function(input: &str) -> Result<Function, ParseError> {
     // Trim leading/trailing whitespace
     let trimmed = input.trim();
-    match parse_function_internal(trimmed) {
+    match parse_function_internal(trimmed, 0) {
         Ok(("", func)) => {
             // Validate all aspects of the function
             if let Err(err_msg) = validation::validate_block_indices(&func) {

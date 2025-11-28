@@ -310,7 +310,7 @@ impl R5FnTest {
     ) -> Function {
         // Bootstrap signature: no params, returns i32 (for syscall)
         let sig = Signature::new(Vec::new(), vec![Type::I32]);
-        let mut builder = FunctionBuilder::new(sig);
+        let mut builder = FunctionBuilder::new(sig, String::from("bootstrap"));
 
         let block_idx = builder.create_block();
 

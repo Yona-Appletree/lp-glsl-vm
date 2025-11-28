@@ -234,7 +234,7 @@ mod tests {
 
     fn create_test_function() -> Function {
         let sig = Signature::new(alloc::vec![Type::I32], alloc::vec![Type::I32]);
-        let mut func = Function::new(sig);
+        let mut func = Function::new(sig, String::from("test"));
 
         let mut block0 = Block::with_params(alloc::vec![Value::new(0)]);
         block0.insts.push(Inst::Iconst {

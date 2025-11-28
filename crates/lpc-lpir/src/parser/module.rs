@@ -1,9 +1,9 @@
 //! Module parser.
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 
 use nom::{
-    bytes::complete::tag, character::complete::char, combinator::opt, multi::many0,
+    bytes::complete::tag, character::complete::char, combinator::opt,
     sequence::terminated, IResult,
 };
 
@@ -28,25 +28,58 @@ pub(crate) fn parse_module_internal(input: &str) -> IResult<&str, Module> {
 
     let (input, entry) = opt(parse_entry)(input)?;
 
-    // Consume whitespace before each function (many0 doesn't do this automatically)
-    let (input, functions) = many0(parse_function_internal)(input)?;
+    // Parse functions manually to handle anon counter
+    let mut anon_counter = 0;
+    let mut remaining_input = input;
+    let mut functions = Vec::new();
+
+    loop {
+        // Skip whitespace
+        let input_after_ws = remaining_input.trim_start();
+
+        // Check if we're at the closing brace
+        if input_after_ws.starts_with('}') {
+            remaining_input = input_after_ws;
+            break;
+        }
+
+        // Try to parse a function
+        match parse_function_internal(input_after_ws, anon_counter) {
+            Ok((new_input, mut func)) => {
+                // If function has a temp_anon name, replace it with proper anon name
+                let name = if func.name.starts_with("temp_anon_") {
+                    let anon_name = alloc::format!("anon_{}", anon_counter);
+                    anon_counter += 1;
+                    func.set_name(anon_name.clone());
+                    anon_name
+                } else {
+                    anon_counter += 1; // Still increment to avoid conflicts
+                    func.name.clone()
+                };
+                functions.push((name, func));
+                remaining_input = new_input;
+            }
+            Err(e) => {
+                // If parsing fails, check if we're at the end
+                if remaining_input.trim_start().starts_with('}') {
+                    remaining_input = remaining_input.trim_start();
+                    break;
+                }
+                // Otherwise, return the original error
+                return Err(e);
+            }
+        }
+    }
+
+    let input = remaining_input;
 
     let (input, _) = terminated(char('}'), blank)(input)?;
 
     let mut module = Module::new();
 
     // Add all functions to module
-    let mut anon_counter = 0;
-    for mut func in functions {
-        if let Some(name) = &func.name {
-            module.add_function(name.clone(), func);
-        } else {
-            // Generate a unique name for unnamed functions
-            let anon_name = alloc::format!("anon_{}", anon_counter);
-            anon_counter += 1;
-            func.set_name(anon_name.clone());
-            module.add_function(anon_name, func);
-        }
+    for (name, func) in functions {
+        module.add_function(name, func);
     }
 
     // Set entry function if specified

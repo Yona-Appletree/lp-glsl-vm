@@ -1,6 +1,6 @@
 //! Function builder.
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
 use crate::{
     builder::{block_builder::BlockBuilder, ssa_builder::SSABuilder},
@@ -21,10 +21,10 @@ pub struct FunctionBuilder {
 }
 
 impl FunctionBuilder {
-    /// Create a new function builder with the given signature.
-    pub fn new(signature: Signature) -> Self {
+    /// Create a new function builder with the given signature and name.
+    pub fn new(signature: Signature, name: String) -> Self {
         Self {
-            function: Function::new(signature),
+            function: Function::new(signature, name),
             ssa: SSABuilder::new(),
             current_block: None,
         }
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn test_function_builder_creation() {
         let sig = Signature::new(vec![Type::I32, Type::I32], vec![Type::I32]);
-        let builder = FunctionBuilder::new(sig);
+        let builder = FunctionBuilder::new(sig, String::from("test"));
         let func = builder.finish();
         assert_eq!(func.block_count(), 0);
     }
@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn test_create_block() {
         let sig = Signature::empty();
-        let mut builder = FunctionBuilder::new(sig);
+        let mut builder = FunctionBuilder::new(sig, String::from("test"));
         let block_idx = builder.create_block();
         assert_eq!(block_idx, 0);
         let func = builder.finish();
@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn test_block_builder() {
         let sig = Signature::empty();
-        let mut builder = FunctionBuilder::new(sig);
+        let mut builder = FunctionBuilder::new(sig, String::from("test"));
         let block_idx = builder.create_block();
 
         let _v1 = builder.new_value();
@@ -128,7 +128,7 @@ mod tests {
     fn test_build_add_function() {
         // Build: fn add(a: i32, b: i32) -> i32 { a + b }
         let sig = Signature::new(vec![Type::I32, Type::I32], vec![Type::I32]);
-        let mut builder = FunctionBuilder::new(sig);
+        let mut builder = FunctionBuilder::new(sig, String::from("add"));
         let block_idx = builder.create_block();
 
         // Get parameter values (in real usage, these would come from block params)

@@ -339,10 +339,13 @@ mod tests {
             value::Value,
         };
 
-        let mut func = Function::new(Signature {
-            params: vec![Type::I32],
-            returns: vec![Type::I32],
-        });
+        let mut func = Function::new(
+            Signature {
+                params: vec![Type::I32],
+                returns: vec![Type::I32],
+            },
+            String::from("test"),
+        );
 
         // block0: defines v1
         let mut block0 = Block::new();

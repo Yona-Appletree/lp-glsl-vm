@@ -95,7 +95,7 @@ mod tests {
 
     fn create_test_function() -> Function {
         let sig = Signature::new(alloc::vec![Type::I32], alloc::vec![Type::I32]);
-        let mut func = Function::new(sig);
+        let mut func = Function::new(sig, String::from("test"));
         let block0 = Block::new();
         func.blocks.push(block0);
         func
@@ -215,7 +215,7 @@ mod fixup_tests {
 
     fn create_test_function() -> Function {
         let sig = Signature::new(alloc::vec![Type::I32], alloc::vec![Type::I32]);
-        let mut func = Function::new(sig);
+        let mut func = Function::new(sig, String::from("test"));
         func.blocks.push(Block::new());
         func.blocks.push(Block::new());
         func

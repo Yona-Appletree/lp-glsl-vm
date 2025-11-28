@@ -31,16 +31,23 @@ impl Module {
     ///
     /// # Arguments
     ///
-    /// * `name` - Function name (must be unique)
+    /// * `name` - Function name (must be unique and match func.name)
     /// * `func` - The function to add
     ///
     /// # Panics
     ///
-    /// Panics if a function with the same name already exists.
+    /// Panics if:
+    /// - A function with the same name already exists
+    /// - The function's name doesn't match the provided name
     pub fn add_function(&mut self, name: String, func: Function) {
         if self.functions.contains_key(&name) {
             panic!("Function '{}' already exists in module", name);
         }
+        assert_eq!(
+            func.name, name,
+            "Function name '{}' does not match map key '{}'",
+            func.name, name
+        );
         self.functions.insert(name, func);
     }
 
@@ -99,12 +106,9 @@ impl fmt::Display for Module {
         }
 
         // Print each function
-        for (name, func) in &self.functions {
+        for (_name, func) in &self.functions {
             writeln!(f)?;
-            // Temporarily set the function name for display
-            let mut func_with_name = func.clone();
-            func_with_name.set_name(name.clone());
-            write!(f, "    {}", func_with_name)?;
+            write!(f, "    {}", func)?;
         }
 
         writeln!(f, "}}")?;
@@ -130,7 +134,7 @@ mod tests {
     fn test_module_add_function() {
         let mut module = Module::new();
         let sig = Signature::new(vec![crate::Type::I32], vec![crate::Type::I32]);
-        let func = Function::new(sig);
+        let func = Function::new(sig, String::from("test"));
 
         module.add_function(String::from("test"), func);
         assert_eq!(module.function_count(), 1);
@@ -141,7 +145,7 @@ mod tests {
     fn test_module_entry_function() {
         let mut module = Module::new();
         let sig = Signature::empty();
-        let func = Function::new(sig);
+        let func = Function::new(sig, String::from("main"));
 
         module.add_function(String::from("main"), func);
         module.set_entry_function(String::from("main"));
@@ -155,8 +159,8 @@ mod tests {
     fn test_module_duplicate_function() {
         let mut module = Module::new();
         let sig = Signature::empty();
-        let func1 = Function::new(sig.clone());
-        let func2 = Function::new(sig);
+        let func1 = Function::new(sig.clone(), String::from("test"));
+        let func2 = Function::new(sig, String::from("test"));
 
         module.add_function(String::from("test"), func1);
         module.add_function(String::from("test"), func2);

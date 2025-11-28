@@ -255,11 +255,7 @@ pub fn format_function_with_liveness(func: &Function, liveness: &LivenessInfo) -
     let mut output = String::new();
 
     // Format function signature
-    if let Some(name) = &func.name {
-        output.push_str(&format!("function %{}", name));
-    } else {
-        output.push_str("function");
-    }
+    output.push_str(&format!("function %{}", func.name));
 
     // Signature parameters
     output.push('(');
