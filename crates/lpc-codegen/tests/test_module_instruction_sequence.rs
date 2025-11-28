@@ -25,7 +25,7 @@ return v0
 }
 }"#;
 
-    use lpc_riscv32::{expect_ir_syscall, Gpr};
+    use lpc_codegen::{expect_ir_syscall, Gpr};
 
     // Run until syscall and verify syscall info
     let mut emu = expect_ir_syscall(ir, 0, &[42]);
@@ -39,7 +39,7 @@ return v0
 
     // Continue execution to EBREAK (halt)
     match emu.step() {
-        Ok(lpc_riscv32::StepResult::Halted) => {
+        Ok(lpc_codegen::StepResult::Halted) => {
             // Successfully halted
         }
         Ok(other) => {

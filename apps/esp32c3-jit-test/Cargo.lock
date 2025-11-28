@@ -1126,7 +1126,7 @@ version = "0.1.0"
 dependencies = [
  "lpc-lpir",
  "riscv32-emulator",
- "lpc-riscv32",
+ "lpc-codegen",
 ]
 
 [[package]]
@@ -1195,11 +1195,11 @@ dependencies = [
 name = "riscv32-emulator"
 version = "0.1.0"
 dependencies = [
- "lpc-riscv32",
+ "lpc-codegen",
 ]
 
 [[package]]
-name = "lpc-riscv32"
+name = "lpc-codegen"
 version = "0.1.0"
 dependencies = [
  "nom",

@@ -302,7 +302,7 @@ The backend follows cranelift's structure with these key components:
 ## File Structure
 
 ```
-crates/lpc-riscv32/src/backend/
+crates/lpc-codegen/src/backend/
 ├── mod.rs                 # Module entry point, public API
 ├── abi.rs                 # ABI calculations and helpers
 ├── frame.rs               # Frame layout computation

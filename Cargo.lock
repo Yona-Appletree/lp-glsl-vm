@@ -1011,17 +1011,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "lpc-lpir"
+name = "lpc-codegen"
 version = "0.1.0"
 dependencies = [
+ "lpc-lpir",
  "nom",
 ]
 
 [[package]]
-name = "lpc-riscv32"
+name = "lpc-lpir"
 version = "0.1.0"
 dependencies = [
- "lpc-lpir",
  "nom",
 ]
 
@@ -1237,8 +1237,8 @@ dependencies = [
 name = "riscv-shared"
 version = "0.1.0"
 dependencies = [
+ "lpc-codegen",
  "lpc-lpir",
- "lpc-riscv32",
 ]
 
 [[package]]

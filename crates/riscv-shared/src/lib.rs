@@ -10,7 +10,7 @@ extern crate alloc;
 use alloc::string::String;
 
 use lpc_lpir::parse_module;
-use lpc_riscv32::{compile_module_to_insts, generate_elf};
+use lpc_codegen::{compile_module_to_insts, generate_elf};
 
 /// Result of JIT compilation
 pub struct JitResult {
@@ -180,7 +180,7 @@ pub fn build_and_compile_fib_hardware() -> JitResult {
 
 #[cfg(test)]
 mod tests {
-    use lpc_riscv32::expect_ir_a0;
+    use lpc_codegen::expect_ir_a0;
 
     use super::*;
 

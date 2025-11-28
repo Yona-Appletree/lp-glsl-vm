@@ -45,7 +45,7 @@ The parser (`crates/lpc-lpir/src/parser/`) can be updated later to capture sourc
 
 ### 6. Update Backend (Future Work)
 
-The backend (`crates/lpc-riscv32/src/backend/`) can be updated later to use source locations when emitting machine code for debugging/relocation purposes.
+The backend (`crates/lpc-codegen/src/backend/`) can be updated later to use source locations when emitting machine code for debugging/relocation purposes.
 
 ## Files to Modify
 

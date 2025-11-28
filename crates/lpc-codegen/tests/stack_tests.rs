@@ -1,6 +1,6 @@
 //! Comprehensive tests for stack operations, frame management, and call stack.
 
-use lpc_riscv32::{expect_ir_ok, expect_ir_syscall, Gpr};
+use lpc_codegen::{expect_ir_ok, expect_ir_syscall, Gpr};
 
 #[test]
 fn test_basic_stack_operations() {

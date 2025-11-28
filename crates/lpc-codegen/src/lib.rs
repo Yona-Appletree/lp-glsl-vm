@@ -19,6 +19,7 @@ pub mod inst;
 mod inst_buffer;
 mod register_role;
 pub mod regs;
+mod isa;
 
 pub use asm_parser::{assemble_code, assemble_instruction};
 // Re-export backend items for convenience

@@ -1,5 +1,5 @@
 [package]
-name = "lpc-riscv32"
+name = "lpc-codegen"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

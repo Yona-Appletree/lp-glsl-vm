@@ -1,4 +1,4 @@
-use lpc_riscv32::expect_ir_a0;
+use lpc_codegen::expect_ir_a0;
 
 const FIB_SSA_HARDWARE: &str = r#"
 module {

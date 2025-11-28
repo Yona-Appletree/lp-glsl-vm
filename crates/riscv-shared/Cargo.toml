@@ -9,7 +9,7 @@ description = "Shared code for RISC-V JIT testing"
 
 [dependencies]
 lpc-lpir = { path = "../lpc-lpir" }
-lpc-riscv32 = { path = "../lpc-riscv32" }
+lpc-codegen = { path = "../lpc-codegen" }
 
 
 

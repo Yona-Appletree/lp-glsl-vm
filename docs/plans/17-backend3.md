@@ -92,7 +92,7 @@ Machine Code
 
 ### 1. VCode Structure
 
-**File**: `crates/lpc-riscv32/src/backend3/vcode.rs`
+**File**: `crates/lpc-codegen/src/backend3/vcode.rs`
 
 ```rust
 /// Virtual-register code: machine instructions with virtual registers
@@ -136,7 +136,7 @@ pub struct VCode<I: MachInst> {
 
 ### 2. Machine Instruction Type
 
-**File**: `crates/lpc-riscv32/src/backend3/inst.rs`
+**File**: `crates/lpc-codegen/src/backend3/inst.rs`
 
 ```rust
 /// RISC-V 32-bit machine instruction with virtual registers
@@ -191,7 +191,7 @@ impl MachInst for MachInst {
 
 ### 3. Lowering
 
-**File**: `crates/lpc-riscv32/src/backend3/lower.rs`
+**File**: `crates/lpc-codegen/src/backend3/lower.rs`
 
 ```rust
 /// Lowering context: converts IR to VCode
@@ -268,7 +268,7 @@ impl Lower {
 
 ### 4. Regalloc2 Integration
 
-**File**: `crates/lpc-riscv32/src/backend3/regalloc.rs`
+**File**: `crates/lpc-codegen/src/backend3/regalloc.rs`
 
 ```rust
 use regalloc2::{Function as RegallocFunction, ...};
@@ -312,7 +312,7 @@ impl RegallocFunction for VCode<MachInst> {
 
 ### 5. ABI Machine Spec
 
-**File**: `crates/lpc-riscv32/src/backend3/abi.rs`
+**File**: `crates/lpc-codegen/src/backend3/abi.rs`
 
 ```rust
 use regalloc2::{ABIMachineSpec, ...};
@@ -347,7 +347,7 @@ impl ABIMachineSpec for Riscv32ABI {
 
 ### 6. Emission
 
-**File**: `crates/lpc-riscv32/src/backend3/emit.rs`
+**File**: `crates/lpc-codegen/src/backend3/emit.rs`
 
 ```rust
 /// Emit VCode to machine code
@@ -531,7 +531,7 @@ impl VCode<MachInst> {
 ## File Structure
 
 ```
-crates/lpc-riscv32/src/backend3/
+crates/lpc-codegen/src/backend3/
 ├── mod.rs                 # Main module, compile_function entry point
 ├── vcode.rs               # VCode structure
 ├── vcode_builder.rs       # VCode builder
@@ -652,7 +652,7 @@ crates/lpc-riscv32/src/backend3/
 ### Internal Dependencies
 
 - `lpc-lpir`: IR types
-- `lpc-riscv32`: Instruction types, InstBuffer
+- `lpc-codegen`: Instruction types, InstBuffer
 - `backend/`: Reference implementation (frame layout, ABI)
 
 ## Performance Considerations

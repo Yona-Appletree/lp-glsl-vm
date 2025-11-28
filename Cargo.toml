@@ -4,13 +4,13 @@ members = [
     "crates/runtime-embive",
     "apps/embive-program",
     "apps/esp32c3-jit-test",
-    "crates/lpc-riscv32",
+    "crates/lpc-codegen",
     "crates/lpc-lpir",
     "crates/riscv-shared",
 ]
 default-members = [
     "crates/lp-glsl-vm",
-    "crates/lpc-riscv32",
+    "crates/lpc-codegen",
     "crates/lpc-lpir",
 
 # cross compile crates should not be default members

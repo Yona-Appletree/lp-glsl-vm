@@ -2,7 +2,7 @@
 
 ### 1. Current State
 
-- **Failing tests** (all under `crates/lpc-riscv32`):
+- **Failing tests** (all under `crates/lpc-codegen`):
   - `backend::lower::call::tests::test_multiple_returns_medium` (expects 36, gets 33)
   - `backend::lower::call::tests::test_nested_calls_with_multiple_returns` (expects 315, gets 310)
   - `backend::lower::call::tests::test_large_function_stress_test` (expects 272, gets 2)
@@ -35,7 +35,7 @@
 
 ### 4. Detailed Work Plan
 
-#### Step A – Frame Layout Refactor (`crates/lpc-riscv32/src/backend/frame.rs`)
+#### Step A – Frame Layout Refactor (`crates/lpc-codegen/src/backend/frame.rs`)
 
 1. Revisit `FrameLayout::compute` to separate caller-owned tail space from callee-owned areas:
    - Track `tail_args_size` (as today) but expose **two derived values**:
@@ -54,7 +54,7 @@
 4. Write doc-comments describing the final stack picture and include ASCII art similar to Cranelift.
 5. Update existing unit tests (e.g., `test_total_size_includes_tail_args`) to reflect the new accounting—tests should assert tail area values via the helper functions rather than by recomputing arithmetic inline.
 
-#### Step B – ABI Data Flow (`crates/lpc-riscv32/src/backend/abi.rs`, `backend/compile.rs`)
+#### Step B – ABI Data Flow (`crates/lpc-codegen/src/backend/abi.rs`, `backend/compile.rs`)
 
 1. Keep `AbiInfo` focused on register vs stack classification; remove/prevent direct offset math.
 2. Propagate the maximum stack return requirement per callee (already tracked) into `FrameLayout`.

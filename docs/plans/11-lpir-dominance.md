@@ -277,8 +277,8 @@ Update to reflect dominance-based scoping:
 
 **Files**:
 
-- `crates/lpc-riscv32/src/backend/liveness.rs`
-- `crates/lpc-riscv32/src/backend/lower/mod.rs`
+- `crates/lpc-codegen/src/backend/liveness.rs`
+- `crates/lpc-codegen/src/backend/lower/mod.rs`
 
 Verify backend handles cross-block values correctly:
 

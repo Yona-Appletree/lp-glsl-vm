@@ -1,6 +1,6 @@
 //! Basic tests for the RISC-V 32 emu.
 
-use lpc_riscv32::{assemble_code, Gpr, LogLevel, Riscv32Emulator};
+use lpc_codegen::{assemble_code, Gpr, LogLevel, Riscv32Emulator};
 
 #[test]
 fn test_add_instruction() {
@@ -123,7 +123,7 @@ jal zero, -4",
     let result = emu.run_until_ebreak();
     assert!(result.is_err(), "Expected instruction limit error");
     match result {
-        Err(lpc_riscv32::EmulatorError::InstructionLimitExceeded {
+        Err(lpc_codegen::EmulatorError::InstructionLimitExceeded {
             limit, executed, ..
         }) => {
             assert_eq!(limit, 100);

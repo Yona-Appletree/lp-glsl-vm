@@ -18,9 +18,9 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/riscv32-emulator/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/riscv32-emulator/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/lpc-lpir/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-riscv32/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-riscv32/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/runtime-embive/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-codegen/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-codegen/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/lpc-lpir/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/apps/esp32c3-jit-test/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />

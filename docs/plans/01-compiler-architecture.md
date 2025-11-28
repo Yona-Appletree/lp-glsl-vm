@@ -193,7 +193,7 @@ trait Backend {
 **Key Components**:
 
 #### Instruction Encoding
-- Use `lpc-riscv32` crate for encoding instructions
+- Use `lpc-codegen` crate for encoding instructions
 - Map abstract instructions to RISC-V opcodes
 - Handle instruction formats (R, I, S, U, J, B)
 
@@ -211,7 +211,7 @@ trait Backend {
 
 ### 6. Instruction Encoder
 
-**Crate**: `lpc-riscv32`
+**Crate**: `lpc-codegen`
 
 **Purpose**: Low-level RISC-V 32-bit instruction encoding
 
@@ -236,7 +236,7 @@ trait Backend {
    - Define `Signature` (function signature: params + returns)
    - Write comprehensive tests
 
-2. **Create `lpc-riscv32` crate**
+2. **Create `lpc-codegen` crate**
    - Recreate instruction encoder
    - Support all instruction formats
    - Register definitions
@@ -265,7 +265,7 @@ trait Backend {
    - Implement backend traits for RISC-V
    - Instruction lowering (IR → RISC-V)
    - Simple register allocator (linear scan)
-   - Code emission using `lpc-riscv32`
+   - Code emission using `lpc-codegen`
    - ELF generation
    - Tests
 
@@ -336,7 +336,7 @@ crates/
 │       ├── const_fold.rs     # Constant folding
 │       └── simplify_cfg.rs   # CFG simplification
 │
-└── lpc-riscv32/          # RISC-V instruction encoder
+└── lpc-codegen/          # RISC-V instruction encoder
     ├── Cargo.toml
     └── src/
         ├── lib.rs
@@ -359,14 +359,14 @@ crates/
 - `no_std` compatible
 
 ### `r5-target-riscv32`
-- Depends on: `lpc-lpir`, `r5-backend`, `lpc-riscv32`
+- Depends on: `lpc-lpir`, `r5-backend`, `lpc-codegen`
 - `no_std` compatible
 
 ### `r5-opt`
 - Depends on: `lpc-lpir`
 - `no_std` compatible
 
-### `lpc-riscv32`
+### `lpc-codegen`
 - Pure `no_std` (no `alloc` needed)
 - No dependencies
 
