@@ -10,6 +10,7 @@ use crate::{
     entity_map::PrimaryMap,
     layout::Layout,
     signature::Signature,
+    sourceloc::{RelSourceLoc, SourceLoc},
 };
 
 /// A function in the IR
@@ -20,6 +21,7 @@ use crate::{
 /// - Layout (where blocks/instructions are)
 /// - DFG (what instructions are - opcode + operands)
 /// - A name (required, for debugging and module lookup)
+/// - Source location tracking (for debugging and correlation)
 #[derive(Debug, Clone)]
 pub struct Function {
     /// Function signature
@@ -32,6 +34,10 @@ pub struct Function {
     pub layout: Layout,
     /// Data Flow Graph (what instructions are)
     pub dfg: DFG,
+    /// Base source location for this function (used for relative source locations)
+    base_srcloc: Option<SourceLoc>,
+    /// Relative source locations for instructions (offset from base)
+    srclocs: PrimaryMap<Inst, RelSourceLoc>,
 }
 
 impl Function {
@@ -43,6 +49,8 @@ impl Function {
             blocks: PrimaryMap::new(),
             layout: Layout::new(),
             dfg: DFG::new(),
+            base_srcloc: None,
+            srclocs: PrimaryMap::new(),
         }
     }
 
@@ -124,6 +132,57 @@ impl Function {
     /// Get an iterator over instructions in a block
     pub fn block_insts(&self, block: Block) -> impl Iterator<Item = Inst> + '_ {
         self.layout.block_insts(block)
+    }
+
+    /// Get the base source location for this function.
+    ///
+    /// Returns the default source location if no base has been set.
+    pub fn base_srcloc(&self) -> SourceLoc {
+        self.base_srcloc.unwrap_or_default()
+    }
+
+    /// Ensure that a base source location is set for this function.
+    ///
+    /// If a base source location is already set, returns the existing one.
+    /// Otherwise, sets the given source location as the base and returns it.
+    pub fn ensure_base_srcloc(&mut self, srcloc: SourceLoc) -> SourceLoc {
+        if let Some(base) = self.base_srcloc {
+            base
+        } else {
+            self.base_srcloc = Some(srcloc);
+            srcloc
+        }
+    }
+
+    /// Set the absolute source location for an instruction.
+    ///
+    /// This will automatically set the base source location if not already set,
+    /// and store a relative source location for the instruction.
+    pub fn set_srcloc(&mut self, inst: Inst, srcloc: SourceLoc) {
+        let base = self.ensure_base_srcloc(srcloc);
+        let rel = RelSourceLoc::from_base_offset(base, srcloc);
+        // Ensure the map is large enough to hold this instruction
+        let inst_index = inst.index() as usize;
+        while self.srclocs.len() <= inst_index {
+            self.srclocs.push(RelSourceLoc::default());
+        }
+        // Now we can safely set it
+        if let Some(existing) = self.srclocs.get_mut(inst) {
+            *existing = rel;
+        }
+    }
+
+    /// Get the absolute source location for an instruction.
+    ///
+    /// Returns the default source location if the instruction doesn't have
+    /// an explicit source location set.
+    pub fn srcloc(&self, inst: Inst) -> SourceLoc {
+        let base = self.base_srcloc();
+        if let Some(rel) = self.srclocs.get(inst) {
+            rel.expand(base)
+        } else {
+            SourceLoc::default()
+        }
     }
 
     /// Format an instruction for display
@@ -550,5 +609,134 @@ mod tests {
         let insts: Vec<_> = func.block_insts(block).collect();
         assert_eq!(insts.len(), 1);
         assert_eq!(insts[0], inst);
+    }
+
+    #[test]
+    fn test_function_base_srcloc_default() {
+        let sig = Signature::empty();
+        let func = Function::new(sig, String::from("test"));
+        let base = func.base_srcloc();
+        assert!(base.is_default());
+    }
+
+    #[test]
+    fn test_function_ensure_base_srcloc() {
+        let sig = Signature::empty();
+        let mut func = Function::new(sig, String::from("test"));
+        let srcloc1 = SourceLoc::new(100);
+        let base1 = func.ensure_base_srcloc(srcloc1);
+        assert_eq!(base1.bits(), 100);
+        assert_eq!(func.base_srcloc().bits(), 100);
+
+        // Setting again should return the existing base
+        let srcloc2 = SourceLoc::new(200);
+        let base2 = func.ensure_base_srcloc(srcloc2);
+        assert_eq!(base2.bits(), 100); // Should still be the first one
+        assert_eq!(func.base_srcloc().bits(), 100);
+    }
+
+    #[test]
+    fn test_function_set_and_get_srcloc() {
+        let sig = Signature::empty();
+        let mut func = Function::new(sig, String::from("test"));
+        let block = func.create_block();
+        func.append_block(block);
+
+        let v1 = Value::new(1);
+        let v2 = Value::new(2);
+        let v3 = Value::new(3);
+        let inst_data = InstData::arithmetic(Opcode::Iadd, v3, v1, v2);
+        let inst = func.create_inst(inst_data);
+
+        // Initially, instruction should have default source location
+        let default_srcloc = func.srcloc(inst);
+        assert!(default_srcloc.is_default());
+
+        // Set a source location
+        let srcloc = SourceLoc::new(150);
+        func.set_srcloc(inst, srcloc);
+
+        // Retrieve it
+        let retrieved = func.srcloc(inst);
+        assert_eq!(retrieved.bits(), srcloc.bits());
+        assert!(!retrieved.is_default());
+    }
+
+    #[test]
+    fn test_function_srcloc_without_base() {
+        let sig = Signature::empty();
+        let mut func = Function::new(sig, String::from("test"));
+        let block = func.create_block();
+        func.append_block(block);
+
+        let v1 = Value::new(1);
+        let v2 = Value::new(2);
+        let v3 = Value::new(3);
+        let inst_data = InstData::arithmetic(Opcode::Iadd, v3, v1, v2);
+        let inst = func.create_inst(inst_data);
+
+        // Set a source location - this should automatically set the base
+        let srcloc = SourceLoc::new(200);
+        func.set_srcloc(inst, srcloc);
+
+        // Base should now be set
+        assert_eq!(func.base_srcloc().bits(), 200);
+        assert_eq!(func.srcloc(inst).bits(), 200);
+    }
+
+    #[test]
+    fn test_function_srcloc_relative() {
+        let sig = Signature::empty();
+        let mut func = Function::new(sig, String::from("test"));
+        let block = func.create_block();
+        func.append_block(block);
+
+        // Set base source location
+        let base = SourceLoc::new(1000);
+        func.ensure_base_srcloc(base);
+
+        let v1 = Value::new(1);
+        let v2 = Value::new(2);
+        let v3 = Value::new(3);
+        let inst_data = InstData::arithmetic(Opcode::Iadd, v3, v1, v2);
+        let inst = func.create_inst(inst_data);
+
+        // Set a source location relative to base
+        let srcloc = SourceLoc::new(1050);
+        func.set_srcloc(inst, srcloc);
+
+        // Retrieve it - should expand correctly
+        let retrieved = func.srcloc(inst);
+        assert_eq!(retrieved.bits(), 1050);
+    }
+
+    #[test]
+    fn test_function_srcloc_multiple_instructions() {
+        let sig = Signature::empty();
+        let mut func = Function::new(sig, String::from("test"));
+        let block = func.create_block();
+        func.append_block(block);
+
+        let base = SourceLoc::new(500);
+        func.ensure_base_srcloc(base);
+
+        let v1 = Value::new(1);
+        let v2 = Value::new(2);
+        let v3 = Value::new(3);
+        let v4 = Value::new(4);
+
+        // Create two instructions
+        let inst1_data = InstData::arithmetic(Opcode::Iadd, v3, v1, v2);
+        let inst1 = func.create_inst(inst1_data);
+        let inst2_data = InstData::arithmetic(Opcode::Isub, v4, v3, v1);
+        let inst2 = func.create_inst(inst2_data);
+
+        // Set different source locations
+        func.set_srcloc(inst1, SourceLoc::new(600));
+        func.set_srcloc(inst2, SourceLoc::new(700));
+
+        // Verify both are stored correctly
+        assert_eq!(func.srcloc(inst1).bits(), 600);
+        assert_eq!(func.srcloc(inst2).bits(), 700);
     }
 }
