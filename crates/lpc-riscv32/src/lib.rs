@@ -9,22 +9,21 @@ extern crate alloc;
 
 pub mod asm_parser;
 pub mod backend;
+mod backend3;
 pub mod debug;
 pub mod decode;
 pub mod disasm;
+mod elf;
 pub mod emu;
 pub mod encode;
 pub mod inst;
-pub mod regs;
-mod register_role;
-mod elf;
 mod inst_buffer;
-mod backend3;
+mod register_role;
+pub mod regs;
 
 pub use asm_parser::{assemble_code, assemble_instruction};
 // Re-export backend items for convenience
-pub use backend::{FrameLayout, Abi, compile_module_to_insts, CompiledModule};
-
+pub use backend::{compile_module_to_insts, Abi, CompiledModule, FrameLayout};
 // Re-export test helpers (always available for tests)
 pub use backend::{expect_ir_a0, expect_ir_ok, expect_ir_syscall};
 pub use decode::{decode_instruction, DecodedFields};

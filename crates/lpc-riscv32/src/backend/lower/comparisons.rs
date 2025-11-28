@@ -1,19 +1,22 @@
 //! Lower comparison instructions.
 
-use crate::{Gpr, Inst};
-use super::Lowerer;
 use lpc_lpir::Value;
+
+use super::Lowerer;
+use crate::{Gpr, Inst};
 
 /// Lower ICMP_EQ: result = (arg1 == arg2) ? 1 : 0
 pub fn lower_icmp_eq(lowerer: &mut Lowerer, result: Value, arg1: Value, arg2: Value) {
     let result_reg = lowerer.get_reg_for_value(result);
     let arg1_reg = lowerer.get_reg_for_value_required(arg1);
     let arg2_reg = lowerer.get_reg_for_value_required(arg2);
-    
+
     // Use SUB to compare: if arg1 == arg2, then arg1 - arg2 == 0
-    lowerer.inst_buffer_mut().push_sub(result_reg, arg1_reg, arg2_reg);
+    lowerer
+        .inst_buffer_mut()
+        .push_sub(result_reg, arg1_reg, arg2_reg);
     // Now result_reg is 0 if equal, non-zero if not equal
-    
+
     // Use SLTIU: if result_reg < 1 (i.e., == 0), then set to 1, else 0
     // SLTIU gives 1 if rs1 < imm (unsigned), 0 if rs1 >= imm
     // So if result_reg == 0, then result_reg < 1 is true, so result = 1
@@ -43,7 +46,7 @@ pub fn lower_icmp_lt(lowerer: &mut Lowerer, result: Value, arg1: Value, arg2: Va
     let result_reg = lowerer.get_reg_for_value(result);
     let arg1_reg = lowerer.get_reg_for_value_required(arg1);
     let arg2_reg = lowerer.get_reg_for_value_required(arg2);
-    
+
     lowerer.inst_buffer_mut().emit(Inst::Slt {
         rd: result_reg,
         rs1: arg1_reg,
@@ -58,7 +61,7 @@ pub fn lower_icmp_le(lowerer: &mut Lowerer, result: Value, arg1: Value, arg2: Va
     let result_reg = lowerer.get_reg_for_value(result);
     let arg1_reg = lowerer.get_reg_for_value_required(arg1);
     let arg2_reg = lowerer.get_reg_for_value_required(arg2);
-    
+
     lowerer.inst_buffer_mut().emit(Inst::Slt {
         rd: result_reg,
         rs1: arg2_reg,
@@ -78,7 +81,7 @@ pub fn lower_icmp_gt(lowerer: &mut Lowerer, result: Value, arg1: Value, arg2: Va
     let result_reg = lowerer.get_reg_for_value(result);
     let arg1_reg = lowerer.get_reg_for_value_required(arg1);
     let arg2_reg = lowerer.get_reg_for_value_required(arg2);
-    
+
     lowerer.inst_buffer_mut().emit(Inst::Slt {
         rd: result_reg,
         rs1: arg2_reg,
@@ -92,7 +95,7 @@ pub fn lower_icmp_ge(lowerer: &mut Lowerer, result: Value, arg1: Value, arg2: Va
     let result_reg = lowerer.get_reg_for_value(result);
     let arg1_reg = lowerer.get_reg_for_value_required(arg1);
     let arg2_reg = lowerer.get_reg_for_value_required(arg2);
-    
+
     lowerer.inst_buffer_mut().emit(Inst::Slt {
         rd: result_reg,
         rs1: arg1_reg,

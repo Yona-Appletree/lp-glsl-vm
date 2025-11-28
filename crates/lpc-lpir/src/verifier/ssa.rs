@@ -2,7 +2,7 @@
 
 use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
 
-use crate::{Function, VerifierError, Value};
+use crate::{Function, Value, VerifierError};
 
 /// Verify SSA form
 ///
@@ -77,9 +77,11 @@ fn verify_value_uses(function: &Function, errors: &mut Vec<VerifierError>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dfg::{InstData, Opcode};
-    use crate::signature::Signature;
-    use crate::value::Value;
+    use crate::{
+        dfg::{InstData, Opcode},
+        signature::Signature,
+        value::Value,
+    };
 
     #[test]
     fn test_verify_ssa_valid() {
@@ -125,7 +127,8 @@ mod tests {
         let mut errors = Vec::new();
         verify_ssa(&func, &mut errors);
         assert!(!errors.is_empty());
-        assert!(errors.iter().any(|e| e.message.contains("defined multiple times")));
+        assert!(errors
+            .iter()
+            .any(|e| e.message.contains("defined multiple times")));
     }
 }
-

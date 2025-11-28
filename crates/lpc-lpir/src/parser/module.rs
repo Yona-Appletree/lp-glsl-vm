@@ -3,8 +3,7 @@
 use alloc::{string::String, vec::Vec};
 
 use nom::{
-    bytes::complete::tag, character::complete::char, combinator::opt,
-    sequence::terminated, IResult,
+    bytes::complete::tag, character::complete::char, combinator::opt, sequence::terminated, IResult,
 };
 
 use super::{

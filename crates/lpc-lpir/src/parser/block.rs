@@ -46,7 +46,9 @@ fn parse_block_params(input: &str) -> IResult<&str, Vec<crate::value::Value>> {
 
 /// Parse a block
 /// Returns (params, instructions) tuple
-pub(crate) fn parse_block(input: &str) -> IResult<&str, (Vec<crate::value::Value>, Vec<crate::inst::Inst>)> {
+pub(crate) fn parse_block(
+    input: &str,
+) -> IResult<&str, (Vec<crate::value::Value>, Vec<crate::inst::Inst>)> {
     let (input, _) = blank(input)?;
     let (input, _block_index) = terminated(parse_block_index, blank)(input)?;
     let (input, params) = opt(parse_block_params)(input)?;
@@ -57,10 +59,7 @@ pub(crate) fn parse_block(input: &str) -> IResult<&str, (Vec<crate::value::Value
     // when we hit a new block or closing brace
     let (input, insts) = many0(terminated(parse_instruction, blank))(input)?;
 
-    Ok((
-        input,
-        (params.unwrap_or_default(), insts),
-    ))
+    Ok((input, (params.unwrap_or_default(), insts)))
 }
 
 #[cfg(test)]

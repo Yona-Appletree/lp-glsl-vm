@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use crate::value::Value;
+use crate::{types::Type, value::Value};
 
 /// Block data (what a block is, separate from layout)
 ///
@@ -13,6 +13,8 @@ use crate::value::Value;
 pub struct BlockData {
     /// Block parameters (for phi nodes)
     pub params: Vec<Value>,
+    /// Parameter types (parallel to params)
+    pub param_types: Vec<Type>,
 }
 
 impl BlockData {
@@ -20,17 +22,41 @@ impl BlockData {
     pub fn new() -> Self {
         Self {
             params: Vec::new(),
+            param_types: Vec::new(),
         }
     }
 
     /// Create a new block data with the given parameters
+    /// Types default to I32 if not provided
     pub fn with_params(params: Vec<Value>) -> Self {
-        Self { params }
+        let param_types: Vec<Type> = (0..params.len()).map(|_| Type::I32).collect();
+        Self {
+            params,
+            param_types,
+        }
+    }
+
+    /// Create a new block data with the given parameters and types
+    pub fn with_params_and_types(params: Vec<Value>, param_types: Vec<Type>) -> Self {
+        assert_eq!(
+            params.len(),
+            param_types.len(),
+            "params and param_types must have the same length"
+        );
+        Self {
+            params,
+            param_types,
+        }
     }
 
     /// Get the number of parameters for this block
     pub fn param_count(&self) -> usize {
         self.params.len()
+    }
+
+    /// Get the type of a parameter by index
+    pub fn param_type(&self, index: usize) -> Option<Type> {
+        self.param_types.get(index).copied()
     }
 }
 

@@ -92,4 +92,3 @@ mod tests {
         assert_ne!(call1, call3);
     }
 }
-

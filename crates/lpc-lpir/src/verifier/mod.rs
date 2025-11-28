@@ -6,11 +6,15 @@ use crate::Function;
 
 mod cfg;
 mod dominance;
+mod entities;
+mod format;
 mod ssa;
 mod types;
 
 pub use cfg::verify_cfg;
 pub use dominance::verify_dominance;
+pub use entities::verify_entities;
+pub use format::verify_format;
 pub use ssa::verify_ssa;
 pub use types::verify_types;
 
@@ -46,14 +50,24 @@ impl VerifierError {
 /// This runs all verification checks and returns a list of errors if any are found.
 /// Returns `Ok(())` if the function is valid, or `Err(errors)` with a list of
 /// verification errors.
-pub fn verify(function: &Function) -> Result<(), Vec<VerifierError>> {
+///
+/// # Arguments
+///
+/// * `function` - The function to verify
+/// * `module` - Optional module context for function call validation
+pub fn verify(
+    function: &Function,
+    module: Option<&crate::Module>,
+) -> Result<(), Vec<VerifierError>> {
     let mut errors = Vec::new();
 
     // Run all checks
+    verify_format(function, &mut errors);
+    verify_entities(function, &mut errors, module);
     verify_cfg(function, &mut errors);
     verify_ssa(function, &mut errors);
     verify_dominance(function, &mut errors);
-    verify_types(function, &mut errors);
+    verify_types(function, &mut errors, module);
     verify_terminators(function, &mut errors);
 
     if errors.is_empty() {
@@ -66,21 +80,19 @@ pub fn verify(function: &Function) -> Result<(), Vec<VerifierError>> {
 /// Verify that all blocks have proper terminators
 fn verify_terminators(function: &Function, errors: &mut Vec<VerifierError>) {
     for block in function.blocks() {
-        let has_terminator = function
-            .block_insts(block)
-            .any(|inst| {
-                if let Some(inst_data) = function.dfg.inst_data(inst) {
-                    matches!(
-                        inst_data.opcode,
-                        crate::dfg::Opcode::Jump
-                            | crate::dfg::Opcode::Br
-                            | crate::dfg::Opcode::Return
-                            | crate::dfg::Opcode::Halt
-                    )
-                } else {
-                    false
-                }
-            });
+        let has_terminator = function.block_insts(block).any(|inst| {
+            if let Some(inst_data) = function.dfg.inst_data(inst) {
+                matches!(
+                    inst_data.opcode,
+                    crate::dfg::Opcode::Jump
+                        | crate::dfg::Opcode::Br
+                        | crate::dfg::Opcode::Return
+                        | crate::dfg::Opcode::Halt
+                )
+            } else {
+                false
+            }
+        });
 
         if !has_terminator {
             errors.push(VerifierError::with_location(
@@ -94,8 +106,7 @@ fn verify_terminators(function: &Function, errors: &mut Vec<VerifierError>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dfg::InstData;
-    use crate::signature::Signature;
+    use crate::{dfg::InstData, signature::Signature};
 
     #[test]
     fn test_verify_valid_function() {
@@ -108,7 +119,7 @@ mod tests {
         let inst = func.create_inst(inst_data);
         func.append_inst(inst, block);
 
-        let result = verify(&func);
+        let result = verify(&func, None);
         assert!(result.is_ok());
     }
 
@@ -120,7 +131,7 @@ mod tests {
         func.append_block(block);
 
         // Block has no instructions, so no terminator
-        let result = verify(&func);
+        let result = verify(&func, None);
         assert!(result.is_err());
         let errors = result.unwrap_err();
         assert_eq!(errors.len(), 1);
@@ -133,12 +144,9 @@ mod tests {
         assert_eq!(error.message, "test error");
         assert_eq!(error.location, None);
 
-        let error_with_loc = VerifierError::with_location(
-            String::from("test error"),
-            String::from("block0"),
-        );
+        let error_with_loc =
+            VerifierError::with_location(String::from("test error"), String::from("block0"));
         assert_eq!(error_with_loc.message, "test error");
         assert_eq!(error_with_loc.location, Some(String::from("block0")));
     }
 }
-

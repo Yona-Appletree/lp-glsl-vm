@@ -23,5 +23,3 @@ macro_rules! debug {
         }
     };
 }
-
-

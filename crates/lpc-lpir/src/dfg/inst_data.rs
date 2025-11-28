@@ -2,8 +2,7 @@
 
 use alloc::{string::String, vec::Vec};
 
-use crate::entity::Block;
-use crate::{Type, Value};
+use crate::{entity::Block, Type, Value};
 
 /// Instruction data (opcode + operands)
 ///
@@ -63,7 +62,12 @@ impl InstData {
     }
 
     /// Create an arithmetic instruction
-    pub fn arithmetic(opcode: crate::dfg::opcode::Opcode, result: Value, arg1: Value, arg2: Value) -> Self {
+    pub fn arithmetic(
+        opcode: crate::dfg::opcode::Opcode,
+        result: Value,
+        arg1: Value,
+        arg2: Value,
+    ) -> Self {
         Self {
             opcode,
             args: Vec::from([arg1, arg2]),
@@ -75,7 +79,12 @@ impl InstData {
     }
 
     /// Create a comparison instruction
-    pub fn comparison(opcode: crate::dfg::opcode::Opcode, result: Value, arg1: Value, arg2: Value) -> Self {
+    pub fn comparison(
+        opcode: crate::dfg::opcode::Opcode,
+        result: Value,
+        arg1: Value,
+        arg2: Value,
+    ) -> Self {
         Self {
             opcode,
             args: Vec::from([arg1, arg2]),
@@ -118,7 +127,13 @@ impl InstData {
     }
 
     /// Create a branch instruction
-    pub fn branch(condition: Value, target_true: Block, args_true: Vec<Value>, target_false: Block, args_false: Vec<Value>) -> Self {
+    pub fn branch(
+        condition: Value,
+        target_true: Block,
+        args_true: Vec<Value>,
+        target_false: Block,
+        args_false: Vec<Value>,
+    ) -> Self {
         Self {
             opcode: crate::dfg::opcode::Opcode::Br,
             args: {
@@ -295,4 +310,3 @@ mod tests {
         }
     }
 }
-

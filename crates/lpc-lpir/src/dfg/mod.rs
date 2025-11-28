@@ -1,8 +1,6 @@
 //! Data Flow Graph (instruction data).
 
-use crate::entity_map::PrimaryMap;
-use crate::entity::Inst as InstEntity;
-use crate::{Type, Value};
+use crate::{entity::Inst as InstEntity, entity_map::PrimaryMap, Type, Value};
 
 pub mod inst_data;
 pub mod opcode;
@@ -84,15 +82,39 @@ impl DFG {
 
     /// Set the type of a value
     pub fn set_value_type(&mut self, value: Value, ty: Type) {
-        // Ensure the value exists in the map
+        let index = value.index() as usize;
         // Ensure the value exists in the map by growing if necessary
-        while self.value_types.len() <= value.index() as usize {
-            let _ = self.value_types.push(ty); // Placeholder, will be overwritten
+        if index >= self.value_types.len() {
+            // Reserve capacity to avoid multiple reallocations
+            let needed = index + 1;
+            self.value_types
+                .reserve(needed.saturating_sub(self.value_types.capacity()));
+            // Push the actual value directly until we reach the target index (inclusive)
+            while self.value_types.len() <= index {
+                self.value_types.push(ty);
+            }
+        } else {
+            // Value already exists, update it
+            if let Some(existing_ty) = self.value_types.get_mut(value) {
+                *existing_ty = ty;
+            }
         }
-        // Now set the actual type
-        if let Some(existing_ty) = self.value_types.get_mut(value) {
-            *existing_ty = ty;
-        }
+    }
+
+    /// Get the next available value index
+    ///
+    /// This computes the next value index by finding the maximum value index
+    /// currently in use. This is used by builders to allocate new values.
+    pub fn next_value_index(&self) -> u32 {
+        // Find the maximum value index in use
+        // value_types is a PrimaryMap, so we can iterate over it
+        let max_index = self
+            .value_types
+            .iter()
+            .map(|(value, _)| value.index() as u32)
+            .max()
+            .unwrap_or(0);
+        max_index + 1
     }
 
     /// Infer the result type from an opcode
@@ -106,11 +128,26 @@ impl DFG {
         }
 
         match opcode {
-            Opcode::Iadd | Opcode::Isub | Opcode::Imul | Opcode::Idiv | Opcode::Irem | Opcode::Iconst => Some(Type::I32),
-            Opcode::IcmpEq | Opcode::IcmpNe | Opcode::IcmpLt | Opcode::IcmpLe | Opcode::IcmpGt | Opcode::IcmpGe => Some(Type::I32), // Comparisons return i32 (0/1)
+            Opcode::Iadd
+            | Opcode::Isub
+            | Opcode::Imul
+            | Opcode::Idiv
+            | Opcode::Irem
+            | Opcode::Iconst => Some(Type::I32),
+            Opcode::IcmpEq
+            | Opcode::IcmpNe
+            | Opcode::IcmpLt
+            | Opcode::IcmpLe
+            | Opcode::IcmpGt
+            | Opcode::IcmpGe => Some(Type::I32), // Comparisons return i32 (0/1)
             Opcode::Fconst => Some(Type::F32),
             Opcode::Load => None, // Must be specified explicitly
-            Opcode::Store | Opcode::Jump | Opcode::Br | Opcode::Return | Opcode::Halt | Opcode::Syscall => None, // No results
+            Opcode::Store
+            | Opcode::Jump
+            | Opcode::Br
+            | Opcode::Return
+            | Opcode::Halt
+            | Opcode::Syscall => None, // No results
             Opcode::Call { .. } => None, // Call results depend on function signature
         }
     }
@@ -204,4 +241,3 @@ mod tests {
         assert_eq!(dfg.value_type(v1), Some(Type::F32));
     }
 }
-

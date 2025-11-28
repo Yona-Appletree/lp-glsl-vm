@@ -125,6 +125,253 @@ impl Function {
     pub fn block_insts(&self, block: Block) -> impl Iterator<Item = Inst> + '_ {
         self.layout.block_insts(block)
     }
+
+    /// Format an instruction for display
+    fn format_instruction(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        inst_data: &crate::dfg::InstData,
+    ) -> fmt::Result {
+        use crate::dfg::{opcode::Opcode, Immediate};
+
+        match &inst_data.opcode {
+            // Arithmetic
+            Opcode::Iadd | Opcode::Isub | Opcode::Imul | Opcode::Idiv | Opcode::Irem => {
+                if inst_data.results.len() == 1 && inst_data.args.len() == 2 {
+                    let opname = match inst_data.opcode {
+                        Opcode::Iadd => "iadd",
+                        Opcode::Isub => "isub",
+                        Opcode::Imul => "imul",
+                        Opcode::Idiv => "idiv",
+                        Opcode::Irem => "irem",
+                        _ => unreachable!(),
+                    };
+                    write!(
+                        f,
+                        "v{} = {} v{}, v{}",
+                        inst_data.results[0].index(),
+                        opname,
+                        inst_data.args[0].index(),
+                        inst_data.args[1].index()
+                    )
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            // Comparisons
+            Opcode::IcmpEq
+            | Opcode::IcmpNe
+            | Opcode::IcmpLt
+            | Opcode::IcmpLe
+            | Opcode::IcmpGt
+            | Opcode::IcmpGe => {
+                if inst_data.results.len() == 1 && inst_data.args.len() == 2 {
+                    let opname = match inst_data.opcode {
+                        Opcode::IcmpEq => "icmp_eq",
+                        Opcode::IcmpNe => "icmp_ne",
+                        Opcode::IcmpLt => "icmp_lt",
+                        Opcode::IcmpLe => "icmp_le",
+                        Opcode::IcmpGt => "icmp_gt",
+                        Opcode::IcmpGe => "icmp_ge",
+                        _ => unreachable!(),
+                    };
+                    write!(
+                        f,
+                        "v{} = {} v{}, v{}",
+                        inst_data.results[0].index(),
+                        opname,
+                        inst_data.args[0].index(),
+                        inst_data.args[1].index()
+                    )
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            // Constants
+            Opcode::Iconst | Opcode::Fconst => {
+                if inst_data.results.len() == 1 {
+                    let opname = match inst_data.opcode {
+                        Opcode::Iconst => "iconst",
+                        Opcode::Fconst => "fconst",
+                        _ => unreachable!(),
+                    };
+                    if let Some(imm) = &inst_data.imm {
+                        match imm {
+                            Immediate::I64(val) => {
+                                write!(f, "v{} = {} {}", inst_data.results[0].index(), opname, val)
+                            }
+                            Immediate::I32(val) => {
+                                write!(f, "v{} = {} {}", inst_data.results[0].index(), opname, val)
+                            }
+                            Immediate::F32Bits(bits) => {
+                                let val = f32::from_bits(*bits);
+                                write!(f, "v{} = {} {}", inst_data.results[0].index(), opname, val)
+                            }
+                            Immediate::String(_) => write!(f, "{:?}", inst_data.opcode),
+                        }
+                    } else {
+                        write!(f, "{:?}", inst_data.opcode)
+                    }
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            // Control flow
+            Opcode::Jump => {
+                if let Some(block_args) = &inst_data.block_args {
+                    if block_args.targets.len() == 1 {
+                        let (target, args) = &block_args.targets[0];
+                        write!(f, "jump block{}", target.index())?;
+                        if !args.is_empty() {
+                            write!(f, "(")?;
+                            for (i, arg) in args.iter().enumerate() {
+                                if i > 0 {
+                                    write!(f, ", ")?;
+                                }
+                                write!(f, "v{}", arg.index())?;
+                            }
+                            write!(f, ")")?;
+                        }
+                        Ok(())
+                    } else {
+                        write!(f, "{:?}", inst_data.opcode)
+                    }
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            Opcode::Br => {
+                if let Some(block_args) = &inst_data.block_args {
+                    if block_args.targets.len() == 2 && !inst_data.args.is_empty() {
+                        let condition = inst_data.args[0];
+                        let (target_true, args_true) = &block_args.targets[0];
+                        let (target_false, args_false) = &block_args.targets[1];
+                        write!(
+                            f,
+                            "brif v{}, block{}",
+                            condition.index(),
+                            target_true.index()
+                        )?;
+                        if !args_true.is_empty() {
+                            write!(f, "(")?;
+                            for (i, arg) in args_true.iter().enumerate() {
+                                if i > 0 {
+                                    write!(f, ", ")?;
+                                }
+                                write!(f, "v{}", arg.index())?;
+                            }
+                            write!(f, ")")?;
+                        }
+                        write!(f, ", block{}", target_false.index())?;
+                        if !args_false.is_empty() {
+                            write!(f, "(")?;
+                            for (i, arg) in args_false.iter().enumerate() {
+                                if i > 0 {
+                                    write!(f, ", ")?;
+                                }
+                                write!(f, "v{}", arg.index())?;
+                            }
+                            write!(f, ")")?;
+                        }
+                        Ok(())
+                    } else {
+                        write!(f, "{:?}", inst_data.opcode)
+                    }
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            Opcode::Return => {
+                write!(f, "return")?;
+                if !inst_data.args.is_empty() {
+                    for arg in &inst_data.args {
+                        write!(f, " v{}", arg.index())?;
+                    }
+                }
+                Ok(())
+            }
+            Opcode::Halt => write!(f, "halt"),
+            Opcode::Call { callee } => {
+                write!(f, "call %{}(", callee)?;
+                for (i, arg) in inst_data.args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "v{}", arg.index())?;
+                }
+                write!(f, ")")?;
+                if !inst_data.results.is_empty() {
+                    write!(f, " -> ")?;
+                    for (i, res) in inst_data.results.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "v{}", res.index())?;
+                    }
+                }
+                Ok(())
+            }
+            Opcode::Syscall => {
+                if let Some(Immediate::I32(number)) = inst_data.imm {
+                    write!(f, "syscall {}(", number)?;
+                } else {
+                    write!(f, "syscall (")?;
+                }
+                for (i, arg) in inst_data.args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "v{}", arg.index())?;
+                }
+                write!(f, ")")
+            }
+            // Memory
+            Opcode::Load => {
+                if inst_data.results.len() == 1 && inst_data.args.len() == 1 {
+                    if let Some(ty) = inst_data.ty {
+                        write!(
+                            f,
+                            "v{} = load.{} v{}",
+                            inst_data.results[0].index(),
+                            ty,
+                            inst_data.args[0].index()
+                        )
+                    } else {
+                        write!(
+                            f,
+                            "v{} = load v{}",
+                            inst_data.results[0].index(),
+                            inst_data.args[0].index()
+                        )
+                    }
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            Opcode::Store => {
+                if inst_data.args.len() == 2 {
+                    if let Some(ty) = inst_data.ty {
+                        write!(
+                            f,
+                            "store.{} v{}, v{}",
+                            ty,
+                            inst_data.args[0].index(),
+                            inst_data.args[1].index()
+                        )
+                    } else {
+                        write!(
+                            f,
+                            "store v{}, v{}",
+                            inst_data.args[0].index(),
+                            inst_data.args[1].index()
+                        )
+                    }
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+        }
+    }
 }
 
 impl fmt::Display for Function {
@@ -161,13 +408,16 @@ impl fmt::Display for Function {
             if let Some(block_data) = self.block_data(block) {
                 if !block_data.params.is_empty() {
                     write!(f, "(")?;
-                    for (i, param) in block_data.params.iter().enumerate() {
+                    for (i, (param, param_ty)) in block_data
+                        .params
+                        .iter()
+                        .zip(block_data.param_types.iter())
+                        .enumerate()
+                    {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        // Default to i32 for parameter types (as per plan)
-                        // TODO: Could enhance later to track actual types
-                        write!(f, "v{}: i32", param.index())?;
+                        write!(f, "v{}: {}", param.index(), param_ty)?;
                     }
                     write!(f, ")")?;
                 }
@@ -177,8 +427,9 @@ impl fmt::Display for Function {
             // Print instructions in this block
             for inst in self.block_insts(block) {
                 if let Some(inst_data) = self.dfg.inst_data(inst) {
-                    // TODO: Implement proper instruction formatting
-                    writeln!(f, "    {:?}", inst_data.opcode)?;
+                    write!(f, "    ")?;
+                    self.format_instruction(f, inst_data)?;
+                    writeln!(f)?;
                 }
             }
         }
