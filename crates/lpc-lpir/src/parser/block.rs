@@ -15,7 +15,6 @@ use super::{
     primitives::{parse_block_index, parse_type, parse_value},
     whitespace::blank,
 };
-use crate::block::Block;
 
 /// Parse a single block parameter: v0: i32
 /// Handles its own leading whitespace (for use in separated_list0)
@@ -46,7 +45,8 @@ fn parse_block_params(input: &str) -> IResult<&str, Vec<crate::value::Value>> {
 }
 
 /// Parse a block
-pub(crate) fn parse_block(input: &str) -> IResult<&str, Block> {
+/// Returns (params, instructions) tuple
+pub(crate) fn parse_block(input: &str) -> IResult<&str, (Vec<crate::value::Value>, Vec<crate::inst::Inst>)> {
     let (input, _) = blank(input)?;
     let (input, _block_index) = terminated(parse_block_index, blank)(input)?;
     let (input, params) = opt(parse_block_params)(input)?;
@@ -59,10 +59,7 @@ pub(crate) fn parse_block(input: &str) -> IResult<&str, Block> {
 
     Ok((
         input,
-        Block {
-            params: params.unwrap_or_default(),
-            insts,
-        },
+        (params.unwrap_or_default(), insts),
     ))
 }
 
@@ -169,10 +166,10 @@ mod tests {
         let input = "block0:\n    v0 = iconst 42\n    return v0";
         let result = parse_block(input);
         assert!(result.is_ok(), "parse_block failed: {:?}", result);
-        let (_remaining, block) = result.unwrap();
-        assert_eq!(block.insts.len(), 2, "Expected 2 instructions");
-        assert!(matches!(block.insts[0], crate::inst::Inst::Iconst { .. }));
-        assert!(matches!(block.insts[1], crate::inst::Inst::Return { .. }));
+        let (_remaining, (_params, insts)) = result.unwrap();
+        assert_eq!(insts.len(), 2, "Expected 2 instructions");
+        assert!(matches!(insts[0], crate::inst::Inst::Iconst { .. }));
+        assert!(matches!(insts[1], crate::inst::Inst::Return { .. }));
     }
 
     #[test]
@@ -180,9 +177,9 @@ mod tests {
         let input = "block0(v0: i32, v1: i32):\n    v2 = iadd v0, v1\n    return v2";
         let result = parse_block(input);
         assert!(result.is_ok(), "parse_block failed: {:?}", result);
-        let (_, block) = result.unwrap();
-        assert_eq!(block.params.len(), 2);
-        assert_eq!(block.insts.len(), 2);
+        let (_, (params, insts)) = result.unwrap();
+        assert_eq!(params.len(), 2);
+        assert_eq!(insts.len(), 2);
     }
 
     #[test]
@@ -241,8 +238,8 @@ mod tests {
         let input = "block0:";
         let result = parse_block(input);
         assert!(result.is_ok(), "Empty block should be valid");
-        let (_, block) = result.unwrap();
-        assert_eq!(block.insts.len(), 0);
+        let (_, (_params, insts)) = result.unwrap();
+        assert_eq!(insts.len(), 0);
     }
 
     #[test]
@@ -260,8 +257,8 @@ mod tests {
             "parse_block with comments failed: {:?}",
             result
         );
-        let (_, block) = result.unwrap();
-        assert_eq!(block.insts.len(), 3);
+        let (_, (_params, insts)) = result.unwrap();
+        assert_eq!(insts.len(), 3);
     }
 
     #[test]
@@ -276,16 +273,16 @@ mod tests {
         return v5"#;
         let result = parse_block(input.trim());
         assert!(result.is_ok(), "parse_block with call failed: {:?}", result);
-        let (remaining, block) = result.unwrap();
+        let (remaining, (_params, insts)) = result.unwrap();
         assert_eq!(
             remaining.trim(),
             "",
             "Should consume all input, got: {:?}",
             remaining
         );
-        assert_eq!(block.insts.len(), 6, "Expected 6 instructions");
+        assert_eq!(insts.len(), 6, "Expected 6 instructions");
         // Verify the call instruction is parsed correctly
-        assert!(matches!(block.insts[2], crate::inst::Inst::Call { .. }));
+        assert!(matches!(insts[2], crate::inst::Inst::Call { .. }));
     }
 
     #[test]
@@ -313,22 +310,22 @@ mod tests {
             "parse_block with call and multiple instructions failed: {:?}",
             result
         );
-        let (remaining, block) = result.unwrap();
+        let (remaining, (_params, insts)) = result.unwrap();
         assert_eq!(
             remaining.trim(),
             "",
             "Should consume all input, got remaining: {:?}",
             remaining
         );
-        assert_eq!(block.insts.len(), 14, "Expected 14 instructions");
+        assert_eq!(insts.len(), 14, "Expected 14 instructions");
         // Verify call is at the right position
         assert!(
-            matches!(block.insts[10], crate::inst::Inst::Call { .. }),
+            matches!(insts[10], crate::inst::Inst::Call { .. }),
             "Expected call instruction at position 9"
         );
         // Verify instructions after call are parsed
         assert!(
-            matches!(block.insts[11], crate::inst::Inst::Iconst { .. }),
+            matches!(insts[11], crate::inst::Inst::Iconst { .. }),
             "Expected iconst after call"
         );
     }

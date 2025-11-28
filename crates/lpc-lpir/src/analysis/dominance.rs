@@ -246,7 +246,7 @@ impl DominatorTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{block::Block, function::Function, inst::Inst, signature::Signature, value::Value};
+    use crate::{dfg::InstData, function::Function, signature::Signature};
 
     fn create_function() -> Function {
         Function::new(Signature::empty(), alloc::string::String::from("test"))
@@ -255,9 +255,10 @@ mod tests {
     #[test]
     fn test_dominance_single_block() {
         let mut func = create_function();
-        let mut block = Block::new();
-        block.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block);
+        let block = func.create_block();
+        func.append_block(block);
+        let inst = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst, block);
 
         let cfg = ControlFlowGraph::from_function(&func);
         let domtree = DominatorTree::from_cfg(&cfg);
@@ -269,23 +270,21 @@ mod tests {
     fn test_dominance_linear_chain() {
         let mut func = create_function();
         // block0 -> block1 -> block2
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Jump {
-            target: 1,
-            args: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let block2 = func.create_block();
+        func.append_block(block2);
 
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Jump {
-            target: 2,
-            args: Vec::new(),
-        });
-        func.add_block(block1);
+        let inst0 = func.create_inst(InstData::jump(block1, Vec::new()));
+        func.append_inst(inst0, block0);
 
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block2);
+        let inst1 = func.create_inst(InstData::jump(block2, Vec::new()));
+        func.append_inst(inst1, block1);
+
+        let inst2 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst2, block2);
 
         let cfg = ControlFlowGraph::from_function(&func);
         let domtree = DominatorTree::from_cfg(&cfg);
@@ -309,33 +308,33 @@ mod tests {
         // block0 -> block1, block2
         // block1 -> block3
         // block2 -> block3
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Br {
-            condition: Value::new(0),
-            target_true: 1,
-            args_true: Vec::new(),
-            target_false: 2,
-            args_false: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let block2 = func.create_block();
+        func.append_block(block2);
+        let block3 = func.create_block();
+        func.append_block(block3);
 
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Jump {
-            target: 3,
-            args: Vec::new(),
-        });
-        func.add_block(block1);
+        let cond = crate::value::Value::new(0);
+        let inst0 = func.create_inst(InstData::branch(
+            cond,
+            block1,
+            Vec::new(),
+            block2,
+            Vec::new(),
+        ));
+        func.append_inst(inst0, block0);
 
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Jump {
-            target: 3,
-            args: Vec::new(),
-        });
-        func.add_block(block2);
+        let inst1 = func.create_inst(InstData::jump(block3, Vec::new()));
+        func.append_inst(inst1, block1);
 
-        let mut block3 = Block::new();
-        block3.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block3);
+        let inst2 = func.create_inst(InstData::jump(block3, Vec::new()));
+        func.append_inst(inst2, block2);
+
+        let inst3 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst3, block3);
 
         let cfg = ControlFlowGraph::from_function(&func);
         let domtree = DominatorTree::from_cfg(&cfg);
@@ -361,26 +360,28 @@ mod tests {
         let mut func = create_function();
         // block0 -> block1
         // block1 -> block1 (loop), block2
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Jump {
-            target: 1,
-            args: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let block2 = func.create_block();
+        func.append_block(block2);
 
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Br {
-            condition: Value::new(0),
-            target_true: 1, // Loop back
-            args_true: Vec::new(),
-            target_false: 2,
-            args_false: Vec::new(),
-        });
-        func.add_block(block1);
+        let inst0 = func.create_inst(InstData::jump(block1, Vec::new()));
+        func.append_inst(inst0, block0);
 
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block2);
+        let cond = crate::value::Value::new(0);
+        let inst1 = func.create_inst(InstData::branch(
+            cond,
+            block1, // Loop back
+            Vec::new(),
+            block2,
+            Vec::new(),
+        ));
+        func.append_inst(inst1, block1);
+
+        let inst2 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst2, block2);
 
         let cfg = ControlFlowGraph::from_function(&func);
         let domtree = DominatorTree::from_cfg(&cfg);
@@ -402,23 +403,21 @@ mod tests {
     fn test_dominance_immediate_dominator() {
         let mut func = create_function();
         // block0 -> block1 -> block2
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Jump {
-            target: 1,
-            args: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let block2 = func.create_block();
+        func.append_block(block2);
 
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Jump {
-            target: 2,
-            args: Vec::new(),
-        });
-        func.add_block(block1);
+        let inst0 = func.create_inst(InstData::jump(block1, Vec::new()));
+        func.append_inst(inst0, block0);
 
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block2);
+        let inst1 = func.create_inst(InstData::jump(block2, Vec::new()));
+        func.append_inst(inst1, block1);
+
+        let inst2 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst2, block2);
 
         let cfg = ControlFlowGraph::from_function(&func);
         let domtree = DominatorTree::from_cfg(&cfg);
@@ -437,23 +436,21 @@ mod tests {
     fn test_dominance_dominated_blocks() {
         let mut func = create_function();
         // block0 -> block1 -> block2
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Jump {
-            target: 1,
-            args: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let block2 = func.create_block();
+        func.append_block(block2);
 
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Jump {
-            target: 2,
-            args: Vec::new(),
-        });
-        func.add_block(block1);
+        let inst0 = func.create_inst(InstData::jump(block1, Vec::new()));
+        func.append_inst(inst0, block0);
 
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block2);
+        let inst1 = func.create_inst(InstData::jump(block2, Vec::new()));
+        func.append_inst(inst1, block1);
+
+        let inst2 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst2, block2);
 
         let cfg = ControlFlowGraph::from_function(&func);
         let domtree = DominatorTree::from_cfg(&cfg);
@@ -472,14 +469,16 @@ mod tests {
     #[test]
     fn test_dominance_unreachable_blocks() {
         let mut func = create_function();
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let inst0 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst0, block0);
 
         // block1 is unreachable (no path from entry)
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block1);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let inst1 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst1, block1);
 
         let cfg = ControlFlowGraph::from_function(&func);
         let domtree = DominatorTree::from_cfg(&cfg);
@@ -511,43 +510,45 @@ mod tests {
         // block0 -> block1 -> block2 -> block1 (inner loop)
         // block1 -> block3 -> block1 (outer loop)
         let mut func = create_function();
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Jump {
-            target: 1,
-            args: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let block2 = func.create_block();
+        func.append_block(block2);
+        let block3 = func.create_block();
+        func.append_block(block3);
+        let block4 = func.create_block();
+        func.append_block(block4);
 
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Br {
-            condition: Value::new(0),
-            target_true: 2,
-            args_true: Vec::new(),
-            target_false: 3,
-            args_false: Vec::new(),
-        });
-        func.add_block(block1);
+        let inst0 = func.create_inst(InstData::jump(block1, Vec::new()));
+        func.append_inst(inst0, block0);
 
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Jump {
-            target: 1,
-            args: Vec::new(),
-        });
-        func.add_block(block2);
+        let cond1 = crate::value::Value::new(0);
+        let inst1 = func.create_inst(InstData::branch(
+            cond1,
+            block2,
+            Vec::new(),
+            block3,
+            Vec::new(),
+        ));
+        func.append_inst(inst1, block1);
 
-        let mut block3 = Block::new();
-        block3.push_inst(Inst::Br {
-            condition: Value::new(0),
-            target_true: 1,
-            args_true: Vec::new(),
-            target_false: 4,
-            args_false: Vec::new(),
-        });
-        func.add_block(block3);
+        let inst2 = func.create_inst(InstData::jump(block1, Vec::new()));
+        func.append_inst(inst2, block2);
 
-        let mut block4 = Block::new();
-        block4.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block4);
+        let cond2 = crate::value::Value::new(0);
+        let inst3 = func.create_inst(InstData::branch(
+            cond2,
+            block1,
+            Vec::new(),
+            block4,
+            Vec::new(),
+        ));
+        func.append_inst(inst3, block3);
+
+        let inst4 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst4, block4);
 
         let cfg = ControlFlowGraph::from_function(&func);
         let domtree = DominatorTree::from_cfg(&cfg);
@@ -574,19 +575,22 @@ mod tests {
         // Test that common_dominator handles unreachable blocks gracefully
         // (This tests the internal common_dominator function indirectly through dominance computation)
         let mut func = create_function();
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let inst0 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst0, block0);
 
         // block1 is unreachable
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block1);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let inst1 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst1, block1);
 
         // block2 is unreachable
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block2);
+        let block2 = func.create_block();
+        func.append_block(block2);
+        let inst2 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst2, block2);
 
         let cfg = ControlFlowGraph::from_function(&func);
         let domtree = DominatorTree::from_cfg(&cfg);

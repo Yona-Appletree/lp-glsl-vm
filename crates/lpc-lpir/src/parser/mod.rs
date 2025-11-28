@@ -3,6 +3,7 @@
 mod block;
 mod error;
 mod function;
+mod inst_converter;
 mod instructions;
 mod module;
 mod primitives;
@@ -214,8 +215,10 @@ mod tests {
             result
         );
         let func = result.unwrap();
-        assert_eq!(func.blocks.len(), 1);
-        assert_eq!(func.blocks[0].insts.len(), 2);
+        assert_eq!(func.block_count(), 1);
+        let block = func.entry_block().unwrap();
+        let insts: alloc::vec::Vec<_> = func.block_insts(block).collect();
+        assert_eq!(insts.len(), 2);
     }
 
     #[test]

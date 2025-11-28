@@ -4,13 +4,14 @@ use nom::{
     bytes::complete::tag,
     character::complete::char,
     combinator::{map, opt},
-    multi::{many1, separated_list0},
+    multi::separated_list0,
     sequence::{delimited, terminated, tuple},
     IResult,
 };
 
 use super::{
     block::parse_block,
+    inst_converter::inst_to_inst_data,
     primitives::{parse_function_name, parse_type},
     whitespace::blank,
 };
@@ -46,35 +47,57 @@ pub(crate) fn parse_signature(input: &str) -> IResult<&str, Signature> {
 /// Parse a function (internal, used by module parser)
 /// The module parser handles leading whitespace before calling this
 /// If no name is provided, a temporary name will be generated (module parser will replace it)
-pub(crate) fn parse_function_internal(
-    input: &str,
-    anon_counter: usize,
-) -> IResult<&str, Function> {
+pub(crate) fn parse_function_internal(input: &str, anon_counter: usize) -> IResult<&str, Function> {
     let (input, _) = terminated(tag("function"), blank)(input)?;
     let (input, name) = opt(terminated(parse_function_name, blank))(input)?;
     let (input, signature) = parse_signature(input)?;
     let (input, _) = terminated(char('{'), blank)(input)?;
 
-    let (input, blocks) = many1(parse_block)(input)?;
+    // Generate a name if none was provided (module parser will replace with proper anon name)
+    let name = name.unwrap_or_else(|| alloc::format!("temp_anon_{}", anon_counter));
+
+    // Create function with new API
+    let mut function = Function::new(signature, name);
+
+    // Parse blocks and build function incrementally
+    let mut input = input;
+    loop {
+        // Check if we're at the closing brace
+        let (remaining, _) = blank(input)?;
+        if remaining.starts_with('}') {
+            break;
+        }
+
+        // Parse a block
+        let (remaining, (params, insts)) = parse_block(remaining)?;
+        input = remaining;
+
+        // Create block in function
+        let block_entity = if params.is_empty() {
+            function.create_block()
+        } else {
+            function.create_block_with_params(params)
+        };
+        function.append_block(block_entity);
+
+        // Add instructions to the block
+        for inst in insts {
+            let inst_data = inst_to_inst_data(inst);
+            let inst_entity = function.create_inst(inst_data);
+            function.append_inst(inst_entity, block_entity);
+        }
+    }
 
     // Allow whitespace before closing brace
     let (input, _) = terminated(char('}'), blank)(input)?;
 
-    // Generate a name if none was provided (module parser will replace with proper anon name)
-    let name = name.unwrap_or_else(|| alloc::format!("temp_anon_{}", anon_counter));
-
-    Ok((
-        input,
-        Function {
-            signature,
-            blocks,
-            name,
-        },
-    ))
+    Ok((input, function))
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::*;
 
     #[test]
@@ -113,8 +136,10 @@ mod tests {
             "Should consume all input, got: {:?}",
             remaining
         );
-        assert_eq!(func.blocks.len(), 1);
-        assert_eq!(func.blocks[0].insts.len(), 2);
+        assert_eq!(func.block_count(), 1);
+        let block = func.entry_block().unwrap();
+        let insts: Vec<_> = func.block_insts(block).collect();
+        assert_eq!(insts.len(), 2);
     }
 
     #[test]

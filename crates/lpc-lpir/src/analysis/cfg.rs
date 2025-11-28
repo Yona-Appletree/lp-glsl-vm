@@ -2,7 +2,7 @@
 
 use alloc::{collections::BTreeSet, vec, vec::Vec};
 
-use crate::{function::Function, inst::Inst};
+use crate::{dfg::Opcode, entity::Block, function::Function};
 
 /// Control Flow Graph for a function.
 ///
@@ -20,42 +20,40 @@ pub struct ControlFlowGraph {
 impl ControlFlowGraph {
     /// Build CFG from function.
     pub fn from_function(func: &Function) -> Self {
-        let num_blocks = func.blocks.len();
+        let num_blocks = func.block_count();
         let mut predecessors = vec![BTreeSet::new(); num_blocks];
         let mut successors = vec![BTreeSet::new(); num_blocks];
 
+        // Build block index mapping
+        let block_to_index: alloc::collections::BTreeMap<Block, usize> = func
+            .blocks()
+            .enumerate()
+            .map(|(idx, block)| (block, idx))
+            .collect();
+
         // Build CFG by examining jump and branch instructions
-        for (block_idx, block) in func.blocks.iter().enumerate() {
-            for inst in &block.insts {
-                match inst {
-                    Inst::Jump { target, .. } => {
-                        let target_idx = *target as usize;
-                        if target_idx < num_blocks {
-                            successors[block_idx].insert(target_idx);
-                            predecessors[target_idx].insert(block_idx);
+        for (block_idx, block) in func.blocks().enumerate() {
+            for inst in func.block_insts(block) {
+                if let Some(inst_data) = func.dfg.inst_data(inst) {
+                    match inst_data.opcode {
+                        Opcode::Jump | Opcode::Br => {
+                            if let Some(block_args) = &inst_data.block_args {
+                                for (target_block, _args) in &block_args.targets {
+                                    if let Some(&target_idx) = block_to_index.get(target_block) {
+                                        if target_idx < num_blocks {
+                                            successors[block_idx].insert(target_idx);
+                                            predecessors[target_idx].insert(block_idx);
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    }
-                    Inst::Br {
-                        target_true,
-                        target_false,
-                        ..
-                    } => {
-                        let true_idx = *target_true as usize;
-                        let false_idx = *target_false as usize;
-                        if true_idx < num_blocks {
-                            successors[block_idx].insert(true_idx);
-                            predecessors[true_idx].insert(block_idx);
+                        Opcode::Return | Opcode::Halt => {
+                            // These terminate the block, no successors
                         }
-                        if false_idx < num_blocks {
-                            successors[block_idx].insert(false_idx);
-                            predecessors[false_idx].insert(block_idx);
+                        _ => {
+                            // Other instructions don't affect control flow
                         }
-                    }
-                    Inst::Return { .. } | Inst::Halt => {
-                        // These terminate the block, no successors
-                    }
-                    _ => {
-                        // Other instructions don't affect control flow
                     }
                 }
             }
@@ -154,7 +152,7 @@ impl ControlFlowGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{block::Block, function::Function, inst::Inst, signature::Signature, value::Value};
+    use crate::{dfg::InstData, function::Function, signature::Signature};
 
     fn create_function() -> Function {
         Function::new(Signature::empty(), alloc::string::String::from("test"))
@@ -163,9 +161,10 @@ mod tests {
     #[test]
     fn test_cfg_single_block() {
         let mut func = create_function();
-        let mut block = Block::new();
-        block.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block);
+        let block = func.create_block();
+        func.append_block(block);
+        let inst = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst, block);
 
         let cfg = ControlFlowGraph::from_function(&func);
         assert_eq!(cfg.num_blocks(), 1);
@@ -178,23 +177,21 @@ mod tests {
     fn test_cfg_linear_chain() {
         let mut func = create_function();
         // block0 -> block1 -> block2
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Jump {
-            target: 1,
-            args: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let block2 = func.create_block();
+        func.append_block(block2);
 
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Jump {
-            target: 2,
-            args: Vec::new(),
-        });
-        func.add_block(block1);
+        let inst0 = func.create_inst(InstData::jump(block1, Vec::new()));
+        func.append_inst(inst0, block0);
 
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block2);
+        let inst1 = func.create_inst(InstData::jump(block2, Vec::new()));
+        func.append_inst(inst1, block1);
+
+        let inst2 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst2, block2);
 
         let cfg = ControlFlowGraph::from_function(&func);
         assert_eq!(cfg.num_blocks(), 3);
@@ -221,33 +218,33 @@ mod tests {
         // block0 -> block1, block2
         // block1 -> block3
         // block2 -> block3
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Br {
-            condition: Value::new(0),
-            target_true: 1,
-            args_true: Vec::new(),
-            target_false: 2,
-            args_false: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let block2 = func.create_block();
+        func.append_block(block2);
+        let block3 = func.create_block();
+        func.append_block(block3);
 
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Jump {
-            target: 3,
-            args: Vec::new(),
-        });
-        func.add_block(block1);
+        let cond = crate::value::Value::new(0);
+        let inst0 = func.create_inst(InstData::branch(
+            cond,
+            block1,
+            Vec::new(),
+            block2,
+            Vec::new(),
+        ));
+        func.append_inst(inst0, block0);
 
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Jump {
-            target: 3,
-            args: Vec::new(),
-        });
-        func.add_block(block2);
+        let inst1 = func.create_inst(InstData::jump(block3, Vec::new()));
+        func.append_inst(inst1, block1);
 
-        let mut block3 = Block::new();
-        block3.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block3);
+        let inst2 = func.create_inst(InstData::jump(block3, Vec::new()));
+        func.append_inst(inst2, block2);
+
+        let inst3 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst3, block3);
 
         let cfg = ControlFlowGraph::from_function(&func);
         assert_eq!(cfg.num_blocks(), 4);
@@ -265,26 +262,28 @@ mod tests {
         let mut func = create_function();
         // block0 -> block1
         // block1 -> block1 (loop), block2
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Jump {
-            target: 1,
-            args: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let block2 = func.create_block();
+        func.append_block(block2);
 
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Br {
-            condition: Value::new(0),
-            target_true: 1, // Loop back
-            args_true: Vec::new(),
-            target_false: 2,
-            args_false: Vec::new(),
-        });
-        func.add_block(block1);
+        let inst0 = func.create_inst(InstData::jump(block1, Vec::new()));
+        func.append_inst(inst0, block0);
 
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block2);
+        let cond = crate::value::Value::new(0);
+        let inst1 = func.create_inst(InstData::branch(
+            cond,
+            block1, // Loop back
+            Vec::new(),
+            block2,
+            Vec::new(),
+        ));
+        func.append_inst(inst1, block1);
+
+        let inst2 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst2, block2);
 
         let cfg = ControlFlowGraph::from_function(&func);
         assert_eq!(cfg.num_blocks(), 3);
@@ -303,33 +302,33 @@ mod tests {
         // block0 -> block1, block2
         // block1 -> block3
         // block2 -> block3
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Br {
-            condition: Value::new(0),
-            target_true: 1,
-            args_true: Vec::new(),
-            target_false: 2,
-            args_false: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let block2 = func.create_block();
+        func.append_block(block2);
+        let block3 = func.create_block();
+        func.append_block(block3);
 
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Jump {
-            target: 3,
-            args: Vec::new(),
-        });
-        func.add_block(block1);
+        let cond = crate::value::Value::new(0);
+        let inst0 = func.create_inst(InstData::branch(
+            cond,
+            block1,
+            Vec::new(),
+            block2,
+            Vec::new(),
+        ));
+        func.append_inst(inst0, block0);
 
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Jump {
-            target: 3,
-            args: Vec::new(),
-        });
-        func.add_block(block2);
+        let inst1 = func.create_inst(InstData::jump(block3, Vec::new()));
+        func.append_inst(inst1, block1);
 
-        let mut block3 = Block::new();
-        block3.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block3);
+        let inst2 = func.create_inst(InstData::jump(block3, Vec::new()));
+        func.append_inst(inst2, block2);
+
+        let inst3 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst3, block3);
 
         let cfg = ControlFlowGraph::from_function(&func);
         let rpo = cfg.reverse_post_order();
@@ -345,14 +344,16 @@ mod tests {
     #[test]
     fn test_cfg_unreachable_block() {
         let mut func = create_function();
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let inst0 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst0, block0);
 
         // block1 is unreachable (no path from entry)
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Return { values: Vec::new() });
-        func.add_block(block1);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let inst1 = func.create_inst(InstData::return_(Vec::new()));
+        func.append_inst(inst1, block1);
 
         let cfg = ControlFlowGraph::from_function(&func);
         assert!(cfg.is_reachable(0));

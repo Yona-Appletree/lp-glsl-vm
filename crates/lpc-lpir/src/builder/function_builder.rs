@@ -4,7 +4,8 @@ use alloc::{string::String, vec::Vec};
 
 use crate::{
     builder::{block_builder::BlockBuilder, ssa_builder::SSABuilder},
-    Block, Function, Signature, Value,
+    entity::Block as BlockEntity,
+    Function, Signature, Value,
 };
 
 /// Builder for constructing functions in IR.
@@ -17,7 +18,7 @@ pub struct FunctionBuilder {
     /// SSA builder for tracking variable definitions.
     ssa: SSABuilder,
     /// Current block being built (if any).
-    current_block: Option<usize>,
+    current_block: Option<BlockEntity>,
 }
 
 impl FunctionBuilder {
@@ -30,26 +31,26 @@ impl FunctionBuilder {
         }
     }
 
-    /// Create a new block and return its index.
-    pub fn create_block(&mut self) -> usize {
-        let block = Block::new();
-        let index = self.function.add_block(block);
-        index
+    /// Create a new block and return its entity.
+    pub fn create_block(&mut self) -> BlockEntity {
+        let block = self.function.create_block();
+        self.function.append_block(block);
+        block
     }
 
     /// Create a new block with parameters (for phi nodes).
-    pub fn create_block_with_params(&mut self, params: Vec<Value>) -> usize {
-        let block = Block::with_params(params);
-        let index = self.function.add_block(block);
-        index
+    pub fn create_block_with_params(&mut self, params: Vec<Value>) -> BlockEntity {
+        let block = self.function.create_block_with_params(params);
+        self.function.append_block(block);
+        block
     }
 
     /// Switch to building the given block.
     ///
     /// Returns a `BlockBuilder` for adding instructions to this block.
-    pub fn block_builder(&mut self, block_index: usize) -> BlockBuilder<'_> {
-        self.current_block = Some(block_index);
-        BlockBuilder::new(self, block_index)
+    pub fn block_builder(&mut self, block: BlockEntity) -> BlockBuilder<'_> {
+        self.current_block = Some(block);
+        BlockBuilder::new(self, block)
     }
 
     /// Get the SSA builder (for advanced use cases).
@@ -72,8 +73,8 @@ impl FunctionBuilder {
         &mut self.function
     }
 
-    /// Get the current block index.
-    pub fn current_block(&self) -> Option<usize> {
+    /// Get the current block entity.
+    pub fn current_block(&self) -> Option<BlockEntity> {
         self.current_block
     }
 }
@@ -97,8 +98,7 @@ mod tests {
     fn test_create_block() {
         let sig = Signature::empty();
         let mut builder = FunctionBuilder::new(sig, String::from("test"));
-        let block_idx = builder.create_block();
-        assert_eq!(block_idx, 0);
+        let _block = builder.create_block();
         let func = builder.finish();
         assert_eq!(func.block_count(), 1);
     }
@@ -107,21 +107,21 @@ mod tests {
     fn test_block_builder() {
         let sig = Signature::empty();
         let mut builder = FunctionBuilder::new(sig, String::from("test"));
-        let block_idx = builder.create_block();
+        let block = builder.create_block();
 
         let _v1 = builder.new_value();
         let _v2 = builder.new_value();
         let v3 = builder.new_value();
 
         {
-            let mut block_builder = builder.block_builder(block_idx);
+            let mut block_builder = builder.block_builder(block);
             block_builder.iconst(v3, 42);
             block_builder.return_(&vec![v3]);
         }
 
         let func = builder.finish();
-        let block = func.block(0).unwrap();
-        assert_eq!(block.inst_count(), 2);
+        let insts: Vec<_> = func.block_insts(block).collect();
+        assert_eq!(insts.len(), 2);
     }
 
     #[test]
@@ -129,7 +129,7 @@ mod tests {
         // Build: fn add(a: i32, b: i32) -> i32 { a + b }
         let sig = Signature::new(vec![Type::I32, Type::I32], vec![Type::I32]);
         let mut builder = FunctionBuilder::new(sig, String::from("add"));
-        let block_idx = builder.create_block();
+        let block = builder.create_block();
 
         // Get parameter values (in real usage, these would come from block params)
         let a = builder.new_value();
@@ -137,13 +137,13 @@ mod tests {
         let result = builder.new_value();
 
         {
-            let mut block_builder = builder.block_builder(block_idx);
+            let mut block_builder = builder.block_builder(block);
             block_builder.iadd(result, a, b);
             block_builder.return_(&vec![result]);
         }
 
         let func = builder.finish();
-        let block = func.block(0).unwrap();
-        assert_eq!(block.inst_count(), 2);
+        let insts: Vec<_> = func.block_insts(block).collect();
+        assert_eq!(insts.len(), 2);
     }
 }

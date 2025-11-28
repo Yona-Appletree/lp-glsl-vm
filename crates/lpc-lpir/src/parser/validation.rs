@@ -9,48 +9,31 @@ use alloc::{
 
 use crate::{
     analysis::{ControlFlowGraph, DominatorTree},
+    dfg::Opcode,
+    entity::Block,
     function::Function,
-    inst::Inst,
     value::Value,
 };
 
 /// Validate that block indices in jumps and branches are valid.
 pub fn validate_block_indices(func: &Function) -> Result<(), String> {
-    let num_blocks = func.blocks.len();
+    let valid_blocks: BTreeSet<Block> = func.blocks().collect();
+    let num_blocks = valid_blocks.len();
 
-    for (_block_idx, block) in func.blocks.iter().enumerate() {
-        for inst in &block.insts {
-            match inst {
-                Inst::Jump { target, .. } => {
-                    if *target as usize >= num_blocks {
-                        return Err(alloc::format!(
-                            "Jump to block{} but function only has {} blocks",
-                            target,
-                            num_blocks
-                        ));
+    for block in func.blocks() {
+        for inst in func.block_insts(block) {
+            if let Some(inst_data) = func.dfg.inst_data(inst) {
+                if let Some(block_args) = &inst_data.block_args {
+                    for (target_block, _args) in &block_args.targets {
+                        if !valid_blocks.contains(target_block) {
+                            return Err(alloc::format!(
+                                "Jump/branch to block{} but function only has {} blocks",
+                                target_block.index(),
+                                num_blocks
+                            ));
+                        }
                     }
                 }
-                Inst::Br {
-                    target_true,
-                    target_false,
-                    ..
-                } => {
-                    if *target_true as usize >= num_blocks {
-                        return Err(alloc::format!(
-                            "Branch to block{} but function only has {} blocks",
-                            target_true,
-                            num_blocks
-                        ));
-                    }
-                    if *target_false as usize >= num_blocks {
-                        return Err(alloc::format!(
-                            "Branch to block{} but function only has {} blocks",
-                            target_false,
-                            num_blocks
-                        ));
-                    }
-                }
-                _ => {}
             }
         }
     }
@@ -60,48 +43,26 @@ pub fn validate_block_indices(func: &Function) -> Result<(), String> {
 
 /// Validate that jump/branch arguments match target block parameter counts.
 pub fn validate_block_parameters(func: &Function) -> Result<(), String> {
-    for (_block_idx, block) in func.blocks.iter().enumerate() {
-        for inst in &block.insts {
-            match inst {
-                Inst::Jump { target, args } => {
-                    let target_block = &func.blocks[*target as usize];
-                    if args.len() != target_block.params.len() {
-                        return Err(alloc::format!(
-                            "Jump to block{} expects {} parameters, but {} arguments provided",
-                            target,
-                            target_block.params.len(),
-                            args.len()
-                        ));
+    for block in func.blocks() {
+        for inst in func.block_insts(block) {
+            if let Some(inst_data) = func.dfg.inst_data(inst) {
+                if let Some(block_args) = &inst_data.block_args {
+                    for (target_block, args) in &block_args.targets {
+                        let expected_param_count = func
+                            .block_data(*target_block)
+                            .map(|bd| bd.params.len())
+                            .unwrap_or(0);
+                        if args.len() != expected_param_count {
+                            return Err(alloc::format!(
+                                "Jump/branch to block{} expects {} parameters, but {} arguments \
+                                 provided",
+                                target_block.index(),
+                                expected_param_count,
+                                args.len()
+                            ));
+                        }
                     }
                 }
-                Inst::Br {
-                    target_true,
-                    args_true,
-                    target_false,
-                    args_false,
-                    ..
-                } => {
-                    let target_true_block = &func.blocks[*target_true as usize];
-                    if args_true.len() != target_true_block.params.len() {
-                        return Err(alloc::format!(
-                            "Branch to block{} expects {} parameters, but {} arguments provided",
-                            target_true,
-                            target_true_block.params.len(),
-                            args_true.len()
-                        ));
-                    }
-
-                    let target_false_block = &func.blocks[*target_false as usize];
-                    if args_false.len() != target_false_block.params.len() {
-                        return Err(alloc::format!(
-                            "Branch to block{} expects {} parameters, but {} arguments provided",
-                            target_false,
-                            target_false_block.params.len(),
-                            args_false.len()
-                        ));
-                    }
-                }
-                _ => {}
             }
         }
     }
@@ -113,17 +74,19 @@ pub fn validate_block_parameters(func: &Function) -> Result<(), String> {
 pub fn validate_return_values(func: &Function) -> Result<(), String> {
     let expected_return_count = func.signature.returns.len();
 
-    for (block_idx, block) in func.blocks.iter().enumerate() {
-        for inst in &block.insts {
-            if let Inst::Return { values } = inst {
-                if values.len() != expected_return_count {
-                    return Err(alloc::format!(
-                        "Return instruction in block{} returns {} values, but function signature \
-                         expects {}",
-                        block_idx,
-                        values.len(),
-                        expected_return_count
-                    ));
+    for block in func.blocks() {
+        for inst in func.block_insts(block) {
+            if let Some(inst_data) = func.dfg.inst_data(inst) {
+                if inst_data.opcode == Opcode::Return {
+                    if inst_data.results.len() != expected_return_count {
+                        return Err(alloc::format!(
+                            "Return instruction in block{} returns {} values, but function \
+                             signature expects {}",
+                            block.index(),
+                            inst_data.results.len(),
+                            expected_return_count
+                        ));
+                    }
                 }
             }
         }
@@ -134,24 +97,29 @@ pub fn validate_return_values(func: &Function) -> Result<(), String> {
 
 /// Validate that blocks end with terminating instructions.
 pub fn validate_terminating_instructions(func: &Function) -> Result<(), String> {
-    for (block_idx, block) in func.blocks.iter().enumerate() {
-        if block.insts.is_empty() {
+    for block in func.blocks() {
+        let insts: Vec<_> = func.block_insts(block).collect();
+        if insts.is_empty() {
             return Err(alloc::format!(
                 "Block{} is empty (must have at least one terminating instruction)",
-                block_idx
+                block.index()
             ));
         }
 
-        let last_inst = &block.insts[block.insts.len() - 1];
-        match last_inst {
-            Inst::Return { .. } | Inst::Jump { .. } | Inst::Br { .. } | Inst::Halt => {
-                // Valid terminator
-            }
-            _ => {
-                return Err(alloc::format!(
-                    "Block{} does not end with a terminating instruction (return/jump/branch/halt)",
-                    block_idx
-                ));
+        if let Some(last_inst) = insts.last() {
+            if let Some(inst_data) = func.dfg.inst_data(*last_inst) {
+                match inst_data.opcode {
+                    Opcode::Return | Opcode::Jump | Opcode::Br | Opcode::Halt => {
+                        // Valid terminator
+                    }
+                    _ => {
+                        return Err(alloc::format!(
+                            "Block{} does not end with a terminating instruction \
+                             (return/jump/branch/halt)",
+                            block.index()
+                        ));
+                    }
+                }
             }
         }
     }
@@ -161,9 +129,12 @@ pub fn validate_terminating_instructions(func: &Function) -> Result<(), String> 
 
 /// Validate that entry block parameters match function signature.
 pub fn validate_entry_block(func: &Function) -> Result<(), String> {
-    if let Some(entry_block) = func.blocks.first() {
+    if let Some(entry_block) = func.entry_block() {
         let expected_param_count = func.signature.params.len();
-        let actual_param_count = entry_block.params.len();
+        let actual_param_count = func
+            .block_data(entry_block)
+            .map(|bd| bd.params.len())
+            .unwrap_or(0);
 
         if actual_param_count != expected_param_count {
             return Err(alloc::format!(
@@ -186,35 +157,37 @@ pub fn validate_value_scoping(func: &Function) -> Result<(), String> {
     let cfg = ControlFlowGraph::from_function(func);
     let domtree = DominatorTree::from_cfg(&cfg);
 
+    // Note: CFG/domtree use usize indices, which we get from enumerate() below
+
     // Track value definitions: value -> (block_idx, inst_idx)
     let mut value_definitions: BTreeMap<Value, (usize, usize)> = BTreeMap::new();
 
     // Track values defined in each block (for SSA property check)
-    let mut block_definitions: Vec<BTreeSet<Value>> = vec![BTreeSet::new(); func.blocks.len()];
+    let mut block_definitions: Vec<BTreeSet<Value>> = vec![BTreeSet::new(); func.block_count()];
 
     // First pass: collect all value definitions
-    for (block_idx, block) in func.blocks.iter().enumerate() {
+    for (block_idx, block) in func.blocks().enumerate() {
         // Block parameters are defined at block entry (inst 0)
-        for param in &block.params {
-            if !block_definitions[block_idx].insert(*param) {
-                return Err(alloc::format!(
-                    "Value {} defined multiple times in block{} (SSA violation)",
-                    param.index(),
-                    block_idx
-                ));
+        if let Some(block_data) = func.block_data(block) {
+            for param in &block_data.params {
+                if !block_definitions[block_idx].insert(*param) {
+                    return Err(alloc::format!(
+                        "Value {} defined multiple times in block{} (SSA violation)",
+                        param.index(),
+                        block_idx
+                    ));
+                }
+                value_definitions.insert(*param, (block_idx, 0));
             }
-            value_definitions.insert(*param, (block_idx, 0));
         }
 
         // Track values defined by instructions
-        for (inst_idx, inst) in block.insts.iter().enumerate() {
-            match inst {
-                Inst::Return { .. } => {
-                    // Return instructions don't produce results
-                }
-                _ => {
-                    for result in inst.results() {
-                        if !block_definitions[block_idx].insert(result) {
+        for (inst_idx, inst) in func.block_insts(block).enumerate() {
+            if let Some(inst_data) = func.dfg.inst_data(inst) {
+                // Return instructions don't produce results (they use results field for return values)
+                if inst_data.opcode != Opcode::Return {
+                    for result in &inst_data.results {
+                        if !block_definitions[block_idx].insert(*result) {
                             return Err(alloc::format!(
                                 "Value {} defined multiple times in block{} (SSA violation)",
                                 result.index(),
@@ -222,7 +195,7 @@ pub fn validate_value_scoping(func: &Function) -> Result<(), String> {
                             ));
                         }
                         // inst_idx + 1 because 0 is reserved for block entry
-                        value_definitions.insert(result, (block_idx, inst_idx + 1));
+                        value_definitions.insert(*result, (block_idx, inst_idx + 1));
                     }
                 }
             }
@@ -230,53 +203,55 @@ pub fn validate_value_scoping(func: &Function) -> Result<(), String> {
     }
 
     // Second pass: validate that all value uses are dominated by their definitions
-    for (use_block_idx, block) in func.blocks.iter().enumerate() {
+    for (use_block_idx, block) in func.blocks().enumerate() {
         // Skip unreachable blocks (they can't execute anyway)
         if !cfg.is_reachable(use_block_idx) {
             continue;
         }
 
-        for (inst_idx, inst) in block.insts.iter().enumerate() {
-            // Check all argument values used by this instruction
-            for arg_value in inst.args() {
-                if let Some((def_block_idx, def_inst_idx)) = value_definitions.get(&arg_value) {
-                    // Check if value is defined in an unreachable block
-                    if !cfg.is_reachable(*def_block_idx) {
-                        return Err(alloc::format!(
-                            "Value {} used in block{} but defined in unreachable block{}",
-                            arg_value.index(),
-                            use_block_idx,
-                            def_block_idx
-                        ));
-                    }
+        for (inst_idx, inst) in func.block_insts(block).enumerate() {
+            if let Some(inst_data) = func.dfg.inst_data(inst) {
+                // Check all argument values used by this instruction
+                for arg_value in &inst_data.args {
+                    if let Some((def_block_idx, def_inst_idx)) = value_definitions.get(arg_value) {
+                        // Check if value is defined in an unreachable block
+                        if !cfg.is_reachable(*def_block_idx) {
+                            return Err(alloc::format!(
+                                "Value {} used in block{} but defined in unreachable block{}",
+                                arg_value.index(),
+                                use_block_idx,
+                                def_block_idx
+                            ));
+                        }
 
-                    // Check dominance: def_block must dominate use_block
-                    if !domtree.dominates(*def_block_idx, use_block_idx) {
-                        return Err(alloc::format!(
-                            "Value {} used in block{} but defined in block{}. Value must be \
-                             dominated by its definition.",
-                            arg_value.index(),
-                            use_block_idx,
-                            def_block_idx
-                        ));
-                    }
+                        // Check dominance: def_block must dominate use_block
+                        if !domtree.dominates(*def_block_idx, use_block_idx) {
+                            return Err(alloc::format!(
+                                "Value {} used in block{} but defined in block{}. Value must be \
+                                 dominated by its definition.",
+                                arg_value.index(),
+                                use_block_idx,
+                                def_block_idx
+                            ));
+                        }
 
-                    // Check that definition comes before use (within same block)
-                    if *def_block_idx == use_block_idx && *def_inst_idx >= inst_idx + 1 {
+                        // Check that definition comes before use (within same block)
+                        if *def_block_idx == use_block_idx && *def_inst_idx >= inst_idx + 1 {
+                            return Err(alloc::format!(
+                                "Value {} used before definition in block{} (instruction {})",
+                                arg_value.index(),
+                                use_block_idx,
+                                inst_idx
+                            ));
+                        }
+                    } else {
+                        // Value not defined anywhere
                         return Err(alloc::format!(
-                            "Value {} used before definition in block{} (instruction {})",
+                            "Value {} used in block{} but not defined anywhere",
                             arg_value.index(),
-                            use_block_idx,
-                            inst_idx
+                            use_block_idx
                         ));
                     }
-                } else {
-                    // Value not defined anywhere
-                    return Err(alloc::format!(
-                        "Value {} used in block{} but not defined anywhere",
-                        arg_value.index(),
-                        use_block_idx
-                    ));
                 }
             }
         }
@@ -296,10 +271,7 @@ mod tests {
         // This should now PASS because block0 dominates block1 and block2
         use alloc::vec;
 
-        use crate::{
-            block::Block, function::Function, inst::Inst, signature::Signature, types::Type,
-            value::Value,
-        };
+        use crate::{function::Function, signature::Signature, types::Type, value::Value};
 
         let mut func = Function::new(
             Signature {
@@ -310,34 +282,35 @@ mod tests {
         );
 
         // block0: defines v1
-        let mut block0 = Block::new();
-        block0.params.push(Value::new(0)); // v0 parameter
-        block0.push_inst(Inst::Iconst {
-            result: Value::new(1),
-            value: 42,
-        });
-        block0.push_inst(Inst::Br {
-            condition: Value::new(0),
-            target_true: 1,
-            args_true: Vec::new(),
-            target_false: 2,
-            args_false: Vec::new(),
-        });
-        func.add_block(block0);
+        let block0 = func.create_block_with_params(vec![Value::new(0)]); // v0 parameter
+        func.append_block(block0);
+        let v1 = Value::new(1);
+        let v0 = Value::new(0);
+        let inst0 = func.create_inst(crate::dfg::InstData::constant(
+            v1,
+            crate::dfg::Immediate::I64(42),
+        ));
+        func.append_inst(inst0, block0);
+        let block1_entity = func.create_block();
+        func.append_block(block1_entity);
+        let block2_entity = func.create_block();
+        func.append_block(block2_entity);
+        let inst1 = func.create_inst(crate::dfg::InstData::branch(
+            v0,
+            block1_entity,
+            Vec::new(),
+            block2_entity,
+            Vec::new(),
+        ));
+        func.append_inst(inst1, block0);
 
         // block1: uses v1 (defined in block0) - should PASS (block0 dominates block1)
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Return {
-            values: vec![Value::new(1)],
-        });
-        func.add_block(block1);
+        let inst2 = func.create_inst(crate::dfg::InstData::return_(vec![v1]));
+        func.append_inst(inst2, block1_entity);
 
         // block2: uses v1 (defined in block0) - should PASS (block0 dominates block2)
-        let mut block2 = Block::new();
-        block2.push_inst(Inst::Return {
-            values: vec![Value::new(1)],
-        });
-        func.add_block(block2);
+        let inst3 = func.create_inst(crate::dfg::InstData::return_(vec![v1]));
+        func.append_inst(inst3, block2_entity);
 
         let result = validate_value_scoping(&func);
         assert!(
@@ -492,10 +465,7 @@ block1:
         // Test explicit case: value defined in unreachable block, used in reachable block
         use alloc::vec;
 
-        use crate::{
-            block::Block, function::Function, inst::Inst, signature::Signature, types::Type,
-            value::Value,
-        };
+        use crate::{function::Function, signature::Signature, types::Type, value::Value};
 
         let mut func = Function::new(
             Signature {
@@ -506,22 +476,22 @@ block1:
         );
 
         // block0: reachable, uses v1
-        let mut block0 = Block::new();
-        block0.push_inst(Inst::Return {
-            values: vec![Value::new(1)],
-        });
-        func.add_block(block0);
+        let block0 = func.create_block();
+        func.append_block(block0);
+        let v1 = Value::new(1);
+        let inst0 = func.create_inst(crate::dfg::InstData::return_(vec![v1]));
+        func.append_inst(inst0, block0);
 
         // block1: unreachable, defines v1
-        let mut block1 = Block::new();
-        block1.push_inst(Inst::Iconst {
-            result: Value::new(1),
-            value: 42,
-        });
-        block1.push_inst(Inst::Return {
-            values: vec![Value::new(1)],
-        });
-        func.add_block(block1);
+        let block1 = func.create_block();
+        func.append_block(block1);
+        let inst1 = func.create_inst(crate::dfg::InstData::constant(
+            v1,
+            crate::dfg::Immediate::I64(42),
+        ));
+        func.append_inst(inst1, block1);
+        let inst2 = func.create_inst(crate::dfg::InstData::return_(vec![v1]));
+        func.append_inst(inst2, block1);
 
         let result = validate_value_scoping(&func);
         assert!(
