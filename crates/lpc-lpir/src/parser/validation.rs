@@ -1,8 +1,18 @@
 //! Validation for parsed IR functions.
 
-use alloc::{collections::BTreeSet, string::String, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    string::String,
+    vec,
+    vec::Vec,
+};
 
-use crate::{function::Function, inst::Inst, value::Value};
+use crate::{
+    analysis::{ControlFlowGraph, DominatorTree},
+    function::Function,
+    inst::Inst,
+    value::Value,
+};
 
 /// Validate that block indices in jumps and branches are valid.
 pub fn validate_block_indices(func: &Function) -> Result<(), String> {
@@ -167,156 +177,107 @@ pub fn validate_entry_block(func: &Function) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate that values are only used within their defining block or passed as parameters.
+/// Validate that values are only used where they're dominated by their definition.
+///
+/// This implements CLIF-style dominance-based value scoping: values can be used
+/// anywhere they're dominated by their definition, not just within their defining block.
 pub fn validate_value_scoping(func: &Function) -> Result<(), String> {
-    // Track which values are defined in which blocks
-    // Map: value -> block index where it's defined
-    let mut value_definitions: BTreeSet<(usize, Value)> = BTreeSet::new();
+    // Build CFG and compute dominance
+    let cfg = ControlFlowGraph::from_function(func);
+    let domtree = DominatorTree::from_cfg(&cfg);
 
-    // Track which values are available in each block
-    // Map: block_idx -> set of available values
-    let mut available_values: Vec<BTreeSet<Value>> = Vec::new();
+    // Track value definitions: value -> (block_idx, inst_idx)
+    let mut value_definitions: BTreeMap<Value, (usize, usize)> = BTreeMap::new();
 
-    // First pass: collect definitions and initialize available values
+    // Track values defined in each block (for SSA property check)
+    let mut block_definitions: Vec<BTreeSet<Value>> = vec![BTreeSet::new(); func.blocks.len()];
+
+    // First pass: collect all value definitions
     for (block_idx, block) in func.blocks.iter().enumerate() {
-        // Initialize available values for this block
-        let mut block_available = BTreeSet::new();
-        let mut block_definitions = BTreeSet::new();
-
-        // Block parameters are available in this block
+        // Block parameters are defined at block entry (inst 0)
         for param in &block.params {
-            if !block_definitions.insert(*param) {
+            if !block_definitions[block_idx].insert(*param) {
                 return Err(alloc::format!(
                     "Value {} defined multiple times in block{} (SSA violation)",
                     param.index(),
                     block_idx
                 ));
             }
-            block_available.insert(*param);
-            value_definitions.insert((block_idx, *param));
+            value_definitions.insert(*param, (block_idx, 0));
         }
 
-        // Track values defined in this block
-        // Note: Return instructions don't produce results - they consume values
-        for inst in &block.insts {
+        // Track values defined by instructions
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
             match inst {
-                crate::inst::Inst::Return { .. } => {
-                    // Return instructions don't produce results, skip them
+                Inst::Return { .. } => {
+                    // Return instructions don't produce results
                 }
                 _ => {
                     for result in inst.results() {
-                        if !block_definitions.insert(result) {
+                        if !block_definitions[block_idx].insert(result) {
                             return Err(alloc::format!(
                                 "Value {} defined multiple times in block{} (SSA violation)",
                                 result.index(),
                                 block_idx
                             ));
                         }
-                        block_available.insert(result);
-                        value_definitions.insert((block_idx, result));
+                        // inst_idx + 1 because 0 is reserved for block entry
+                        value_definitions.insert(result, (block_idx, inst_idx + 1));
                     }
                 }
             }
         }
-
-        available_values.push(block_available);
     }
 
-    // Second pass: validate that all used values are available
-    for (block_idx, block) in func.blocks.iter().enumerate() {
-        let available = &available_values[block_idx];
+    // Second pass: validate that all value uses are dominated by their definitions
+    for (use_block_idx, block) in func.blocks.iter().enumerate() {
+        // Skip unreachable blocks (they can't execute anyway)
+        if !cfg.is_reachable(use_block_idx) {
+            continue;
+        }
 
-        for inst in &block.insts {
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
             // Check all argument values used by this instruction
             for arg_value in inst.args() {
-                if !available.contains(&arg_value) {
-                    // Check if this value is defined in another block
-                    // Note: We need to find the FIRST definition (in case of duplicates, though SSA shouldn't have them)
-                    let defined_in = value_definitions
-                        .iter()
-                        .find(|(_, v)| *v == arg_value)
-                        .map(|(bid, _)| *bid);
-
-                    if let Some(def_block) = defined_in {
-                        // Value is defined in a different block - this is an error
-                        // (If it were defined in the same block, it would be in available)
+                if let Some((def_block_idx, def_inst_idx)) = value_definitions.get(&arg_value) {
+                    // Check if value is defined in an unreachable block
+                    if !cfg.is_reachable(*def_block_idx) {
                         return Err(alloc::format!(
-                            "Value {} used in block{} but defined in block{}. Values must be \
-                             passed as block parameters.",
+                            "Value {} used in block{} but defined in unreachable block{}",
                             arg_value.index(),
-                            block_idx,
-                            def_block
-                        ));
-                    } else {
-                        // Value not defined anywhere - this is also an error
-                        return Err(alloc::format!(
-                            "Value {} used in block{} but not defined anywhere",
-                            arg_value.index(),
-                            block_idx
+                            use_block_idx,
+                            def_block_idx
                         ));
                     }
-                }
-            }
 
-            // For jump/branch instructions, validate that args are available
-            match inst {
-                Inst::Jump { args, .. } => {
-                    for arg_value in args {
-                        if !available.contains(arg_value) {
-                            let defined_in = value_definitions
-                                .iter()
-                                .find(|(_, v)| *v == *arg_value)
-                                .map(|(bid, _)| *bid);
-
-                            if let Some(def_block) = defined_in {
-                                return Err(alloc::format!(
-                                    "Value {} passed to jump in block{} but defined in block{}. \
-                                     Values must be available in the current block.",
-                                    arg_value.index(),
-                                    block_idx,
-                                    def_block
-                                ));
-                            } else {
-                                return Err(alloc::format!(
-                                    "Value {} passed to jump in block{} but not defined anywhere",
-                                    arg_value.index(),
-                                    block_idx
-                                ));
-                            }
-                        }
+                    // Check dominance: def_block must dominate use_block
+                    if !domtree.dominates(*def_block_idx, use_block_idx) {
+                        return Err(alloc::format!(
+                            "Value {} used in block{} but defined in block{}. Value must be \
+                             dominated by its definition.",
+                            arg_value.index(),
+                            use_block_idx,
+                            def_block_idx
+                        ));
                     }
-                }
-                Inst::Br {
-                    args_true,
-                    args_false,
-                    ..
-                } => {
-                    for arg_value in args_true.iter().chain(args_false.iter()) {
-                        if !available.contains(arg_value) {
-                            let defined_in = value_definitions
-                                .iter()
-                                .find(|(_, v)| *v == *arg_value)
-                                .map(|(bid, _)| *bid);
 
-                            if let Some(def_block) = defined_in {
-                                return Err(alloc::format!(
-                                    "Value {} passed to branch in block{} but defined in block{}. \
-                                     Values must be available in the current block.",
-                                    arg_value.index(),
-                                    block_idx,
-                                    def_block
-                                ));
-                            } else {
-                                return Err(alloc::format!(
-                                    "Value {} passed to branch in block{} but not defined anywhere",
-                                    arg_value.index(),
-                                    block_idx
-                                ));
-                            }
-                        }
+                    // Check that definition comes before use (within same block)
+                    if *def_block_idx == use_block_idx && *def_inst_idx >= inst_idx + 1 {
+                        return Err(alloc::format!(
+                            "Value {} used before definition in block{} (instruction {})",
+                            arg_value.index(),
+                            use_block_idx,
+                            inst_idx
+                        ));
                     }
+                } else {
+                    // Value not defined anywhere
+                    return Err(alloc::format!(
+                        "Value {} used in block{} but not defined anywhere",
+                        arg_value.index(),
+                        use_block_idx
+                    ));
                 }
-                _ => {}
             }
         }
     }
@@ -332,6 +293,7 @@ mod tests {
     #[test]
     fn test_validate_cross_block_usage_direct() {
         // Test validation directly with a manually constructed function
+        // This should now PASS because block0 dominates block1 and block2
         use alloc::vec;
 
         use crate::{
@@ -363,14 +325,14 @@ mod tests {
         });
         func.add_block(block0);
 
-        // block1: uses v1 (defined in block0) - should fail
+        // block1: uses v1 (defined in block0) - should PASS (block0 dominates block1)
         let mut block1 = Block::new();
         block1.push_inst(Inst::Return {
             values: vec![Value::new(1)],
         });
         func.add_block(block1);
 
-        // block2: uses v1 (defined in block0) - should fail
+        // block2: uses v1 (defined in block0) - should PASS (block0 dominates block2)
         let mut block2 = Block::new();
         block2.push_inst(Inst::Return {
             values: vec![Value::new(1)],
@@ -378,17 +340,16 @@ mod tests {
         func.add_block(block2);
 
         let result = validate_value_scoping(&func);
-        assert!(result.is_err(), "Should fail validation, got: {:?}", result);
-        let err_msg = result.unwrap_err();
         assert!(
-            err_msg.contains("Value 1 used in block") && err_msg.contains("but defined in block0"),
-            "Error should mention cross-block usage: {}",
-            err_msg
+            result.is_ok(),
+            "Should pass validation (block0 dominates block1 and block2), got: {:?}",
+            result
         );
     }
 
     #[test]
     fn test_validate_cross_block_usage() {
+        // This should now PASS - CLIF-style cross-block usage is valid
         let input = r#"function %test(i32) -> i32 {
 block0(v0: i32):
     v1 = iconst 42
@@ -401,17 +362,44 @@ block2:
     return v1
 }"#;
         // Note: parse_function will call validate_value_scoping internally
-        // If validation fails, parse_function will return an error
+        // This should now pass because block0 dominates block1 and block2
+        let result = parse_function(input.trim());
+        assert!(
+            result.is_ok(),
+            "Should pass validation (CLIF-style cross-block usage), got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_validate_dominance_violation() {
+        // Test actual dominance violation: value defined in block that doesn't dominate use
+        let input = r#"function %test(i32) -> i32 {
+block0(v0: i32):
+    brif v0, block1, block2
+
+block1:
+    v1 = iconst 42
+    jump block3
+
+block2:
+    jump block3
+
+block3:
+    return v1
+}"#;
+        // block1 doesn't dominate block3 (path through block2 doesn't go through block1)
         let result = parse_function(input.trim());
         assert!(
             result.is_err(),
-            "parse_function should fail due to validation error"
+            "Should fail validation (dominance violation)"
         );
         let err = result.unwrap_err();
         assert!(
             err.message.contains("Value 1 used in block")
-                && err.message.contains("but defined in block0"),
-            "Error should mention cross-block usage: {}",
+                && err.message.contains("but defined in block")
+                && err.message.contains("dominated"),
+            "Error should mention dominance violation: {}",
             err.message
         );
     }
@@ -471,6 +459,80 @@ block0:
             err.message.contains("returns 1 values") && err.message.contains("expects 2"),
             "Error should mention return count mismatch: {}",
             err.message
+        );
+    }
+
+    #[test]
+    fn test_validate_value_from_unreachable_block() {
+        // Test that values defined in unreachable blocks cannot be used in reachable blocks
+        let input = r#"function %test() -> i32 {
+block0:
+    return v0
+
+block1:
+    v0 = iconst 42
+    return v0
+}"#;
+        let result = parse_function(input.trim());
+        assert!(
+            result.is_err(),
+            "Using value from unreachable block should fail"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.message.contains("unreachable block")
+                || (err.message.contains("Value 0") && err.message.contains("not defined")),
+            "Error should mention unreachable block or undefined value: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn test_validate_value_from_unreachable_block_explicit() {
+        // Test explicit case: value defined in unreachable block, used in reachable block
+        use alloc::vec;
+
+        use crate::{
+            block::Block, function::Function, inst::Inst, signature::Signature, types::Type,
+            value::Value,
+        };
+
+        let mut func = Function::new(
+            Signature {
+                params: Vec::new(),
+                returns: vec![Type::I32],
+            },
+            String::from("test"),
+        );
+
+        // block0: reachable, uses v1
+        let mut block0 = Block::new();
+        block0.push_inst(Inst::Return {
+            values: vec![Value::new(1)],
+        });
+        func.add_block(block0);
+
+        // block1: unreachable, defines v1
+        let mut block1 = Block::new();
+        block1.push_inst(Inst::Iconst {
+            result: Value::new(1),
+            value: 42,
+        });
+        block1.push_inst(Inst::Return {
+            values: vec![Value::new(1)],
+        });
+        func.add_block(block1);
+
+        let result = validate_value_scoping(&func);
+        assert!(
+            result.is_err(),
+            "Using value from unreachable block should fail"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("unreachable block"),
+            "Error should mention unreachable block: {}",
+            err
         );
     }
 

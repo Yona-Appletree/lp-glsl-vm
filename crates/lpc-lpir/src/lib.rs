@@ -12,6 +12,7 @@
 
 extern crate alloc;
 
+mod analysis;
 mod block;
 mod builder;
 mod function;
@@ -22,6 +23,7 @@ mod signature;
 mod types;
 mod value;
 
+pub use analysis::{ControlFlowGraph, DominatorTree};
 pub use block::Block;
 pub use builder::function_builder::FunctionBuilder;
 pub use function::Function;

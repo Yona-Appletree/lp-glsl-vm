@@ -4,9 +4,9 @@ LPIR is a SSA-based intermediate representation designed for code generation tar
 
 ## Features
 
-- **SSA Form**: Single Static Assignment with explicit value scoping
+- **SSA Form**: Single Static Assignment with dominance-based value scoping
 - **Basic Blocks**: Control flow via basic blocks with parameters (phi nodes)
-- **Explicit Parameter Passing**: Values must be explicitly passed to blocks via jump/branch arguments
+- **Dominance-Based Scoping**: Values can be used anywhere dominated by their definition (CLIF-style)
 - **Text Format**: Human-readable IR syntax with parsing support
 - **Type System**: Supports i32, u32, f32 types
 
@@ -20,12 +20,12 @@ All parsed functions are automatically validated for:
 - **SSA Properties**: Values cannot be defined multiple times in the same block
 - **Terminating Instructions**: All blocks must end with return/jump/branch/halt
 - **Entry Block**: Entry block parameters must match function signature
-- **Value Scoping**: Values can only be used within their defining block or passed as parameters
+- **Value Scoping**: Values can be used anywhere dominated by their definition
 
 ## Limitations
 
 - **No Type Checking**: Parameter and return value types are not validated (only counts)
-- **No Dominance Validation**: No verification of proper SSA dominance relationships
+- **Dominance Validation**: Values must be dominated by their definition (enforced)
 - **No Dead Code Detection**: Unreachable blocks are not detected
 - **No Call Validation**: Function calls are not validated against module definitions
 - **Simple Type System**: No aggregate types, pointers, or complex types
@@ -51,7 +51,7 @@ let func = parse_function(ir)?;
 
 ### Recursive Fibonacci with Branching
 
-This example demonstrates branching, multiple blocks, block parameters, and recursive calls. Note that values must be explicitly passed to blocks:
+This example demonstrates branching, multiple blocks, block parameters, and recursive calls. Block parameters are used for phi-like merging when different paths provide different values:
 
 ```rust
 use lpc_lpir::parse_module;
@@ -90,5 +90,5 @@ Key features demonstrated:
 - **Block parameters**:
   - `block1(v3: i32)` receives `v0` from the branch
   - `block2(v4: i32, v5: i32)` receives `v0` and `v1` from the branch
-- **Value scoping**: Values defined in `block0` (`v0`, `v1`) must be passed as parameters to `block1` and `block2` since they're used there
+- **Value scoping**: Values defined in `block0` (`v0`, `v1`) can be used in `block1` and `block2` because `block0` dominates them. Block parameters (`v3`, `v4`, `v5`) are only needed for phi-like merging from different control flow paths.
 - **Recursive calls**: `call %fib(v7) -> v9` calls the same function recursively with computed values

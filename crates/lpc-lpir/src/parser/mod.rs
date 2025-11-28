@@ -268,8 +268,9 @@ block2(v5: i32):
     }
 
     #[test]
-    fn test_validate_value_scoping_invalid_cross_block() {
-        // Test that using a value from another block without passing it fails
+    fn test_validate_value_scoping_valid_cross_block() {
+        // Test that using a value from another block is valid if dominated
+        // This is CLIF-style cross-block usage - should PASS
         let input = r#"function %test(i32) -> i32 {
 block0(v0: i32):
     v1 = iconst 42
@@ -284,22 +285,10 @@ block2:
     return v2
 }"#;
         let result = parse_function(input.trim());
-        if result.is_ok() {
-            panic!(
-                "Using values from other blocks should fail validation, but got: {:?}",
-                result.unwrap()
-            );
-        }
-        let err = result.unwrap_err();
         assert!(
-            (err.message.contains("Value 1")
-                && err.message.contains("used in block")
-                && err.message.contains("but defined in block0"))
-                || (err.message.contains("Value 2")
-                    && err.message.contains("used in block")
-                    && err.message.contains("but defined in block0")),
-            "Error message should mention cross-block value usage: {}",
-            err.message
+            result.is_ok(),
+            "Cross-block usage should be valid (block0 dominates block1 and block2): {:?}",
+            result
         );
     }
 
@@ -329,65 +318,81 @@ block2(v5: i32):
 
     #[test]
     fn test_validate_value_scoping_invalid_jump_args() {
-        // Test that jump with unavailable args fails
+        // Test dominance violation: block2 uses v1 from block0, but block0 doesn't dominate block2
+        // CFG: block0 -> block1, block0 -> block2, block1 -> block3, block2 -> block3
+        // block0 dominates block1 and block3, but NOT block2 (path block0->block2 exists but
+        // block2 can also be reached via other paths that don't go through block0... wait, that's not right.
+        // Actually: In a diamond pattern, block0 dominates all blocks. To create a violation,
+        // we need block2 to use v1, but v1 must come from a block that doesn't dominate block2.
+        // Let's use: block0 -> block1, block0 -> block2, block1 -> block3, block2 -> block3
+        // block2 uses v1 from block0. But actually block0 DOES dominate block2.
+        // Better: block0 -> block1 -> block2, block0 -> block3, block2 -> block3
+        // block3 uses v1 from block0, but block0 doesn't dominate block3? No, it does.
+        // Actually, the issue is: block2 uses v1 from block0 in its jump args.
+        // But v1 was passed to block1, not available in block2's scope.
+        // Let me create a case where block2 uses a value from block1, but block1 doesn't dominate block2:
+        // block0 -> block1, block0 -> block2, block1 -> block3, block2 -> block3
+        // block2 uses v1 from block1, but block1 doesn't dominate block2 (path block0->block2 doesn't go through block1)
         let input = r#"function %test(i32) -> i32 {
 block0(v0: i32):
+    v2 = iconst 0
+    brif v0, block1, block2(v2)
+
+block1:
     v1 = iconst 42
-    jump block1(v1)
+    v4 = iconst 0
+    jump block3(v4)
 
-block1(v2: i32):
-    v3 = iconst 0
-    jump block2(v3)
+block2(v3: i32):
+    jump block3(v1)
 
-block2(v4: i32):
-    jump block1(v1)
+block3(v5: i32):
+    return v5
 }"#;
         let result = parse_function(input.trim());
-        assert!(
-            result.is_err(),
-            "Jump with value from different block should fail"
-        );
+        assert!(result.is_err(), "Jump with non-dominated value should fail");
         let err = result.unwrap_err();
         assert!(
             err.message.contains("Value 1")
-                && err.message.contains("used in block2")
-                && err.message.contains("but defined in block0"),
-            "Error message should mention invalid jump args: {}",
+                && err.message.contains("used in block")
+                && err.message.contains("dominated"),
+            "Error message should mention dominance violation: {}",
             err.message
         );
     }
 
     #[test]
     fn test_validate_value_scoping_invalid_branch_args() {
-        // Test that branch with unavailable args fails
+        // Test dominance violation: block3 uses v1 from block1, but block1 doesn't dominate block3
+        // CFG: block0 -> block1, block0 -> block2, block1 -> block3, block2 -> block3
+        // block1 doesn't dominate block3 because there's a path block0->block2->block3 that doesn't go through block1
         let input = r#"function %test(i32) -> i32 {
 block0(v0: i32):
-    v1 = iconst 42
     v2 = iconst 0
-    v3 = iconst 1
-    brif v3, block1, block2(v2)
+    brif v0, block1, block2(v2)
 
 block1:
-    v4 = iconst 100
-    brif v4, block2(v1), block0(v2)
+    v1 = iconst 42
+    jump block3
 
-block2(v5: i32):
-    return v5
+block2(v3: i32):
+    jump block3
+
+block3:
+    v4 = iconst 0
+    brif v4, block1, block2(v1)
 }"#;
         let result = parse_function(input.trim());
         assert!(
             result.is_err(),
-            "Branch with values from different blocks should fail"
+            "Branch with non-dominated value should fail"
         );
         let err = result.unwrap_err();
         assert!(
-            (err.message.contains("Value 1")
+            err.message.contains("Value 1")
                 && err.message.contains("used in block")
-                && err.message.contains("but defined in block0"))
-                || (err.message.contains("Value 2")
-                    && err.message.contains("used in block")
-                    && err.message.contains("but defined in block0")),
-            "Error message should mention invalid branch args: {}",
+                && err.message.contains("dominated"),
+            "Error message should mention dominance violation: {}",
             err.message
         );
     }
