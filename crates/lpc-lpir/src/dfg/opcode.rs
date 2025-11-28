@@ -86,6 +86,46 @@ pub enum Opcode {
     },
 }
 
+impl Opcode {
+    /// Is this a call instruction?
+    pub fn is_call(&self) -> bool {
+        matches!(self, Opcode::Call { .. })
+    }
+
+    /// Is this a terminator (branch, jump, return)?
+    pub fn is_terminator(&self) -> bool {
+        matches!(
+            self,
+            Opcode::Jump
+                | Opcode::Br
+                | Opcode::Return
+                | Opcode::Halt
+                | Opcode::Trap { .. }
+                | Opcode::Trapz { .. }
+                | Opcode::Trapnz { .. }
+        )
+    }
+
+    /// Does this instruction access memory?
+    pub fn is_memory_access(&self) -> bool {
+        matches!(self, Opcode::Load | Opcode::Store)
+    }
+
+    /// Does this instruction have side effects?
+    pub fn has_side_effects(&self) -> bool {
+        matches!(
+            self,
+            Opcode::Store
+                | Opcode::Call { .. }
+                | Opcode::Syscall
+                | Opcode::Return
+                | Opcode::Trap { .. }
+                | Opcode::Trapz { .. }
+                | Opcode::Trapnz { .. }
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +151,87 @@ mod tests {
 
         assert_eq!(call1, call2);
         assert_ne!(call1, call3);
+    }
+
+    #[test]
+    fn test_is_call() {
+        assert!(Opcode::Call {
+            callee: String::from("foo")
+        }
+        .is_call());
+        assert!(!Opcode::Iadd.is_call());
+        assert!(!Opcode::Return.is_call());
+        assert!(!Opcode::Jump.is_call());
+    }
+
+    #[test]
+    fn test_is_terminator() {
+        assert!(Opcode::Jump.is_terminator());
+        assert!(Opcode::Br.is_terminator());
+        assert!(Opcode::Return.is_terminator());
+        assert!(Opcode::Halt.is_terminator());
+        assert!(Opcode::Trap {
+            code: crate::trapcode::TrapCode::STACK_OVERFLOW
+        }
+        .is_terminator());
+        assert!(Opcode::Trapz {
+            code: crate::trapcode::TrapCode::STACK_OVERFLOW
+        }
+        .is_terminator());
+        assert!(Opcode::Trapnz {
+            code: crate::trapcode::TrapCode::STACK_OVERFLOW
+        }
+        .is_terminator());
+
+        assert!(!Opcode::Iadd.is_terminator());
+        assert!(!Opcode::Call {
+            callee: String::from("foo")
+        }
+        .is_terminator());
+        assert!(!Opcode::Load.is_terminator());
+    }
+
+    #[test]
+    fn test_is_memory_access() {
+        assert!(Opcode::Load.is_memory_access());
+        assert!(Opcode::Store.is_memory_access());
+
+        assert!(!Opcode::Iadd.is_memory_access());
+        assert!(!Opcode::Call {
+            callee: String::from("foo")
+        }
+        .is_memory_access());
+        assert!(!Opcode::Return.is_memory_access());
+    }
+
+    #[test]
+    fn test_has_side_effects() {
+        assert!(Opcode::Store.has_side_effects());
+        assert!(Opcode::Call {
+            callee: String::from("foo")
+        }
+        .has_side_effects());
+        assert!(Opcode::Syscall.has_side_effects());
+        assert!(Opcode::Return.has_side_effects());
+        assert!(Opcode::Trap {
+            code: crate::trapcode::TrapCode::STACK_OVERFLOW
+        }
+        .has_side_effects());
+        assert!(Opcode::Trapz {
+            code: crate::trapcode::TrapCode::STACK_OVERFLOW
+        }
+        .has_side_effects());
+        assert!(Opcode::Trapnz {
+            code: crate::trapcode::TrapCode::STACK_OVERFLOW
+        }
+        .has_side_effects());
+
+        assert!(!Opcode::Iadd.has_side_effects());
+        assert!(!Opcode::Load.has_side_effects());
+        assert!(!Opcode::Iconst.has_side_effects());
+        assert!(!Opcode::Icmp {
+            cond: crate::condcodes::IntCC::Equal
+        }
+        .has_side_effects());
     }
 }

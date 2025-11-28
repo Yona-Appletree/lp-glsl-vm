@@ -353,7 +353,7 @@ fn test_multiple_returns() {
     let sig = Signature::new(vec![Type::I32, Type::I32], vec![Type::I32, Type::I32]);
     let expected = r#"function %swap(i32, i32) -> i32, i32 {
 block0(v0: i32, v1: i32):
-    return v1 v0
+    return v1, v0
 }
 "#;
     build_parse_roundtrip(
@@ -502,7 +502,7 @@ fn test_division_and_remainder() {
 block0(v0: i32, v1: i32):
     v2 = idiv v0, v1
     v3 = irem v0, v1
-    return v2 v3
+    return v2, v3
 }
 "#;
     build_parse_roundtrip(

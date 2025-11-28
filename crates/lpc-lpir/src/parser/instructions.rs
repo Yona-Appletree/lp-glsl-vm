@@ -5,7 +5,7 @@ use nom::{
     bytes::complete::tag,
     character::complete::char,
     combinator::{map, opt, peek},
-    multi::{many0, separated_list0},
+    multi::separated_list0,
     sequence::{delimited, preceded, terminated, tuple},
     IResult,
 };
@@ -214,7 +214,10 @@ pub(crate) fn parse_const(input: &str) -> IResult<&str, InstData> {
         "fconst" => {
             let (input, value) = terminated(float, blank)(input)?;
             let value_bits = value.to_bits();
-            Ok((input, InstData::constant(result, Immediate::F32Bits(value_bits))))
+            Ok((
+                input,
+                InstData::constant(result, Immediate::F32Bits(value_bits)),
+            ))
         }
         _ => unreachable!(),
     }
@@ -261,7 +264,13 @@ pub(crate) fn parse_branch(input: &str) -> IResult<&str, InstData> {
     let target_false_block = Block::from_index(target_false as usize);
     Ok((
         input,
-        InstData::branch(condition, target_true_block, args_true, target_false_block, args_false),
+        InstData::branch(
+            condition,
+            target_true_block,
+            args_true,
+            target_false_block,
+            args_false,
+        ),
     ))
 }
 
@@ -299,10 +308,7 @@ pub(crate) fn parse_syscall(input: &str) -> IResult<&str, InstData> {
         separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
         terminated(char(')'), blank),
     )(input)?;
-    Ok((
-        input,
-        InstData::syscall(number as i32, args),
-    ))
+    Ok((input, InstData::syscall(number as i32, args)))
 }
 
 /// Parse a load instruction
@@ -314,10 +320,7 @@ pub(crate) fn parse_load(input: &str) -> IResult<&str, InstData> {
     let (input, _) = char('.')(input)?;
     let (input, ty) = terminated(parse_type, blank)(input)?;
     let (input, address) = terminated(parse_value, blank)(input)?;
-    Ok((
-        input,
-        InstData::load(result, address, ty),
-    ))
+    Ok((input, InstData::load(result, address, ty)))
 }
 
 /// Parse a store instruction
@@ -333,9 +336,8 @@ pub(crate) fn parse_store(input: &str) -> IResult<&str, InstData> {
 /// Parse a return instruction
 pub(crate) fn parse_return(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("return"), blank)(input)?;
-    // Parse space-separated values (Cranelift format)
-    // Values are separated by spaces, not commas
-    let (input, values) = many0(terminated(parse_value, blank))(input)?;
+    // Parse comma-separated values (CLIF format)
+    let (input, values) = separated_list0(terminated(char(','), blank), terminated(parse_value, blank))(input)?;
     Ok((input, InstData::return_(values)))
 }
 
@@ -465,7 +467,7 @@ mod tests {
 
     #[test]
     fn test_parse_return_with_values() {
-        let input = "return v0 v1";
+        let input = "return v0, v1";
         let result = parse_return(input);
         assert!(result.is_ok());
         let (_, inst_data) = result.unwrap();
@@ -569,7 +571,11 @@ mod tests {
         assert!(inst_data.block_args.is_some());
         let block_args = inst_data.block_args.as_ref().unwrap();
         assert_eq!(block_args.targets[0].0.index(), 1);
-        assert_eq!(block_args.targets[0].1.len(), 0, "block1 should have no args");
+        assert_eq!(
+            block_args.targets[0].1.len(),
+            0,
+            "block1 should have no args"
+        );
         assert_eq!(block_args.targets[1].0.index(), 2);
         assert_eq!(block_args.targets[1].1.len(), 1);
         assert_eq!(block_args.targets[1].1[0].index(), 1);
@@ -589,7 +595,11 @@ mod tests {
         assert_eq!(block_args.targets[0].1.len(), 1);
         assert_eq!(block_args.targets[0].1[0].index(), 1);
         assert_eq!(block_args.targets[1].0.index(), 2);
-        assert_eq!(block_args.targets[1].1.len(), 0, "block2 should have no args");
+        assert_eq!(
+            block_args.targets[1].1.len(),
+            0,
+            "block2 should have no args"
+        );
     }
 
     #[test]
@@ -610,7 +620,12 @@ mod tests {
             _ => panic!("Expected Call opcode"),
         }
         assert_eq!(inst_data.args.len(), 2);
-        assert_eq!(inst_data.results.len(), 1, "Expected 1 result, got: {:?}", inst_data.results);
+        assert_eq!(
+            inst_data.results.len(),
+            1,
+            "Expected 1 result, got: {:?}",
+            inst_data.results
+        );
     }
 
     #[test]
@@ -761,7 +776,12 @@ mod tests {
             _ => panic!("Expected Call opcode"),
         }
         assert_eq!(inst_data.args.len(), 2);
-        assert_eq!(inst_data.results.len(), 3, "Expected 3 results, got: {:?}", inst_data.results);
+        assert_eq!(
+            inst_data.results.len(),
+            3,
+            "Expected 3 results, got: {:?}",
+            inst_data.results
+        );
     }
 
     #[test]
@@ -774,7 +794,12 @@ mod tests {
         assert_eq!(remaining, "", "Should consume all input");
         match inst_data.opcode {
             Opcode::Call { .. } => {
-                assert_eq!(inst_data.results.len(), 3, "Expected 3 results, got: {:?}", inst_data.results);
+                assert_eq!(
+                    inst_data.results.len(),
+                    3,
+                    "Expected 3 results, got: {:?}",
+                    inst_data.results
+                );
             }
             _ => panic!("Expected Call opcode"),
         }
@@ -783,24 +808,34 @@ mod tests {
     #[test]
     fn test_parse_return_multiple_values() {
         // Test return with multiple values (more than 2)
-        let input = "return v0 v1 v2 v3";
+        let input = "return v0, v1, v2, v3";
         let result = parse_return(input);
         assert!(result.is_ok());
         let (_, inst_data) = result.unwrap();
         assert_eq!(inst_data.opcode, Opcode::Return);
-        assert_eq!(inst_data.args.len(), 4, "Expected 4 values, got: {:?}", inst_data.args);
+        assert_eq!(
+            inst_data.args.len(),
+            4,
+            "Expected 4 values, got: {:?}",
+            inst_data.args
+        );
     }
 
     #[test]
     fn test_parse_return_multiple_values_via_instruction() {
         // Test parsing return with multiple values via parse_instruction
-        let input = "return v0 v1 v2 v3 v4";
+        let input = "return v0, v1, v2, v3, v4";
         let result = parse_instruction(input);
         assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
         let (remaining, inst_data) = result.unwrap();
         assert_eq!(remaining, "", "Should consume all input");
         assert_eq!(inst_data.opcode, Opcode::Return);
-        assert_eq!(inst_data.args.len(), 5, "Expected 5 values, got: {:?}", inst_data.args);
+        assert_eq!(
+            inst_data.args.len(),
+            5,
+            "Expected 5 values, got: {:?}",
+            inst_data.args
+        );
     }
 
     #[test]

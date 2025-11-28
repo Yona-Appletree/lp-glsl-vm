@@ -312,27 +312,42 @@ fn verify_instruction_format(
             }
         }
 
-        // Return: args matching results, results count matches function signature
+        // Return: args count matches function signature, results must be empty
         Opcode::Return => {
-            if inst_data.args.len() != inst_data.results.len() {
+            if inst_data.results.len() != 0 {
                 errors.push(VerifierError::with_location(
                     format!(
-                        "Return args count ({}) does not match results count ({})",
-                        inst_data.args.len(),
+                        "Return instruction must have 0 results, got {}",
                         inst_data.results.len()
                     ),
                     format!("inst{}", inst.index()),
                 ));
             }
-            if inst_data.results.len() != function.signature.returns.len() {
+            if inst_data.args.len() != function.signature.returns.len() {
                 errors.push(VerifierError::with_location(
                     format!(
-                        "Return expects {} results (matching function signature), got {}",
+                        "Return expects {} arguments (matching function signature), got {}",
                         function.signature.returns.len(),
-                        inst_data.results.len()
+                        inst_data.args.len()
                     ),
                     format!("inst{}", inst.index()),
                 ));
+            }
+            // Verify return value types match function signature
+            for (i, ret_value) in inst_data.args.iter().enumerate() {
+                if let Some(ret_ty) = function.dfg.value_type(*ret_value) {
+                    if let Some(expected_ty) = function.signature.returns.get(i) {
+                        if ret_ty != *expected_ty {
+                            errors.push(VerifierError::with_location(
+                                format!(
+                                    "Return value {} has type {}, expected {}",
+                                    i, ret_ty, expected_ty
+                                ),
+                                format!("inst{}", inst.index()),
+                            ));
+                        }
+                    }
+                }
             }
             if inst_data.block_args.is_some() {
                 errors.push(VerifierError::with_location(
@@ -771,5 +786,120 @@ mod tests {
         verify_format(&func, &mut errors);
         assert!(!errors.is_empty());
         assert!(errors[0].message.contains("requires immediate value"));
+    }
+
+    #[test]
+    fn test_verify_format_return_multi_return() {
+        let sig = Signature::new(vec![], vec![Type::I32, Type::F32, Type::I32]);
+        let mut func = Function::new(sig, String::from("test"));
+        let block = func.create_block();
+        func.append_block(block);
+
+        let v1 = Value::new(1);
+        let v2 = Value::new(2);
+        let v3 = Value::new(3);
+        func.dfg.set_value_type(v1, Type::I32);
+        func.dfg.set_value_type(v2, Type::F32);
+        func.dfg.set_value_type(v3, Type::I32);
+
+        let inst_data = InstData::return_(vec![v1, v2, v3]);
+        let inst = func.create_inst(inst_data);
+        func.append_inst(inst, block);
+
+        let mut errors = Vec::new();
+        verify_format(&func, &mut errors);
+        assert!(
+            errors.is_empty(),
+            "Multi-return with matching signature should pass"
+        );
+    }
+
+    #[test]
+    fn test_verify_format_return_wrong_count() {
+        let sig = Signature::new(vec![], vec![Type::I32, Type::F32]);
+        let mut func = Function::new(sig, String::from("test"));
+        let block = func.create_block();
+        func.append_block(block);
+
+        let v1 = Value::new(1);
+        func.dfg.set_value_type(v1, Type::I32);
+
+        // Return with wrong count (1 instead of 2)
+        let inst_data = InstData::return_(vec![v1]);
+        let inst = func.create_inst(inst_data);
+        func.append_inst(inst, block);
+
+        let mut errors = Vec::new();
+        verify_format(&func, &mut errors);
+        assert!(!errors.is_empty());
+        assert!(errors
+            .iter()
+            .any(|e| e.message.contains("expects 2 arguments")));
+    }
+
+    #[test]
+    fn test_verify_format_return_wrong_types() {
+        let sig = Signature::new(vec![], vec![Type::I32, Type::F32]);
+        let mut func = Function::new(sig, String::from("test"));
+        let block = func.create_block();
+        func.append_block(block);
+
+        let v1 = Value::new(1);
+        let v2 = Value::new(2);
+        func.dfg.set_value_type(v1, Type::I32);
+        func.dfg.set_value_type(v2, Type::I32); // Wrong type, should be F32
+
+        let inst_data = InstData::return_(vec![v1, v2]);
+        let inst = func.create_inst(inst_data);
+        func.append_inst(inst, block);
+
+        let mut errors = Vec::new();
+        verify_format(&func, &mut errors);
+        assert!(!errors.is_empty());
+        assert!(errors
+            .iter()
+            .any(|e| e.message.contains("has type i32, expected f32")));
+    }
+
+    #[test]
+    fn test_verify_format_return_void() {
+        let sig = Signature::empty();
+        let mut func = Function::new(sig, String::from("test"));
+        let block = func.create_block();
+        func.append_block(block);
+
+        let inst_data = InstData::return_(vec![]);
+        let inst = func.create_inst(inst_data);
+        func.append_inst(inst, block);
+
+        let mut errors = Vec::new();
+        verify_format(&func, &mut errors);
+        assert!(
+            errors.is_empty(),
+            "Return with 0 values for void function should pass"
+        );
+    }
+
+    #[test]
+    fn test_verify_format_return_with_results() {
+        let sig = Signature::new(vec![], vec![Type::I32]);
+        let mut func = Function::new(sig, String::from("test"));
+        let block = func.create_block();
+        func.append_block(block);
+
+        let v1 = Value::new(1);
+        func.dfg.set_value_type(v1, Type::I32);
+
+        let mut inst_data = InstData::return_(vec![v1]);
+        inst_data.results.push(Value::new(999)); // Incorrectly add a result
+        let inst = func.create_inst(inst_data);
+        func.append_inst(inst, block);
+
+        let mut errors = Vec::new();
+        verify_format(&func, &mut errors);
+        assert!(!errors.is_empty());
+        assert!(errors
+            .iter()
+            .any(|e| e.message.contains("must have 0 results")));
     }
 }

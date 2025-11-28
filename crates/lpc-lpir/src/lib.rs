@@ -38,7 +38,7 @@ pub use builder::{
     InsertBuilder, ReplaceBuilder,
 };
 pub use condcodes::{CondCode, FloatCC, IntCC};
-pub use dfg::{BlockArgs, Immediate, InstData, Opcode, DFG};
+pub use dfg::{BlockArgs, Immediate, InstData, Opcode, OperandKind, DFG};
 pub use entity::{Block as BlockEntity, EntityRef, Inst as InstEntity};
 pub use entity_map::PrimaryMap;
 pub use function::Function;
@@ -50,4 +50,4 @@ pub use sourceloc::{RelSourceLoc, SourceLoc};
 pub use trapcode::TrapCode;
 pub use types::Type;
 pub use value::Value;
-pub use verifier::{verify, VerifierError};
+pub use verifier::{verify, verify_module, VerifierError};

@@ -200,8 +200,8 @@ impl InstData {
     pub fn return_(values: Vec<Value>) -> Self {
         Self {
             opcode: crate::dfg::opcode::Opcode::Return,
-            args: values.clone(),
-            results: values,
+            args: values,
+            results: Vec::new(),
             block_args: None,
             ty: None,
             imm: None,

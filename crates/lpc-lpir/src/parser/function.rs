@@ -168,7 +168,7 @@ mod tests {
 block0:
     v0 = iconst 1
     v1 = iconst 2
-    return v0 v1
+    return v0, v1
 }"#;
         let result = parse_function_internal(input, 0);
         assert!(

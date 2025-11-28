@@ -78,12 +78,12 @@ pub fn validate_return_values(func: &Function) -> Result<(), String> {
         for inst in func.block_insts(block) {
             if let Some(inst_data) = func.dfg.inst_data(inst) {
                 if inst_data.opcode == Opcode::Return {
-                    if inst_data.results.len() != expected_return_count {
+                    if inst_data.args.len() != expected_return_count {
                         return Err(alloc::format!(
                             "Return instruction in block{} returns {} values, but function \
                              signature expects {}",
                             block.index(),
-                            inst_data.results.len(),
+                            inst_data.args.len(),
                             expected_return_count
                         ));
                     }

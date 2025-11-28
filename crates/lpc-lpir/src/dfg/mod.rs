@@ -1,12 +1,16 @@
 //! Data Flow Graph (instruction data).
 
+use alloc::vec::Vec;
+
 use crate::{entity::Inst as InstEntity, entity_map::PrimaryMap, Type, Value};
 
 pub mod inst_data;
 pub mod opcode;
+pub mod operand;
 
 pub use inst_data::{BlockArgs, Immediate, InstData};
 pub use opcode::Opcode;
+pub use operand::OperandKind;
 
 /// Data Flow Graph - stores instruction data
 ///
@@ -111,7 +115,7 @@ impl DFG {
         let max_index = self
             .value_types
             .iter()
-            .map(|(value, _)| value.index() as u32)
+            .map(|(value, _)| value.index())
             .max()
             .unwrap_or(0);
         max_index + 1
@@ -149,6 +153,33 @@ impl DFG {
             | Opcode::Trapnz { .. } => None, // No results
             Opcode::Call { .. } => None, // Call results depend on function signature
         }
+    }
+
+    /// Get operand kinds for an instruction
+    /// Returns a vector of (value, kind) tuples
+    pub fn operand_kinds(&self, inst: InstEntity) -> Vec<(Value, OperandKind)> {
+        let mut result = Vec::new();
+
+        if let Some(inst_data) = self.inst_data(inst) {
+            // All args are uses
+            for arg in &inst_data.args {
+                result.push((*arg, OperandKind::Use));
+            }
+
+            // All results are defs
+            for result_value in &inst_data.results {
+                result.push((*result_value, OperandKind::Def));
+            }
+        }
+
+        result
+    }
+
+    /// Check if an instruction modifies a register (read-write)
+    /// For now, no instructions modify registers (all are use or def)
+    pub fn has_modify_operands(&self, _inst: InstEntity) -> bool {
+        // Future: check for instructions like add-with-update, etc.
+        false
     }
 }
 
@@ -238,5 +269,77 @@ mod tests {
 
         dfg.set_value_type(v1, Type::F32);
         assert_eq!(dfg.value_type(v1), Some(Type::F32));
+    }
+
+    #[test]
+    fn test_operand_kinds_arithmetic() {
+        let mut dfg = DFG::new();
+        let v1 = Value::new(1);
+        let v2 = Value::new(2);
+        let v3 = Value::new(3);
+        let data = InstData::arithmetic(Opcode::Iadd, v3, v1, v2);
+        let inst = dfg.create_inst(data);
+
+        let kinds = dfg.operand_kinds(inst);
+        assert_eq!(kinds.len(), 3); // 2 args (Use) + 1 result (Def)
+
+        // Check args are Use
+        assert_eq!(kinds[0], (v1, OperandKind::Use));
+        assert_eq!(kinds[1], (v2, OperandKind::Use));
+        // Check result is Def
+        assert_eq!(kinds[2], (v3, OperandKind::Def));
+    }
+
+    #[test]
+    fn test_operand_kinds_no_args() {
+        let mut dfg = DFG::new();
+        let v1 = Value::new(1);
+        let data = InstData::constant(v1, Immediate::I64(42));
+        let inst = dfg.create_inst(data);
+
+        let kinds = dfg.operand_kinds(inst);
+        assert_eq!(kinds.len(), 1); // 0 args + 1 result (Def)
+        assert_eq!(kinds[0], (v1, OperandKind::Def));
+    }
+
+    #[test]
+    fn test_operand_kinds_no_results() {
+        let mut dfg = DFG::new();
+        let v1 = Value::new(1);
+        let v2 = Value::new(2);
+        let data = InstData::store(v1, v2, Type::I32);
+        let inst = dfg.create_inst(data);
+
+        let kinds = dfg.operand_kinds(inst);
+        assert_eq!(kinds.len(), 2); // 2 args (Use) + 0 results
+        assert_eq!(kinds[0], (v1, OperandKind::Use));
+        assert_eq!(kinds[1], (v2, OperandKind::Use));
+    }
+
+    #[test]
+    fn test_operand_kinds_return() {
+        let mut dfg = DFG::new();
+        let v1 = Value::new(1);
+        let v2 = Value::new(2);
+        let data = InstData::return_(vec![v1, v2]);
+        let inst = dfg.create_inst(data);
+
+        let kinds = dfg.operand_kinds(inst);
+        assert_eq!(kinds.len(), 2); // 2 args (Use) + 0 results
+        assert_eq!(kinds[0], (v1, OperandKind::Use));
+        assert_eq!(kinds[1], (v2, OperandKind::Use));
+    }
+
+    #[test]
+    fn test_has_modify_operands() {
+        let mut dfg = DFG::new();
+        let v1 = Value::new(1);
+        let v2 = Value::new(2);
+        let v3 = Value::new(3);
+        let data = InstData::arithmetic(Opcode::Iadd, v3, v1, v2);
+        let inst = dfg.create_inst(data);
+
+        // Currently no instructions modify registers
+        assert_eq!(dfg.has_modify_operands(inst), false);
     }
 }

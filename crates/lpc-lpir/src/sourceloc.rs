@@ -74,15 +74,11 @@ impl RelSourceLoc {
     pub fn from_base_offset(base: SourceLoc, absolute: SourceLoc) -> Self {
         if absolute.is_default() {
             // If absolute is default, use sentinel to represent "no source location"
-            RelSourceLoc {
-                offset: i32::MIN,
-            }
+            RelSourceLoc { offset: i32::MIN }
         } else if base.is_default() {
             // If base is default but absolute is not, we can't compute a meaningful offset
             // Store as sentinel to represent "no source location"
-            RelSourceLoc {
-                offset: i32::MIN,
-            }
+            RelSourceLoc { offset: i32::MIN }
         } else {
             // Compute offset (wrapping arithmetic to handle underflow)
             let base_bits = base.bits() as i32;
@@ -207,4 +203,3 @@ mod tests {
         assert_eq!(expanded.bits(), absolute.bits());
     }
 }
-
