@@ -3,7 +3,7 @@
 //! This module provides semantic methods to check register categories
 //! instead of using magic number ranges.
 
-use crate::Gpr;
+use super::regs::Gpr;
 
 /// Trait for checking register roles and categories.
 pub trait RegisterRole {

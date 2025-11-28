@@ -23,7 +23,7 @@ fn disassemble_instruction_with_labels(
     pc: u32,
     labels: Option<(&BTreeMap<u32, String>, &BTreeMap<u32, String>)>,
 ) -> String {
-    use crate::decode::extract_fields;
+    use super::decode::extract_fields;
 
     let fields = extract_fields(inst);
     let opcode = fields.opcode;
@@ -206,7 +206,7 @@ pub fn disassemble_code_with_labels(code: &[u8], labels: Option<&BTreeMap<u32, S
         let inst = u32::from_le_bytes(inst_bytes);
 
         // Extract target addresses for branches and jumps
-        let fields = crate::decode::extract_fields(inst);
+        let fields = super::decode::extract_fields(inst);
         match fields.opcode {
             0x6f => {
                 // JAL
@@ -336,7 +336,7 @@ fn gpr_name(num: u8) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{encode::*, Gpr};
+    use super::super::{encode::*, regs::Gpr};
 
     #[test]
     fn test_disassemble_add() {
@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn test_round_trip_assemble_disassemble() {
-        use crate::asm_parser::assemble_code;
+        use super::super::asm_parser::assemble_code;
 
         let asm = "addi a0, zero, 5\naddi a1, zero, 10\nadd a0, a0, a1\nebreak";
         let code = assemble_code(asm, None).unwrap();
@@ -447,7 +447,7 @@ mod tests {
     fn test_round_trip_with_labels() {
         use alloc::{collections::BTreeMap, string::ToString};
 
-        use crate::asm_parser::assemble_code;
+        use super::super::asm_parser::assemble_code;
 
         let asm = "addi a0, zero, 5\nloop:\naddi a0, a0, 1\nbeq a0, a1, loop";
         let code = assemble_code(asm, None).unwrap();

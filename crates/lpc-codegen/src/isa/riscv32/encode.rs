@@ -3,7 +3,7 @@
 //! This module provides functions to encode RISC-V instructions
 //! into their 32-bit binary representation.
 
-use crate::regs::Gpr;
+use super::regs::Gpr;
 
 /// Encode an R-type instruction.
 ///

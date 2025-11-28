@@ -144,7 +144,7 @@ impl InstBuffer {
     /// );
     /// ```
     pub fn assert_asm(&self, expected_asm: &str) {
-        use crate::asm_parser::assemble_code;
+        use super::asm_parser::assemble_code;
         extern crate alloc;
 
         // Assemble the expected code
@@ -181,7 +181,7 @@ impl InstBuffer {
 
     /// Disassemble all instructions in this buffer to a string.
     fn disassemble(&self) -> alloc::string::String {
-        use crate::disasm::disassemble_instruction;
+        use super::disasm::disassemble_instruction;
         extern crate alloc;
         use alloc::string::String;
 

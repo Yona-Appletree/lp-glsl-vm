@@ -3,7 +3,7 @@
 //! This module provides functions to decode RISC-V 32-bit instructions
 //! into their structured representation.
 
-use crate::{inst::Inst, regs::Gpr};
+use super::{inst::Inst, regs::Gpr};
 
 /// Decoded instruction fields.
 ///

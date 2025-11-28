@@ -3,7 +3,7 @@
 //! This module provides a structured representation of RISC-V instructions
 //! as Rust enums, enabling type-safe pattern matching and testing.
 
-use crate::Gpr;
+use super::regs::Gpr;
 
 /// A structured representation of a RISC-V instruction.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,7 +70,7 @@ pub enum Inst {
 impl Inst {
     /// Encode this instruction to its binary representation.
     pub fn encode(&self) -> u32 {
-        use crate::encode::*;
+        use super::encode::*;
         match self {
             Inst::Add { rd, rs1, rs2 } => add(*rd, *rs1, *rs2),
             Inst::Sub { rd, rs1, rs2 } => sub(*rd, *rs1, *rs2),
@@ -102,7 +102,7 @@ impl Inst {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Gpr;
+    use super::super::regs::Gpr;
 
     #[test]
     fn test_inst_encode_add() {

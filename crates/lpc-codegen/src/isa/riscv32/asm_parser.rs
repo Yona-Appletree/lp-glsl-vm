@@ -19,7 +19,7 @@ use nom::{
     IResult,
 };
 
-use crate::{encode::*, regs::Gpr};
+use super::{encode::*, regs::Gpr};
 
 /// Parse a register name.
 fn parse_register(input: &str) -> IResult<&str, Gpr> {
