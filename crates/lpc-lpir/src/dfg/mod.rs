@@ -134,12 +134,8 @@ impl DFG {
             | Opcode::Idiv
             | Opcode::Irem
             | Opcode::Iconst => Some(Type::I32),
-            Opcode::IcmpEq
-            | Opcode::IcmpNe
-            | Opcode::IcmpLt
-            | Opcode::IcmpLe
-            | Opcode::IcmpGt
-            | Opcode::IcmpGe => Some(Type::I32), // Comparisons return i32 (0/1)
+            Opcode::Icmp { .. } => Some(Type::I32), // Integer comparisons return i32 (0/1)
+            Opcode::Fcmp { .. } => Some(Type::I32), // Floating point comparisons return i32 (0/1)
             Opcode::Fconst => Some(Type::F32),
             Opcode::Load => None, // Must be specified explicitly
             Opcode::Store
@@ -147,7 +143,10 @@ impl DFG {
             | Opcode::Br
             | Opcode::Return
             | Opcode::Halt
-            | Opcode::Syscall => None, // No results
+            | Opcode::Syscall
+            | Opcode::Trap { .. }
+            | Opcode::Trapz { .. }
+            | Opcode::Trapnz { .. } => None, // No results
             Opcode::Call { .. } => None, // Call results depend on function signature
         }
     }

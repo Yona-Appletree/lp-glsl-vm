@@ -119,11 +119,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        builder::traits::InstBuilder,
-        dfg::Opcode,
-        signature::Signature,
-        types::Type,
-        value::Value,
+        builder::traits::InstBuilder, dfg::Opcode, signature::Signature, types::Type, value::Value,
     };
 
     #[test]

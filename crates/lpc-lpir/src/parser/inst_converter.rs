@@ -27,24 +27,18 @@ pub fn inst_to_inst_data(inst: Inst) -> InstData {
             InstData::arithmetic(crate::dfg::Opcode::Irem, result, arg1, arg2)
         }
 
-        Inst::IcmpEq { result, arg1, arg2 } => {
-            InstData::comparison(crate::dfg::Opcode::IcmpEq, result, arg1, arg2)
-        }
-        Inst::IcmpNe { result, arg1, arg2 } => {
-            InstData::comparison(crate::dfg::Opcode::IcmpNe, result, arg1, arg2)
-        }
-        Inst::IcmpLt { result, arg1, arg2 } => {
-            InstData::comparison(crate::dfg::Opcode::IcmpLt, result, arg1, arg2)
-        }
-        Inst::IcmpLe { result, arg1, arg2 } => {
-            InstData::comparison(crate::dfg::Opcode::IcmpLe, result, arg1, arg2)
-        }
-        Inst::IcmpGt { result, arg1, arg2 } => {
-            InstData::comparison(crate::dfg::Opcode::IcmpGt, result, arg1, arg2)
-        }
-        Inst::IcmpGe { result, arg1, arg2 } => {
-            InstData::comparison(crate::dfg::Opcode::IcmpGe, result, arg1, arg2)
-        }
+        Inst::Icmp {
+            result,
+            cond,
+            arg1,
+            arg2,
+        } => InstData::comparison(crate::dfg::Opcode::Icmp { cond }, result, arg1, arg2),
+        Inst::Fcmp {
+            result,
+            cond,
+            arg1,
+            arg2,
+        } => InstData::comparison(crate::dfg::Opcode::Fcmp { cond }, result, arg1, arg2),
 
         Inst::Iconst { result, value } => InstData::constant(result, Immediate::I64(value)),
         Inst::Fconst { result, value_bits } => {
@@ -95,5 +89,9 @@ pub fn inst_to_inst_data(inst: Inst) -> InstData {
         Inst::Store { address, value, ty } => InstData::store(address, value, ty),
 
         Inst::Halt => InstData::halt(),
+
+        Inst::Trap { code } => InstData::trap(code),
+        Inst::Trapz { condition, code } => InstData::trapz(condition, code),
+        Inst::Trapnz { condition, code } => InstData::trapnz(condition, code),
     }
 }

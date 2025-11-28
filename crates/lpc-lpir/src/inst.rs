@@ -3,7 +3,12 @@
 use alloc::{string::String, vec, vec::Vec};
 use core::fmt;
 
-use crate::{types::Type, value::Value};
+use crate::{
+    condcodes::{FloatCC, IntCC},
+    trapcode::TrapCode,
+    types::Type,
+    value::Value,
+};
 
 /// An IR instruction.
 #[derive(Debug, Clone)]
@@ -41,39 +46,18 @@ pub enum Inst {
     },
 
     // Comparisons
-    /// Integer compare equal: result = (arg1 == arg2)
-    IcmpEq {
+    /// Integer comparison: result = (arg1 cond arg2)
+    Icmp {
         result: Value,
+        cond: IntCC,
         arg1: Value,
         arg2: Value,
     },
-    /// Integer compare not equal: result = (arg1 != arg2)
-    IcmpNe {
+    /// Floating point comparison: result = (arg1 cond arg2)
+    /// Note: IR-only, backend lowering not supported yet
+    Fcmp {
         result: Value,
-        arg1: Value,
-        arg2: Value,
-    },
-    /// Integer compare less than: result = (arg1 < arg2)
-    IcmpLt {
-        result: Value,
-        arg1: Value,
-        arg2: Value,
-    },
-    /// Integer compare less than or equal: result = (arg1 <= arg2)
-    IcmpLe {
-        result: Value,
-        arg1: Value,
-        arg2: Value,
-    },
-    /// Integer compare greater than: result = (arg1 > arg2)
-    IcmpGt {
-        result: Value,
-        arg1: Value,
-        arg2: Value,
-    },
-    /// Integer compare greater than or equal: result = (arg1 >= arg2)
-    IcmpGe {
-        result: Value,
+        cond: FloatCC,
         arg1: Value,
         arg2: Value,
     },
@@ -136,6 +120,14 @@ pub enum Inst {
         value: Value,
         ty: Type,
     },
+
+    // Traps
+    /// Unconditional trap: terminate execution with trap code
+    Trap { code: TrapCode },
+    /// Trap if condition is zero: if condition == 0, trap with code
+    Trapz { condition: Value, code: TrapCode },
+    /// Trap if condition is non-zero: if condition != 0, trap with code
+    Trapnz { condition: Value, code: TrapCode },
 }
 
 impl Inst {
@@ -147,18 +139,20 @@ impl Inst {
             | Inst::Imul { result, .. }
             | Inst::Idiv { result, .. }
             | Inst::Irem { result, .. }
-            | Inst::IcmpEq { result, .. }
-            | Inst::IcmpNe { result, .. }
-            | Inst::IcmpLt { result, .. }
-            | Inst::IcmpLe { result, .. }
-            | Inst::IcmpGt { result, .. }
-            | Inst::IcmpGe { result, .. }
+            | Inst::Icmp { result, .. }
+            | Inst::Fcmp { result, .. }
             | Inst::Iconst { result, .. }
             | Inst::Fconst { result, .. }
             | Inst::Load { result, .. } => vec![*result],
             Inst::Call { results, .. } => results.clone(),
             Inst::Syscall { .. } => Vec::new(),
-            Inst::Jump { .. } | Inst::Br { .. } | Inst::Store { .. } | Inst::Halt => Vec::new(),
+            Inst::Jump { .. }
+            | Inst::Br { .. }
+            | Inst::Store { .. }
+            | Inst::Halt
+            | Inst::Trap { .. }
+            | Inst::Trapz { .. }
+            | Inst::Trapnz { .. } => Vec::new(),
             Inst::Return { values } => values.clone(),
         }
     }
@@ -171,13 +165,12 @@ impl Inst {
             | Inst::Imul { arg1, arg2, .. }
             | Inst::Idiv { arg1, arg2, .. }
             | Inst::Irem { arg1, arg2, .. }
-            | Inst::IcmpEq { arg1, arg2, .. }
-            | Inst::IcmpNe { arg1, arg2, .. }
-            | Inst::IcmpLt { arg1, arg2, .. }
-            | Inst::IcmpLe { arg1, arg2, .. }
-            | Inst::IcmpGt { arg1, arg2, .. }
-            | Inst::IcmpGe { arg1, arg2, .. } => vec![*arg1, *arg2],
-            Inst::Iconst { .. } | Inst::Fconst { .. } | Inst::Halt => Vec::new(),
+            | Inst::Icmp { arg1, arg2, .. }
+            | Inst::Fcmp { arg1, arg2, .. } => vec![*arg1, *arg2],
+            Inst::Iconst { .. } | Inst::Fconst { .. } | Inst::Halt | Inst::Trap { .. } => {
+                Vec::new()
+            }
+            Inst::Trapz { condition, .. } | Inst::Trapnz { condition, .. } => vec![*condition],
             Inst::Jump { args, .. } => args.clone(),
             Inst::Br {
                 condition,
@@ -247,56 +240,32 @@ impl fmt::Display for Inst {
                     arg2.index()
                 )
             }
-            Inst::IcmpEq { result, arg1, arg2 } => {
+            Inst::Icmp {
+                result,
+                cond,
+                arg1,
+                arg2,
+            } => {
                 write!(
                     f,
-                    "v{} = icmp_eq v{}, v{}",
+                    "v{} = icmp {} v{}, v{}",
                     result.index(),
+                    cond,
                     arg1.index(),
                     arg2.index()
                 )
             }
-            Inst::IcmpNe { result, arg1, arg2 } => {
+            Inst::Fcmp {
+                result,
+                cond,
+                arg1,
+                arg2,
+            } => {
                 write!(
                     f,
-                    "v{} = icmp_ne v{}, v{}",
+                    "v{} = fcmp {} v{}, v{}",
                     result.index(),
-                    arg1.index(),
-                    arg2.index()
-                )
-            }
-            Inst::IcmpLt { result, arg1, arg2 } => {
-                write!(
-                    f,
-                    "v{} = icmp_lt v{}, v{}",
-                    result.index(),
-                    arg1.index(),
-                    arg2.index()
-                )
-            }
-            Inst::IcmpLe { result, arg1, arg2 } => {
-                write!(
-                    f,
-                    "v{} = icmp_le v{}, v{}",
-                    result.index(),
-                    arg1.index(),
-                    arg2.index()
-                )
-            }
-            Inst::IcmpGt { result, arg1, arg2 } => {
-                write!(
-                    f,
-                    "v{} = icmp_gt v{}, v{}",
-                    result.index(),
-                    arg1.index(),
-                    arg2.index()
-                )
-            }
-            Inst::IcmpGe { result, arg1, arg2 } => {
-                write!(
-                    f,
-                    "v{} = icmp_ge v{}, v{}",
-                    result.index(),
+                    cond,
                     arg1.index(),
                     arg2.index()
                 )
@@ -408,6 +377,15 @@ impl fmt::Display for Inst {
                 write!(f, "store.{} v{}, v{}", ty, address.index(), value.index())
             }
             Inst::Halt => write!(f, "halt"),
+            Inst::Trap { code } => {
+                write!(f, "trap {}", code)
+            }
+            Inst::Trapz { condition, code } => {
+                write!(f, "trapz v{}, {}", condition.index(), code)
+            }
+            Inst::Trapnz { condition, code } => {
+                write!(f, "trapnz v{}, {}", condition.index(), code)
+            }
         }
     }
 }

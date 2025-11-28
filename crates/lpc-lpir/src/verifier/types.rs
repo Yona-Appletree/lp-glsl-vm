@@ -49,6 +49,56 @@ fn verify_instruction_types(function: &Function, errors: &mut Vec<VerifierError>
                             }
                         }
                     }
+                    Opcode::Icmp { .. } => {
+                        // Integer comparison: both operands should be integers (i32 or u32)
+                        if inst_data.args.len() >= 2 {
+                            let arg1_ty = function.dfg.value_type(inst_data.args[0]);
+                            let arg2_ty = function.dfg.value_type(inst_data.args[1]);
+
+                            if let (Some(ty1), Some(ty2)) = (arg1_ty, arg2_ty) {
+                                if !ty1.is_integer() || !ty2.is_integer() {
+                                    errors.push(VerifierError::with_location(
+                                        format!(
+                                            "Icmp operation expects integer operands, got {:?} \
+                                             and {:?}",
+                                            ty1, ty2
+                                        ),
+                                        format!("inst{}", inst.index()),
+                                    ));
+                                }
+                                if ty1 != ty2 {
+                                    errors.push(VerifierError::with_location(
+                                        format!(
+                                            "Icmp operation expects operands of the same type, \
+                                             got {:?} and {:?}",
+                                            ty1, ty2
+                                        ),
+                                        format!("inst{}", inst.index()),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    Opcode::Fcmp { .. } => {
+                        // Floating point comparison: both operands should be f32
+                        if inst_data.args.len() >= 2 {
+                            let arg1_ty = function.dfg.value_type(inst_data.args[0]);
+                            let arg2_ty = function.dfg.value_type(inst_data.args[1]);
+
+                            if let (Some(ty1), Some(ty2)) = (arg1_ty, arg2_ty) {
+                                if ty1 != Type::F32 || ty2 != Type::F32 {
+                                    errors.push(VerifierError::with_location(
+                                        format!(
+                                            "Fcmp operation expects f32 operands, got {:?} and \
+                                             {:?}",
+                                            ty1, ty2
+                                        ),
+                                        format!("inst{}", inst.index()),
+                                    ));
+                                }
+                            }
+                        }
+                    }
                     Opcode::Load => {
                         // Load requires type information
                         if inst_data.ty.is_none() {

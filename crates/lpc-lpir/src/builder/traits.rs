@@ -4,8 +4,10 @@
 //! allowing for extensible and type-safe instruction construction.
 
 use crate::{
+    condcodes::{FloatCC, IntCC},
     dfg::{Immediate, InstData, Opcode, DFG},
     entity::{Block, Inst as InstEntity},
+    trapcode::TrapCode,
     types::Type,
     value::Value,
 };
@@ -98,15 +100,47 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
 
     // Comparison instructions - return Value
 
-    /// Integer compare equal: result = (arg1 == arg2)
-    fn icmp_eq(self, arg1: Value, arg2: Value) -> Value
+    /// Integer comparison: result = (arg1 cond arg2)
+    fn icmp(self, cond: IntCC, arg1: Value, arg2: Value) -> Value
     where
         Self: Sized,
     {
         let next_idx = self.data_flow_graph().next_value_index();
         let result = Value::new(next_idx);
-        let _ = self.build(InstData::comparison(Opcode::IcmpEq, result, arg1, arg2));
+        let _ = self.build(InstData::comparison(
+            Opcode::Icmp { cond },
+            result,
+            arg1,
+            arg2,
+        ));
         result
+    }
+
+    /// Floating point comparison: result = (arg1 cond arg2)
+    /// Note: IR-only, backend lowering not supported yet
+    fn fcmp(self, cond: FloatCC, arg1: Value, arg2: Value) -> Value
+    where
+        Self: Sized,
+    {
+        let next_idx = self.data_flow_graph().next_value_index();
+        let result = Value::new(next_idx);
+        let _ = self.build(InstData::comparison(
+            Opcode::Fcmp { cond },
+            result,
+            arg1,
+            arg2,
+        ));
+        result
+    }
+
+    // Convenience methods for backward compatibility
+
+    /// Integer compare equal: result = (arg1 == arg2)
+    fn icmp_eq(self, arg1: Value, arg2: Value) -> Value
+    where
+        Self: Sized,
+    {
+        self.icmp(IntCC::Equal, arg1, arg2)
     }
 
     /// Integer compare not equal: result = (arg1 != arg2)
@@ -114,10 +148,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let next_idx = self.data_flow_graph().next_value_index();
-        let result = Value::new(next_idx);
-        let _ = self.build(InstData::comparison(Opcode::IcmpNe, result, arg1, arg2));
-        result
+        self.icmp(IntCC::NotEqual, arg1, arg2)
     }
 
     /// Integer compare less than: result = (arg1 < arg2)
@@ -125,10 +156,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let next_idx = self.data_flow_graph().next_value_index();
-        let result = Value::new(next_idx);
-        let _ = self.build(InstData::comparison(Opcode::IcmpLt, result, arg1, arg2));
-        result
+        self.icmp(IntCC::SignedLessThan, arg1, arg2)
     }
 
     /// Integer compare less than or equal: result = (arg1 <= arg2)
@@ -136,10 +164,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let next_idx = self.data_flow_graph().next_value_index();
-        let result = Value::new(next_idx);
-        let _ = self.build(InstData::comparison(Opcode::IcmpLe, result, arg1, arg2));
-        result
+        self.icmp(IntCC::SignedLessThanOrEqual, arg1, arg2)
     }
 
     /// Integer compare greater than: result = (arg1 > arg2)
@@ -147,10 +172,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let next_idx = self.data_flow_graph().next_value_index();
-        let result = Value::new(next_idx);
-        let _ = self.build(InstData::comparison(Opcode::IcmpGt, result, arg1, arg2));
-        result
+        self.icmp(IntCC::SignedGreaterThan, arg1, arg2)
     }
 
     /// Integer compare greater than or equal: result = (arg1 >= arg2)
@@ -158,10 +180,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let next_idx = self.data_flow_graph().next_value_index();
-        let result = Value::new(next_idx);
-        let _ = self.build(InstData::comparison(Opcode::IcmpGe, result, arg1, arg2));
-        result
+        self.icmp(IntCC::SignedGreaterThanOrEqual, arg1, arg2)
     }
 
     // Constant instructions - return Value
@@ -235,6 +254,32 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
         Self: Sized,
     {
         let _ = self.build(InstData::halt());
+    }
+
+    // Trap instructions
+
+    /// Unconditional trap: terminate execution with trap code
+    fn trap(self, code: TrapCode)
+    where
+        Self: Sized,
+    {
+        let _ = self.build(InstData::trap(code));
+    }
+
+    /// Trap if condition is zero: if condition == 0, trap with code
+    fn trapz(self, condition: Value, code: TrapCode)
+    where
+        Self: Sized,
+    {
+        let _ = self.build(InstData::trapz(condition, code));
+    }
+
+    /// Trap if condition is non-zero: if condition != 0, trap with code
+    fn trapnz(self, condition: Value, code: TrapCode)
+    where
+        Self: Sized,
+    {
+        let _ = self.build(InstData::trapnz(condition, code));
     }
 
     // Memory instructions

@@ -15,6 +15,7 @@ extern crate alloc;
 mod analysis;
 mod block;
 mod builder;
+mod condcodes;
 mod dfg;
 mod entity;
 mod entity_map;
@@ -24,6 +25,7 @@ mod layout;
 mod module;
 mod parser;
 mod signature;
+mod trapcode;
 mod types;
 mod value;
 mod verifier;
@@ -35,6 +37,7 @@ pub use builder::{
     traits::{InstBuilder, InstBuilderBase, InstInserterBase},
     InsertBuilder, ReplaceBuilder,
 };
+pub use condcodes::{CondCode, FloatCC, IntCC};
 pub use dfg::{BlockArgs, Immediate, InstData, Opcode, DFG};
 pub use entity::{Block as BlockEntity, EntityRef, Inst as InstEntity};
 pub use entity_map::PrimaryMap;
@@ -44,6 +47,7 @@ pub use layout::Layout;
 pub use module::Module;
 pub use parser::{parse_function, parse_module, ParseError};
 pub use signature::Signature;
+pub use trapcode::TrapCode;
 pub use types::Type;
 pub use value::Value;
 pub use verifier::{verify, VerifierError};

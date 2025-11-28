@@ -4,8 +4,10 @@ use alloc::{string::String, vec::Vec};
 
 use crate::{
     builder::function_builder::FunctionBuilder,
+    condcodes::{FloatCC, IntCC},
     dfg::{InstData, Opcode},
     entity::Block as BlockEntity,
+    trapcode::TrapCode,
     Type, Value,
 };
 
@@ -66,34 +68,57 @@ impl<'a> BlockBuilder<'a> {
 
     // Comparison instructions
 
+    /// Integer comparison: result = (arg1 cond arg2)
+    pub fn icmp(&mut self, result: Value, cond: IntCC, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::comparison(
+            Opcode::Icmp { cond },
+            result,
+            arg1,
+            arg2,
+        ));
+    }
+
+    /// Floating point comparison: result = (arg1 cond arg2)
+    /// Note: IR-only, backend lowering not supported yet
+    pub fn fcmp(&mut self, result: Value, cond: FloatCC, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::comparison(
+            Opcode::Fcmp { cond },
+            result,
+            arg1,
+            arg2,
+        ));
+    }
+
+    // Convenience methods for backward compatibility
+
     /// Integer compare equal: result = (arg1 == arg2)
     pub fn icmp_eq(&mut self, result: Value, arg1: Value, arg2: Value) {
-        self.push_inst_data(InstData::comparison(Opcode::IcmpEq, result, arg1, arg2));
+        self.icmp(result, IntCC::Equal, arg1, arg2);
     }
 
     /// Integer compare not equal: result = (arg1 != arg2)
     pub fn icmp_ne(&mut self, result: Value, arg1: Value, arg2: Value) {
-        self.push_inst_data(InstData::comparison(Opcode::IcmpNe, result, arg1, arg2));
+        self.icmp(result, IntCC::NotEqual, arg1, arg2);
     }
 
     /// Integer compare less than: result = (arg1 < arg2)
     pub fn icmp_lt(&mut self, result: Value, arg1: Value, arg2: Value) {
-        self.push_inst_data(InstData::comparison(Opcode::IcmpLt, result, arg1, arg2));
+        self.icmp(result, IntCC::SignedLessThan, arg1, arg2);
     }
 
     /// Integer compare less than or equal: result = (arg1 <= arg2)
     pub fn icmp_le(&mut self, result: Value, arg1: Value, arg2: Value) {
-        self.push_inst_data(InstData::comparison(Opcode::IcmpLe, result, arg1, arg2));
+        self.icmp(result, IntCC::SignedLessThanOrEqual, arg1, arg2);
     }
 
     /// Integer compare greater than: result = (arg1 > arg2)
     pub fn icmp_gt(&mut self, result: Value, arg1: Value, arg2: Value) {
-        self.push_inst_data(InstData::comparison(Opcode::IcmpGt, result, arg1, arg2));
+        self.icmp(result, IntCC::SignedGreaterThan, arg1, arg2);
     }
 
     /// Integer compare greater than or equal: result = (arg1 >= arg2)
     pub fn icmp_ge(&mut self, result: Value, arg1: Value, arg2: Value) {
-        self.push_inst_data(InstData::comparison(Opcode::IcmpGe, result, arg1, arg2));
+        self.icmp(result, IntCC::SignedGreaterThanOrEqual, arg1, arg2);
     }
 
     // Constant instructions
@@ -168,5 +193,22 @@ impl<'a> BlockBuilder<'a> {
     /// Halt execution (ebreak)
     pub fn halt(&mut self) {
         self.push_inst_data(InstData::halt());
+    }
+
+    // Trap instructions
+
+    /// Unconditional trap: terminate execution with trap code
+    pub fn trap(&mut self, code: TrapCode) {
+        self.push_inst_data(InstData::trap(code));
+    }
+
+    /// Trap if condition is zero: if condition == 0, trap with code
+    pub fn trapz(&mut self, condition: Value, code: TrapCode) {
+        self.push_inst_data(InstData::trapz(condition, code));
+    }
+
+    /// Trap if condition is non-zero: if condition != 0, trap with code
+    pub fn trapnz(&mut self, condition: Value, code: TrapCode) {
+        self.push_inst_data(InstData::trapnz(condition, code));
     }
 }

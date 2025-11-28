@@ -2,7 +2,12 @@
 
 use alloc::{string::String, vec::Vec};
 
-use crate::{entity::Block, Type, Value};
+use crate::{
+    condcodes::{FloatCC, IntCC},
+    entity::Block,
+    trapcode::TrapCode,
+    Type, Value,
+};
 
 /// Instruction data (opcode + operands)
 ///
@@ -46,6 +51,12 @@ pub enum Immediate {
     I32(i32),
     /// String (for function names in Call, though Call uses opcode field)
     String(String),
+    /// Integer condition code (for Icmp instruction)
+    IntCondCode(IntCC),
+    /// Floating point condition code (for Fcmp instruction)
+    FloatCondCode(FloatCC),
+    /// Trap code (for Trap, Trapz, Trapnz instructions)
+    TrapCode(TrapCode),
 }
 
 impl InstData {
@@ -85,13 +96,20 @@ impl InstData {
         arg1: Value,
         arg2: Value,
     ) -> Self {
+        // Extract condition code from opcode if it's Icmp or Fcmp
+        let imm = match &opcode {
+            crate::dfg::opcode::Opcode::Icmp { cond } => Some(Immediate::IntCondCode(*cond)),
+            crate::dfg::opcode::Opcode::Fcmp { cond } => Some(Immediate::FloatCondCode(*cond)),
+            _ => None,
+        };
+
         Self {
             opcode,
             args: Vec::from([arg1, arg2]),
             results: Vec::from([result]),
             block_args: None,
             ty: None,
-            imm: None,
+            imm,
         }
     }
 
@@ -101,6 +119,9 @@ impl InstData {
             Immediate::I64(_) | Immediate::I32(_) => crate::dfg::opcode::Opcode::Iconst,
             Immediate::F32Bits(_) => crate::dfg::opcode::Opcode::Fconst,
             Immediate::String(_) => panic!("String immediate not supported for constants"),
+            Immediate::IntCondCode(_) | Immediate::FloatCondCode(_) | Immediate::TrapCode(_) => {
+                panic!("Condition codes and trap codes are not valid for constant instructions")
+            }
         };
         Self {
             opcode,
@@ -220,6 +241,42 @@ impl InstData {
             block_args: None,
             ty: None,
             imm: None,
+        }
+    }
+
+    /// Create a trap instruction
+    pub fn trap(code: TrapCode) -> Self {
+        Self {
+            opcode: crate::dfg::opcode::Opcode::Trap { code },
+            args: Vec::new(),
+            results: Vec::new(),
+            block_args: None,
+            ty: None,
+            imm: Some(Immediate::TrapCode(code)),
+        }
+    }
+
+    /// Create a trapz instruction (trap if condition is zero)
+    pub fn trapz(condition: Value, code: TrapCode) -> Self {
+        Self {
+            opcode: crate::dfg::opcode::Opcode::Trapz { code },
+            args: Vec::from([condition]),
+            results: Vec::new(),
+            block_args: None,
+            ty: None,
+            imm: Some(Immediate::TrapCode(code)),
+        }
+    }
+
+    /// Create a trapnz instruction (trap if condition is non-zero)
+    pub fn trapnz(condition: Value, code: TrapCode) -> Self {
+        Self {
+            opcode: crate::dfg::opcode::Opcode::Trapnz { code },
+            args: Vec::from([condition]),
+            results: Vec::new(),
+            block_args: None,
+            ty: None,
+            imm: Some(Immediate::TrapCode(code)),
         }
     }
 }

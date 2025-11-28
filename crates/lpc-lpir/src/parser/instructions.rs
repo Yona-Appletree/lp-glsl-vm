@@ -14,7 +14,11 @@ use super::{
     primitives::{float, integer, parse_block_index, parse_function_name, parse_type, parse_value},
     whitespace::blank,
 };
-use crate::inst::Inst;
+use crate::{
+    condcodes::{FloatCC, IntCC},
+    inst::Inst,
+    trapcode::TrapCode,
+};
 
 /// Parse an arithmetic instruction (iadd, isub, imul, idiv, irem)
 pub(crate) fn parse_arithmetic(input: &str) -> IResult<&str, Inst> {
@@ -46,36 +50,163 @@ pub(crate) fn parse_arithmetic(input: &str) -> IResult<&str, Inst> {
     Ok((input, inst))
 }
 
-/// Parse a comparison instruction (icmp_eq, icmp_ne, etc.)
-pub(crate) fn parse_comparison(input: &str) -> IResult<&str, Inst> {
-    let (input, result) = terminated(parse_value, blank)(input)?;
-    let (input, _) = terminated(tag("="), blank)(input)?;
-    let (input, op) = terminated(
+/// Parse an integer condition code
+fn parse_int_cond_code(input: &str) -> IResult<&str, IntCC> {
+    let (input, cond_str) = terminated(
         alt((
-            tag("icmp_eq"),
-            tag("icmp_ne"),
-            tag("icmp_lt"),
-            tag("icmp_le"),
-            tag("icmp_gt"),
-            tag("icmp_ge"),
+            tag("eq"),
+            tag("ne"),
+            tag("slt"),
+            tag("sge"),
+            tag("sgt"),
+            tag("sle"),
+            tag("ult"),
+            tag("uge"),
+            tag("ugt"),
+            tag("ule"),
         )),
         blank,
     )(input)?;
+
+    let cond = match cond_str {
+        "eq" => IntCC::Equal,
+        "ne" => IntCC::NotEqual,
+        "slt" => IntCC::SignedLessThan,
+        "sge" => IntCC::SignedGreaterThanOrEqual,
+        "sgt" => IntCC::SignedGreaterThan,
+        "sle" => IntCC::SignedLessThanOrEqual,
+        "ult" => IntCC::UnsignedLessThan,
+        "uge" => IntCC::UnsignedGreaterThanOrEqual,
+        "ugt" => IntCC::UnsignedGreaterThan,
+        "ule" => IntCC::UnsignedLessThanOrEqual,
+        _ => unreachable!(),
+    };
+
+    Ok((input, cond))
+}
+
+/// Parse a floating point condition code
+fn parse_float_cond_code(input: &str) -> IResult<&str, FloatCC> {
+    let (input, cond_str) = terminated(
+        alt((
+            tag("ord"),
+            tag("uno"),
+            tag("eq"),
+            tag("ne"),
+            tag("one"),
+            tag("ueq"),
+            tag("lt"),
+            tag("le"),
+            tag("gt"),
+            tag("ge"),
+            tag("ult"),
+            tag("ule"),
+            tag("ugt"),
+            tag("uge"),
+        )),
+        blank,
+    )(input)?;
+
+    let cond = match cond_str {
+        "ord" => FloatCC::Ordered,
+        "uno" => FloatCC::Unordered,
+        "eq" => FloatCC::Equal,
+        "ne" => FloatCC::NotEqual,
+        "one" => FloatCC::OrderedNotEqual,
+        "ueq" => FloatCC::UnorderedOrEqual,
+        "lt" => FloatCC::LessThan,
+        "le" => FloatCC::LessThanOrEqual,
+        "gt" => FloatCC::GreaterThan,
+        "ge" => FloatCC::GreaterThanOrEqual,
+        "ult" => FloatCC::UnorderedOrLessThan,
+        "ule" => FloatCC::UnorderedOrLessThanOrEqual,
+        "ugt" => FloatCC::UnorderedOrGreaterThan,
+        "uge" => FloatCC::UnorderedOrGreaterThanOrEqual,
+        _ => unreachable!(),
+    };
+
+    Ok((input, cond))
+}
+
+/// Parse a trap code
+fn parse_trap_code(input: &str) -> IResult<&str, TrapCode> {
+    // Try standard trap codes first
+    let (input, code) = match terminated(
+        alt((
+            tag("stk_ovf"),
+            tag("heap_oob"),
+            tag("int_ovf"),
+            tag("int_divz"),
+            tag("bad_toint"),
+        )),
+        blank,
+    )(input)
+    {
+        Ok((remaining, code_str)) => {
+            let code = match code_str {
+                "stk_ovf" => TrapCode::STACK_OVERFLOW,
+                "heap_oob" => TrapCode::HEAP_OUT_OF_BOUNDS,
+                "int_ovf" => TrapCode::INTEGER_OVERFLOW,
+                "int_divz" => TrapCode::INTEGER_DIVISION_BY_ZERO,
+                "bad_toint" => TrapCode::BAD_CONVERSION_TO_INTEGER,
+                _ => unreachable!(),
+            };
+            (remaining, code)
+        }
+        Err(_) => {
+            // Try user-defined trap code: "user42"
+            let (input, _) = terminated(tag("user"), blank)(input)?;
+            let (input, num) = terminated(integer, blank)(input)?;
+            let code = TrapCode::unwrap_user(num as u8);
+            (input, code)
+        }
+    };
+
+    Ok((input, code))
+}
+
+/// Parse a comparison instruction (icmp with condition code)
+pub(crate) fn parse_comparison(input: &str) -> IResult<&str, Inst> {
+    let (input, result) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(tag("="), blank)(input)?;
+    let (input, (_, cond, arg1, _, arg2)) = tuple((
+        terminated(tag("icmp"), blank),
+        parse_int_cond_code,
+        terminated(parse_value, blank),
+        terminated(char(','), blank),
+        terminated(parse_value, blank),
+    ))(input)?;
+
+    Ok((
+        input,
+        Inst::Icmp {
+            result,
+            cond,
+            arg1,
+            arg2,
+        },
+    ))
+}
+
+/// Parse a floating point comparison instruction (fcmp with condition code)
+pub(crate) fn parse_fcmp(input: &str) -> IResult<&str, Inst> {
+    let (input, result) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(tag("="), blank)(input)?;
+    let (input, _) = terminated(tag("fcmp"), blank)(input)?;
+    let (input, cond) = parse_float_cond_code(input)?;
     let (input, arg1) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(char(','), blank)(input)?;
     let (input, arg2) = terminated(parse_value, blank)(input)?;
 
-    let inst = match op {
-        "icmp_eq" => Inst::IcmpEq { result, arg1, arg2 },
-        "icmp_ne" => Inst::IcmpNe { result, arg1, arg2 },
-        "icmp_lt" => Inst::IcmpLt { result, arg1, arg2 },
-        "icmp_le" => Inst::IcmpLe { result, arg1, arg2 },
-        "icmp_gt" => Inst::IcmpGt { result, arg1, arg2 },
-        "icmp_ge" => Inst::IcmpGe { result, arg1, arg2 },
-        _ => unreachable!(),
-    };
-
-    Ok((input, inst))
+    Ok((
+        input,
+        Inst::Fcmp {
+            result,
+            cond,
+            arg1,
+            arg2,
+        },
+    ))
 }
 
 /// Parse a constant instruction (iconst, fconst)
@@ -239,6 +370,31 @@ pub(crate) fn parse_halt(input: &str) -> IResult<&str, Inst> {
     map(terminated(tag("halt"), blank), |_| Inst::Halt)(input)
 }
 
+/// Parse a trap instruction
+pub(crate) fn parse_trap(input: &str) -> IResult<&str, Inst> {
+    let (input, _) = terminated(tag("trap"), blank)(input)?;
+    let (input, code) = parse_trap_code(input)?;
+    Ok((input, Inst::Trap { code }))
+}
+
+/// Parse a trapz instruction (trap if condition is zero)
+pub(crate) fn parse_trapz(input: &str) -> IResult<&str, Inst> {
+    let (input, _) = terminated(tag("trapz"), blank)(input)?;
+    let (input, condition) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(char(','), blank)(input)?;
+    let (input, code) = parse_trap_code(input)?;
+    Ok((input, Inst::Trapz { condition, code }))
+}
+
+/// Parse a trapnz instruction (trap if condition is non-zero)
+pub(crate) fn parse_trapnz(input: &str) -> IResult<&str, Inst> {
+    let (input, _) = terminated(tag("trapnz"), blank)(input)?;
+    let (input, condition) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(char(','), blank)(input)?;
+    let (input, code) = parse_trap_code(input)?;
+    Ok((input, Inst::Trapnz { condition, code }))
+}
+
 /// Parse any instruction
 pub(crate) fn parse_instruction(input: &str) -> IResult<&str, Inst> {
     // Order matters: more specific patterns first
@@ -251,11 +407,15 @@ pub(crate) fn parse_instruction(input: &str) -> IResult<&str, Inst> {
         parse_jump,    // "jump block1" - doesn't start with value assignment
         parse_return,  // "return v0" - doesn't start with value assignment
         parse_halt,    // "halt" - doesn't start with value assignment
+        parse_trap,    // "trap int_divz" - doesn't start with value assignment
+        parse_trapz,   // "trapz v0, int_divz" - doesn't start with value assignment
+        parse_trapnz,  // "trapnz v0, int_ovf" - doesn't start with value assignment
         // Instructions that start with "v0 = " come after
         // Try parse_const before parse_load since "iconst" is more specific than "load"
         parse_const,      // "v0 = iconst 42" or "v0 = fconst 3.14"
         parse_load,       // "v0 = load.i32 v1" - has type suffix
-        parse_comparison, // "v0 = icmp_eq v1, v2"
+        parse_fcmp,       // "v0 = fcmp eq v1, v2" - must come before parse_comparison
+        parse_comparison, // "v0 = icmp eq v1, v2" or "v0 = icmp_eq v1, v2"
         parse_arithmetic, // "v0 = iadd v1, v2"
     ))(input)
 }
@@ -344,11 +504,19 @@ mod tests {
 
     #[test]
     fn test_parse_comparison() {
-        let input = "v0 = icmp_eq v1, v2";
+        let input = "v0 = icmp eq v1, v2";
         let result = parse_comparison(input);
         assert!(result.is_ok(), "parse_comparison failed: {:?}", result);
         let (_, inst) = result.unwrap();
-        assert!(matches!(inst, Inst::IcmpEq { .. }));
+        assert!(matches!(inst, Inst::Icmp { cond: crate::condcodes::IntCC::Equal, .. }));
+    }
+
+    #[test]
+    fn test_parse_comparison_rejects_old_format() {
+        // Old format should be rejected
+        let input = "v0 = icmp_eq v1, v2";
+        let result = parse_comparison(input);
+        assert!(result.is_err(), "parse_comparison should reject old format");
     }
 
     #[test]

@@ -71,17 +71,12 @@ fn verify_instruction_format(
             }
         }
 
-        // Comparison ops: 2 args, 1 result, no block_args, no ty, no imm
-        Opcode::IcmpEq
-        | Opcode::IcmpNe
-        | Opcode::IcmpLt
-        | Opcode::IcmpLe
-        | Opcode::IcmpGt
-        | Opcode::IcmpGe => {
+        // Integer comparison with condition code: 2 args, 1 result, IntCondCode immediate
+        Opcode::Icmp { .. } => {
             if inst_data.args.len() != 2 {
                 errors.push(VerifierError::with_location(
                     format!(
-                        "Comparison operation expects 2 arguments, got {}",
+                        "Icmp operation expects 2 arguments, got {}",
                         inst_data.args.len()
                     ),
                     format!("inst{}", inst.index()),
@@ -90,7 +85,7 @@ fn verify_instruction_format(
             if inst_data.results.len() != 1 {
                 errors.push(VerifierError::with_location(
                     format!(
-                        "Comparison operation expects 1 result, got {}",
+                        "Icmp operation expects 1 result, got {}",
                         inst_data.results.len()
                     ),
                     format!("inst{}", inst.index()),
@@ -98,21 +93,83 @@ fn verify_instruction_format(
             }
             if inst_data.block_args.is_some() {
                 errors.push(VerifierError::with_location(
-                    String::from("Comparison operation should not have block_args"),
+                    String::from("Icmp operation should not have block_args"),
                     format!("inst{}", inst.index()),
                 ));
             }
             if inst_data.ty.is_some() {
                 errors.push(VerifierError::with_location(
-                    String::from("Comparison operation should not have type"),
+                    String::from("Icmp operation should not have type"),
                     format!("inst{}", inst.index()),
                 ));
             }
-            if inst_data.imm.is_some() {
+            match &inst_data.imm {
+                Some(crate::dfg::Immediate::IntCondCode(_)) => {
+                    // Correct immediate type
+                }
+                Some(_) => {
+                    errors.push(VerifierError::with_location(
+                        String::from("Icmp operation requires IntCondCode immediate"),
+                        format!("inst{}", inst.index()),
+                    ));
+                }
+                None => {
+                    errors.push(VerifierError::with_location(
+                        String::from("Icmp operation requires IntCondCode immediate"),
+                        format!("inst{}", inst.index()),
+                    ));
+                }
+            }
+        }
+
+        // Floating point comparison with condition code: 2 args, 1 result, FloatCondCode immediate
+        Opcode::Fcmp { .. } => {
+            if inst_data.args.len() != 2 {
                 errors.push(VerifierError::with_location(
-                    String::from("Comparison operation should not have immediate"),
+                    format!(
+                        "Fcmp operation expects 2 arguments, got {}",
+                        inst_data.args.len()
+                    ),
                     format!("inst{}", inst.index()),
                 ));
+            }
+            if inst_data.results.len() != 1 {
+                errors.push(VerifierError::with_location(
+                    format!(
+                        "Fcmp operation expects 1 result, got {}",
+                        inst_data.results.len()
+                    ),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.block_args.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Fcmp operation should not have block_args"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.ty.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Fcmp operation should not have type"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            match &inst_data.imm {
+                Some(crate::dfg::Immediate::FloatCondCode(_)) => {
+                    // Correct immediate type
+                }
+                Some(_) => {
+                    errors.push(VerifierError::with_location(
+                        String::from("Fcmp operation requires FloatCondCode immediate"),
+                        format!("inst{}", inst.index()),
+                    ));
+                }
+                None => {
+                    errors.push(VerifierError::with_location(
+                        String::from("Fcmp operation requires FloatCondCode immediate"),
+                        format!("inst{}", inst.index()),
+                    ));
+                }
             }
         }
 
@@ -447,6 +504,141 @@ fn verify_instruction_format(
                     String::from("Halt should not have immediate"),
                     format!("inst{}", inst.index()),
                 ));
+            }
+        }
+
+        // Trap: 0 args, 0 results, TrapCode immediate, no block_args, no ty
+        Opcode::Trap { .. } => {
+            if inst_data.args.len() != 0 {
+                errors.push(VerifierError::with_location(
+                    format!("Trap expects 0 arguments, got {}", inst_data.args.len()),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.results.len() != 0 {
+                errors.push(VerifierError::with_location(
+                    format!("Trap expects 0 results, got {}", inst_data.results.len()),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.block_args.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Trap should not have block_args"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.ty.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Trap should not have type"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            match &inst_data.imm {
+                Some(crate::dfg::Immediate::TrapCode(_)) => {
+                    // Correct immediate type
+                }
+                Some(_) => {
+                    errors.push(VerifierError::with_location(
+                        String::from("Trap operation requires TrapCode immediate"),
+                        format!("inst{}", inst.index()),
+                    ));
+                }
+                None => {
+                    errors.push(VerifierError::with_location(
+                        String::from("Trap operation requires TrapCode immediate"),
+                        format!("inst{}", inst.index()),
+                    ));
+                }
+            }
+        }
+
+        // Trapz: 1 arg (condition), 0 results, TrapCode immediate, no block_args, no ty
+        Opcode::Trapz { .. } => {
+            if inst_data.args.len() != 1 {
+                errors.push(VerifierError::with_location(
+                    format!("Trapz expects 1 argument, got {}", inst_data.args.len()),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.results.len() != 0 {
+                errors.push(VerifierError::with_location(
+                    format!("Trapz expects 0 results, got {}", inst_data.results.len()),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.block_args.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Trapz should not have block_args"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.ty.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Trapz should not have type"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            match &inst_data.imm {
+                Some(crate::dfg::Immediate::TrapCode(_)) => {
+                    // Correct immediate type
+                }
+                Some(_) => {
+                    errors.push(VerifierError::with_location(
+                        String::from("Trapz operation requires TrapCode immediate"),
+                        format!("inst{}", inst.index()),
+                    ));
+                }
+                None => {
+                    errors.push(VerifierError::with_location(
+                        String::from("Trapz operation requires TrapCode immediate"),
+                        format!("inst{}", inst.index()),
+                    ));
+                }
+            }
+        }
+
+        // Trapnz: 1 arg (condition), 0 results, TrapCode immediate, no block_args, no ty
+        Opcode::Trapnz { .. } => {
+            if inst_data.args.len() != 1 {
+                errors.push(VerifierError::with_location(
+                    format!("Trapnz expects 1 argument, got {}", inst_data.args.len()),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.results.len() != 0 {
+                errors.push(VerifierError::with_location(
+                    format!("Trapnz expects 0 results, got {}", inst_data.results.len()),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.block_args.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Trapnz should not have block_args"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.ty.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Trapnz should not have type"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            match &inst_data.imm {
+                Some(crate::dfg::Immediate::TrapCode(_)) => {
+                    // Correct immediate type
+                }
+                Some(_) => {
+                    errors.push(VerifierError::with_location(
+                        String::from("Trapnz operation requires TrapCode immediate"),
+                        format!("inst{}", inst.index()),
+                    ));
+                }
+                None => {
+                    errors.push(VerifierError::with_location(
+                        String::from("Trapnz operation requires TrapCode immediate"),
+                        format!("inst{}", inst.index()),
+                    ));
+                }
             }
         }
     }

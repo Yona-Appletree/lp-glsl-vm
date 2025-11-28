@@ -2,6 +2,11 @@
 
 use alloc::string::String;
 
+use crate::{
+    condcodes::{FloatCC, IntCC},
+    trapcode::TrapCode,
+};
+
 /// Instruction opcode
 ///
 /// This enum represents the operation that an instruction performs.
@@ -22,18 +27,17 @@ pub enum Opcode {
     Irem,
 
     // Comparisons
-    /// Integer compare equal: result = (arg1 == arg2)
-    IcmpEq,
-    /// Integer compare not equal: result = (arg1 != arg2)
-    IcmpNe,
-    /// Integer compare less than: result = (arg1 < arg2)
-    IcmpLt,
-    /// Integer compare less than or equal: result = (arg1 <= arg2)
-    IcmpLe,
-    /// Integer compare greater than: result = (arg1 > arg2)
-    IcmpGt,
-    /// Integer compare greater than or equal: result = (arg1 >= arg2)
-    IcmpGe,
+    /// Integer comparison with condition code: result = (arg1 cond arg2)
+    Icmp {
+        /// Condition code for the comparison
+        cond: IntCC,
+    },
+    /// Floating point comparison with condition code: result = (arg1 cond arg2)
+    /// Note: IR-only, backend lowering not supported yet
+    Fcmp {
+        /// Condition code for the comparison
+        cond: FloatCC,
+    },
 
     // Constants
     /// Integer constant: result = value
@@ -63,6 +67,23 @@ pub enum Opcode {
     Load,
     /// Store to memory: mem[address] = value
     Store,
+
+    // Traps
+    /// Unconditional trap: terminate execution with trap code
+    Trap {
+        /// Trap code describing the reason for the trap
+        code: TrapCode,
+    },
+    /// Trap if condition is zero: if condition == 0, trap with code
+    Trapz {
+        /// Trap code describing the reason for the trap
+        code: TrapCode,
+    },
+    /// Trap if condition is non-zero: if condition != 0, trap with code
+    Trapnz {
+        /// Trap code describing the reason for the trap
+        code: TrapCode,
+    },
 }
 
 #[cfg(test)]

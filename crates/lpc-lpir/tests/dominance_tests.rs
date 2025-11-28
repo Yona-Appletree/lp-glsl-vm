@@ -138,8 +138,7 @@ block2:
     );
     let err = result.unwrap_err();
     assert!(
-        err.message.contains("Value 1")
-            && err.message.contains("dominated"),
+        err.message.contains("Value 1") && err.message.contains("dominated"),
         "Error should mention dominance violation: {}",
         err.message
     );
@@ -168,8 +167,7 @@ block2:
     );
     let err = result.unwrap_err();
     assert!(
-        err.message.contains("Value 1")
-            && err.message.contains("dominated"),
+        err.message.contains("Value 1") && err.message.contains("dominated"),
         "Error should mention dominance violation: {}",
         err.message
     );
@@ -230,8 +228,7 @@ block3(v2: i32):
     );
     let err = result.unwrap_err();
     assert!(
-        err.message.contains("Value 1")
-            && err.message.contains("dominated"),
+        err.message.contains("Value 1") && err.message.contains("dominated"),
         "Error should mention dominance violation: {}",
         err.message
     );
@@ -280,14 +277,12 @@ block2:
 }
 "#;
     let result = parse_function(input.trim());
-    assert!(
-        result.is_err(),
-        "Value used before definition should fail"
-    );
+    assert!(result.is_err(), "Value used before definition should fail");
     let err = result.unwrap_err();
     assert!(
         err.message.contains("Value 1")
-            && (err.message.contains("dominated") || err.message.contains("used before definition")),
+            && (err.message.contains("dominated")
+                || err.message.contains("used before definition")),
         "Error should mention dominance violation or use-before-def: {}",
         err.message
     );
@@ -363,8 +358,7 @@ block5:
     );
     let err = result.unwrap_err();
     assert!(
-        err.message.contains("Value 1")
-            && err.message.contains("dominated"),
+        err.message.contains("Value 1") && err.message.contains("dominated"),
         "Error should mention dominance violation: {}",
         err.message
     );
@@ -410,8 +404,7 @@ block0(v0: i32):
     );
     let err = result.unwrap_err();
     assert!(
-        err.message.contains("used before definition")
-            || err.message.contains("dominated"),
+        err.message.contains("used before definition") || err.message.contains("dominated"),
         "Error should mention use-before-def or dominance: {}",
         err.message
     );
@@ -481,4 +474,3 @@ block7(v4: i32):
         result
     );
 }
-

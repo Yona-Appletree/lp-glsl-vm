@@ -158,28 +158,29 @@ impl Function {
                     write!(f, "{:?}", inst_data.opcode)
                 }
             }
-            // Comparisons
-            Opcode::IcmpEq
-            | Opcode::IcmpNe
-            | Opcode::IcmpLt
-            | Opcode::IcmpLe
-            | Opcode::IcmpGt
-            | Opcode::IcmpGe => {
+            // Integer comparison with condition code
+            Opcode::Icmp { cond } => {
                 if inst_data.results.len() == 1 && inst_data.args.len() == 2 {
-                    let opname = match inst_data.opcode {
-                        Opcode::IcmpEq => "icmp_eq",
-                        Opcode::IcmpNe => "icmp_ne",
-                        Opcode::IcmpLt => "icmp_lt",
-                        Opcode::IcmpLe => "icmp_le",
-                        Opcode::IcmpGt => "icmp_gt",
-                        Opcode::IcmpGe => "icmp_ge",
-                        _ => unreachable!(),
-                    };
                     write!(
                         f,
-                        "v{} = {} v{}, v{}",
+                        "v{} = icmp {} v{}, v{}",
                         inst_data.results[0].index(),
-                        opname,
+                        cond,
+                        inst_data.args[0].index(),
+                        inst_data.args[1].index()
+                    )
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            // Floating point comparison with condition code
+            Opcode::Fcmp { cond } => {
+                if inst_data.results.len() == 1 && inst_data.args.len() == 2 {
+                    write!(
+                        f,
+                        "v{} = fcmp {} v{}, v{}",
+                        inst_data.results[0].index(),
+                        cond,
                         inst_data.args[0].index(),
                         inst_data.args[1].index()
                     )
@@ -207,7 +208,10 @@ impl Function {
                                 let val = f32::from_bits(*bits);
                                 write!(f, "v{} = {} {}", inst_data.results[0].index(), opname, val)
                             }
-                            Immediate::String(_) => write!(f, "{:?}", inst_data.opcode),
+                            Immediate::String(_)
+                            | Immediate::IntCondCode(_)
+                            | Immediate::FloatCondCode(_)
+                            | Immediate::TrapCode(_) => write!(f, "{:?}", inst_data.opcode),
                         }
                     } else {
                         write!(f, "{:?}", inst_data.opcode)
@@ -291,6 +295,35 @@ impl Function {
                 Ok(())
             }
             Opcode::Halt => write!(f, "halt"),
+            Opcode::Trap { code } => {
+                if let Some(Immediate::TrapCode(tc)) = inst_data.imm {
+                    write!(f, "trap {}", tc)
+                } else {
+                    write!(f, "trap {}", code)
+                }
+            }
+            Opcode::Trapz { code } => {
+                if inst_data.args.len() == 1 {
+                    if let Some(Immediate::TrapCode(tc)) = inst_data.imm {
+                        write!(f, "trapz v{}, {}", inst_data.args[0].index(), tc)
+                    } else {
+                        write!(f, "trapz v{}, {}", inst_data.args[0].index(), code)
+                    }
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            Opcode::Trapnz { code } => {
+                if inst_data.args.len() == 1 {
+                    if let Some(Immediate::TrapCode(tc)) = inst_data.imm {
+                        write!(f, "trapnz v{}, {}", inst_data.args[0].index(), tc)
+                    } else {
+                        write!(f, "trapnz v{}, {}", inst_data.args[0].index(), code)
+                    }
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
             Opcode::Call { callee } => {
                 write!(f, "call %{}(", callee)?;
                 for (i, arg) in inst_data.args.iter().enumerate() {
