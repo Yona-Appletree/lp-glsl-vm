@@ -305,27 +305,37 @@ pub struct VCode<I: MachInst> {
     insts: Vec<I>,
 
     /// Operands: flat array for regalloc2
-    /// Each operand has: (value, constraint, kind)
+    /// Each operand has: (vreg, constraint, kind)
     operands: Vec<Operand>,
 
     /// Operand ranges: per-instruction ranges in operands array
     operand_ranges: Ranges,
 
+    /// Clobbers: explicit clobber sets per instruction (for function calls, etc.)
+    clobbers: FxHashMap<InsnIndex, PRegSet>,
+
     /// Block structure
     block_ranges: Ranges,           // Per-block instruction ranges
-    block_succs: Vec<BlockIndex>,   // Successors
-    block_preds: Vec<BlockIndex>,    // Predecessors
-    block_params: Vec<VReg>,         // Block parameter VRegs
+    block_succ_range: Ranges,        // Per-block successor ranges
+    block_succs: Vec<BlockIndex>,   // Successors (flat array)
+    block_pred_range: Ranges,        // Per-block predecessor ranges
+    block_preds: Vec<BlockIndex>,    // Predecessors (flat array)
+    block_params_range: Ranges,      // Per-block parameter ranges
+    block_params: Vec<VReg>,         // Block parameter VRegs (flat array)
 
     /// Branch arguments (values passed to blocks)
     branch_block_args: Vec<VReg>,
     branch_block_arg_range: Ranges,
+    branch_block_arg_succ_range: Ranges,
 
     /// Entry block
     entry: BlockIndex,
 
+    /// Block lowering order
+    block_order: BlockLoweringOrder,
+
     /// ABI information
-    abi: Callee<ABIMachineSpec>,
+    abi: Callee<I::ABIMachineSpec>,
 
     /// Constants (inline or pool references)
     constants: VCodeConstants,
@@ -335,6 +345,11 @@ pub struct VCode<I: MachInst> {
 
     /// Relocations (function calls, etc.)
     relocations: Vec<VCodeReloc>,
+
+    // Optional fields (deferred):
+    // vreg_types: Vec<Type>,  // VReg types (add if needed for validation)
+    // srclocs: Vec<RelSourceLoc>,  // Source locations (deferred)
+    // debug_value_labels: Vec<(VReg, InsnIndex, InsnIndex, u32)>,  // Debug info (deferred)
 }
 
 /// Block metadata
@@ -367,6 +382,39 @@ struct VCodeReloc {
 - Constants stored (inline or pool references)
 - Block metadata for layout optimization
 - Relocations tracked for later fixup
+
+**VCode Structure Completeness**:
+
+Comparing with Cranelift's VCode, here's what we include vs. defer:
+
+**Included (Required for Basic Functionality)**:
+
+- ✅ `insts`: Machine instructions
+- ✅ `operands`: Flat operand array for regalloc2
+- ✅ `operand_ranges`: Per-instruction operand ranges
+- ✅ `clobbers`: Explicit clobber sets (for function calls)
+- ✅ `block_ranges`: Per-block instruction ranges
+- ✅ `block_succs` / `block_preds`: Block structure
+- ✅ `block_params`: Block parameter VRegs
+- ✅ `branch_block_args`: Branch argument VRegs
+- ✅ `entry`: Entry block
+- ✅ `abi`: ABI information
+- ✅ `constants`: Constant storage
+- ✅ `block_metadata`: Cold blocks, indirect targets, alignment
+- ✅ `relocations`: Function calls and other relocations
+- ✅ `block_order`: Block lowering order
+
+**Deferred (Optional for Initial Implementation)**:
+
+- ❌ `vreg_types`: VReg types (for type checking) - **Add if needed for validation**
+- ❌ `srclocs`: Source locations per instruction - **Deferred** (see notes)
+- ❌ `debug_tags`: Debug tags - **Deferred** (not needed initially)
+- ❌ `user_stack_maps`: Stack maps for safepoints - **Deferred** (GC not needed)
+- ❌ `debug_value_labels`: Value labels for debug info - **Deferred** (debug info later)
+- ❌ `facts`: Proof-carrying code facts - **Deferred** (advanced feature)
+- ❌ `emit_info`: ISA-specific emission info - **May need** (for instruction encoding)
+
+**Recommendation**: Start with the included fields. Add `vreg_types` if we need type validation, and `emit_info` if needed for RISC-V-specific emission details. All other fields can be added later if needed.
 
 ### 2. Machine Instruction Type
 
@@ -560,46 +608,192 @@ impl Lower {
 
 **File**: `crates/lpc-codegen/src/backend3/regalloc.rs` (ISA-agnostic)
 
+**Purpose**: Implement `regalloc2::Function` trait for VCode to enable register allocation.
+
+**Complete Implementation**:
+
 ```rust
-use regalloc2::{Function as RegallocFunction, ...};
+use regalloc2::{
+    Function as RegallocFunction,
+    InstRange,
+    Operand,
+    OperandKind,
+    PRegSet,
+    RegClass,
+    VReg,
+};
 
 /// Implement regalloc2::Function trait for VCode
-impl RegallocFunction for VCode<MachInst> {
+impl<I: MachInst> RegallocFunction for VCode<I> {
     type Inst = InsnIndex;
     type Block = BlockIndex;
     type VReg = VReg;
     type PReg = RealReg;
 
-    fn blocks(&self) -> &[BlockIndex] {
-        // Return all blocks
+    fn num_insts(&self) -> usize {
+        self.insts.len()
     }
 
-    fn block_insts(&self, block: BlockIndex) -> &[InsnIndex] {
-        // Return instruction indices for block
+    fn num_blocks(&self) -> usize {
+        self.block_ranges.len()
+    }
+
+    fn entry_block(&self) -> BlockIndex {
+        self.entry
+    }
+
+    fn block_insns(&self, block: BlockIndex) -> InstRange {
+        let range = self.block_ranges.get(block.index());
+        InstRange::new(
+            InsnIndex::new(range.start),
+            InsnIndex::new(range.end)
+        )
     }
 
     fn block_succs(&self, block: BlockIndex) -> &[BlockIndex] {
-        // Return successors
+        let range = self.block_succ_range.get(block.index());
+        &self.block_succs[range]
+    }
+
+    fn block_preds(&self, block: BlockIndex) -> &[BlockIndex] {
+        let range = self.block_pred_range.get(block.index());
+        &self.block_preds[range]
     }
 
     fn block_params(&self, block: BlockIndex) -> &[VReg] {
-        // Return block parameter VRegs
+        // Entry block params are handled by Args instruction, not block params
+        if block == self.entry {
+            return &[];
+        }
+        let range = self.block_params_range.get(block.index());
+        &self.block_params[range]
     }
 
-    fn inst_operands(&self, inst: InsnIndex) -> &[Operand] {
-        // Return operands for instruction
+    fn branch_blockparams(
+        &self,
+        block: BlockIndex,
+        _insn: InsnIndex,
+        succ_idx: usize
+    ) -> &[VReg] {
+        // Return the VRegs passed to a specific successor block
+        let succ_range = self.branch_block_arg_succ_range.get(block.index());
+        debug_assert!(succ_idx < succ_range.len());
+        let branch_block_args = self.branch_block_arg_range.get(
+            succ_range.start + succ_idx
+        );
+        &self.branch_block_args[branch_block_args]
     }
 
-    // ... implement all required methods ...
+    fn is_ret(&self, insn: InsnIndex) -> bool {
+        match self.insts[insn.index()].is_term() {
+            MachTerminator::Ret | MachTerminator::RetCall => true,
+            MachTerminator::Branch => false,
+            MachTerminator::None => false, // Could be trap, but not ret
+        }
+    }
+
+    fn is_branch(&self, insn: InsnIndex) -> bool {
+        match self.insts[insn.index()].is_term() {
+            MachTerminator::Branch => true,
+            _ => false,
+        }
+    }
+
+    fn inst_operands(&self, insn: InsnIndex) -> &[Operand] {
+        let range = self.operand_ranges.get(insn.index());
+        &self.operands[range]
+    }
+
+    fn inst_clobbers(&self, insn: InsnIndex) -> PRegSet {
+        // Return explicitly clobbered registers for this instruction
+        // (e.g., from function calls)
+        self.clobbers.get(&insn).cloned().unwrap_or_default()
+    }
+
+    fn num_vregs(&self) -> usize {
+        self.vreg_types.len()
+    }
+
+    fn debug_value_labels(&self) -> &[(VReg, InsnIndex, InsnIndex, u32)] {
+        // For debug info (optional, can return empty slice)
+        &[]
+    }
+
+    fn spillslot_size(&self, regclass: RegClass) -> usize {
+        // RISC-V 32: all GPRs are 4 bytes
+        self.abi.get_spillslot_size(regclass) as usize
+    }
+
+    fn allow_multiple_vreg_defs(&self) -> bool {
+        // Allow multiple defs of the same VReg (needed for some backends)
+        true
+    }
+}
+```
+
+**Operand Collection During Lowering**:
+
+Operands are collected during lowering by calling `get_operands()` on each `MachInst`:
+
+```rust
+impl Lower {
+    fn lower_inst(&mut self, inst: InstEntity) {
+        let inst_data = self.func.dfg.inst_data(inst).unwrap();
+
+        // Create machine instruction
+        let mach_inst = match inst_data.opcode {
+            Opcode::Iadd => {
+                let rs1 = self.value_to_vreg[&inst_data.args[0]];
+                let rs2 = self.value_to_vreg[&inst_data.args[1]];
+                let rd = self.value_to_vreg[&inst_data.results[0]];
+                MachInst::Add { rd, rs1, rs2 }
+            }
+            // ... other opcodes ...
+        };
+
+        // Collect operands for regalloc2
+        let inst_idx = self.vcode.insts.len();
+        mach_inst.get_operands(&mut |reg: &mut Reg, constraint, kind, _pos| {
+            self.vcode.operands.push(Operand {
+                vreg: reg.to_vreg(),
+                constraint,
+                kind, // Use, Def, or Modify
+            });
+        });
+
+        // Record operand range for this instruction
+        let operand_start = self.vcode.operands.len() - /* operand count */;
+        let operand_end = self.vcode.operands.len();
+        self.vcode.operand_ranges.set(inst_idx, operand_start..operand_end);
+
+        // Push instruction
+        self.vcode.insts.push(mach_inst);
+    }
 }
 ```
 
 **Key Features**:
 
-- Implements `regalloc2::Function` trait
-- Provides block structure to regalloc2
-- Provides operand information
-- Configures ABI machine spec
+- Implements all required `regalloc2::Function` trait methods
+- Provides block structure (entry, successors, predecessors, parameters)
+- Provides instruction operands with constraints (use/def/modify)
+- Provides clobber information (for function calls)
+- Handles block parameters (phi-like values passed between blocks)
+- Handles branch arguments (values passed to successor blocks)
+
+**ABI Machine Spec Configuration**:
+
+The ABI machine spec is provided separately via `VCode::abi.machine_env()`:
+
+```rust
+impl VCode<MachInst> {
+    fn run_regalloc(&self) -> regalloc2::Output {
+        let machine_env = self.abi.machine_env();
+        regalloc2::run(self, machine_env, &regalloc2::RegallocOptions::default())
+            .expect("register allocation")
+    }
+}
+```
 
 ### 5. ABI Machine Spec
 
@@ -1135,21 +1329,125 @@ impl EmitState {
 
 **InstBuffer Enhancements Needed**:
 
-The current `InstBuffer` needs enhancements for label-based emission:
+The current `InstBuffer` needs enhancements for label-based emission. Since we're using structured instructions (not raw bytes), we can use a simpler approach than Cranelift's byte-patching:
 
 ```rust
+use crate::isa::riscv32::Inst;
+
+/// Type representing a block label (essentially a block index)
+pub type MachLabel = u32; // BlockIndex
+
+/// Type representing a code offset in bytes
+pub type CodeOffset = u32;
+
+/// Branch type for patching
+pub enum BranchType {
+    /// Conditional branch (BEQ, BNE, etc.) - 12-bit signed offset
+    Conditional,
+    /// Unconditional jump (JAL) - 20-bit signed offset
+    Unconditional,
+}
+
 impl InstBuffer {
     /// Get current code offset (in bytes)
-    fn cur_offset(&self) -> CodeOffset { ... }
+    pub fn cur_offset(&self) -> CodeOffset {
+        (self.instructions.len() * 4) as CodeOffset
+    }
 
     /// Emit a branch instruction with a label target (not yet resolved offset)
-    /// The instruction will be patched later when the label is bound
-    fn emit_branch_with_label(&mut self, branch: MachInst, label: MachLabel) { ... }
+    /// Emits the branch with placeholder offset (0), returns instruction index for patching
+    ///
+    /// The branch instruction should have `imm: 0` as placeholder.
+    /// The actual offset will be patched later via `patch_branch()`.
+    pub fn emit_branch_with_label(
+        &mut self,
+        branch: Inst
+    ) -> usize {
+        // Verify it's a branch instruction
+        match &branch {
+            Inst::Beq { .. } | Inst::Bne { .. } | Inst::Blt { .. } | Inst::Bge { .. }
+            | Inst::Jal { .. } => {}
+            _ => panic!("Not a branch instruction: {:?}", branch),
+        }
 
-    /// Patch a branch instruction at the given offset with the computed target offset
-    fn patch_branch(&mut self, offset: CodeOffset, target_offset: CodeOffset, branch_type: BranchType) { ... }
+        let inst_idx = self.instructions.len();
+        self.emit(branch);
+        inst_idx
+    }
+
+    /// Patch a branch instruction at the given instruction index
+    /// Computes the offset from branch location to target and patches the instruction
+    ///
+    /// # Panics
+    ///
+    /// Panics if the offset is out of range for the branch type.
+    pub fn patch_branch(
+        &mut self,
+        inst_idx: usize,
+        target_offset: CodeOffset,
+        branch_type: BranchType,
+    ) {
+        let branch_offset = (inst_idx * 4) as CodeOffset;
+        let delta = target_offset as i32 - branch_offset as i32;
+
+        // RISC-V offsets are in 2-byte units (instructions are 4 bytes, but offset is /2)
+        let offset_in_units = delta / 2;
+
+        // Get the instruction
+        let inst = &mut self.instructions[inst_idx];
+
+        match (inst, branch_type) {
+            // Conditional branches: 12-bit signed offset (in 2-byte units)
+            (Inst::Beq { imm, .. } | Inst::Bne { imm, .. }
+             | Inst::Blt { imm, .. } | Inst::Bge { imm, .. }, BranchType::Conditional) => {
+                assert!(
+                    offset_in_units >= -2048 && offset_in_units <= 2047,
+                    "Branch offset {} out of range for conditional branch (max ±4KB)",
+                    offset_in_units * 2
+                );
+                *imm = offset_in_units as i32;
+            }
+            // Unconditional jumps: 20-bit signed offset (in 2-byte units)
+            (Inst::Jal { imm, .. }, BranchType::Unconditional) => {
+                assert!(
+                    offset_in_units >= -524288 && offset_in_units <= 524287,
+                    "Jump offset {} out of range for unconditional jump (max ±1MB)",
+                    offset_in_units * 2
+                );
+                *imm = offset_in_units as i32;
+            }
+            _ => panic!("Mismatch between instruction type and branch type"),
+        }
+    }
+
+    /// Patch a function call instruction (JALR) with target address
+    /// This is for external relocations, not internal branches
+    pub fn fixup_call(&mut self, inst_idx: usize, target_addr: u32) {
+        // For now, function calls use JALR with register (indirect)
+        // The address should be loaded into a register first
+        // This is a placeholder - actual implementation depends on call ABI
+        // TODO: Implement based on call ABI requirements
+    }
 }
 ```
+
+**Simplified Approach**:
+
+Since we're using structured instructions (not raw bytes), we can:
+
+1. Emit branches with placeholder offsets (0)
+2. Store instruction indices where branches are (in EmitState)
+3. Patch instructions directly when labels are bound (by modifying the `Inst` enum in-place)
+
+This is simpler than Cranelift's byte-patching approach and sufficient for our needs.
+
+**Key Points**:
+
+- RISC-V branch offsets are in 2-byte units (even though instructions are 4 bytes)
+- Conditional branches: ±4KB range (12-bit signed × 2 bytes)
+- Unconditional jumps: ±1MB range (20-bit signed × 2 bytes)
+- Patching happens by modifying the `imm` field of the `Inst` enum
+- We assume functions < 4KB for now (panic if out of range)
 
 **Branch Range Limits** (RISC-V 32):
 
@@ -1204,180 +1502,15 @@ trait MachInst {
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Week 1)
+The implementation is broken down into 5 phases. Each phase has its own detailed plan document:
 
-**Goal**: Basic structure and lowering
+- **[Phase 1: Foundation](17-backend3-phase1.md)** (Week 1) - Basic structure and lowering
+- **[Phase 2: Regalloc2 Integration](17-backend3-phase2.md)** (Week 2) - Register allocation working
+- **[Phase 3: Emission](17-backend3-phase3.md)** (Week 3) - Generate machine code
+- **[Phase 4: Control Flow](17-backend3-phase4.md)** (Week 4) - Branches and calls
+- **[Phase 5: Advanced Features](17-backend3-phase5.md)** (Week 5+) - Complete feature set
 
-1. **Create VCode structure** (ISA-agnostic)
-
-   - `backend3/vcode.rs`: Core VCode type (generic over MachInst)
-   - `backend3/vcode_builder.rs`: Builder for constructing VCode
-   - Basic block and instruction tracking
-   - Block metadata (cold, indirect targets)
-   - Relocation tracking
-
-2. **Block lowering order** (ISA-agnostic)
-
-   - `backend3/blockorder.rs`: Block ordering computation
-   - Critical edge detection
-   - Reverse postorder computation
-   - Basic implementation (no cold block optimization yet)
-
-3. **Create machine instruction type** (RISC-V 32-specific)
-
-   - `isa/riscv32/backend3/inst.rs`: MachInst enum with VReg operands
-   - Implement basic instructions (add, addi, lw, sw)
-   - Implement MachInst trait for regalloc2 (operand visitor)
-
-4. **Basic lowering** (ISA-agnostic)
-
-   - `backend3/lower.rs`: Lower simple instructions (iconst, iadd, isub)
-   - Use block lowering order
-   - Create virtual registers for values
-   - Build VCode structure
-   - Handle edge blocks (phi moves)
-   - Uses MachInst trait (implemented by RISC-V 32 MachInst)
-
-5. **Constant handling** (ISA-agnostic)
-   - `backend3/constants.rs`: Constant materialization
-   - Inline constants (12-bit immediates)
-   - Large constants (lui + addi)
-
-**Deliverable**: Can lower simple arithmetic functions to VCode
-
-### Phase 2: Regalloc2 Integration (Week 2)
-
-**Goal**: Register allocation working
-
-1. **Implement regalloc2::Function trait** (ISA-agnostic)
-
-   - `backend3/regalloc.rs`: Trait implementation
-   - Block structure methods
-   - Operand methods
-
-2. **ABI machine spec** (RISC-V 32-specific)
-
-   - `isa/riscv32/backend3/abi.rs`: Riscv32ABI implementation
-   - Register classes
-   - Callee-saved vs caller-saved
-
-3. **Test regalloc2**
-   - Run regalloc2 on simple VCode
-   - Verify allocations and edits
-
-**Deliverable**: Can allocate registers for simple functions
-
-### Phase 3: Emission (Week 3)
-
-**Goal**: Generate machine code
-
-1. **Emission state tracking** (ISA-agnostic)
-
-   - Track SP offsets for stack-relative addressing
-   - Track block offsets for branch targets
-   - Track relocations
-
-2. **Frame layout computation** (ISA-agnostic)
-
-   - Compute frame size from regalloc spills
-   - Compute ABI requirements
-   - Determine clobbered callee-saved registers
-
-3. **Prologue/epilogue generation** (ISA-agnostic, uses ISA-specific ABI)
-
-   - Generate prologue: setup area → SP adjustment → callee-saved saves
-   - Generate epilogue: callee-saved restores → SP restore → return
-   - Uses ABI trait for frame layout details
-
-4. **Emission implementation** (ISA-agnostic)
-
-   - `backend3/emit.rs`: Apply allocations and emit code
-   - Handle edits (moves, spills, reloads)
-   - Iterate blocks and instructions
-   - Record relocations
-
-5. **Instruction conversion** (RISC-V 32-specific)
-
-   - Convert VReg operands to physical registers in MachInst
-   - Handle stack slots (compute offsets)
-   - Implement MachInst methods for emission
-
-6. **End-to-end test**
-   - Lower → Regalloc → Emit → Execute
-
-**Deliverable**: Can compile simple functions end-to-end
-
-### Phase 4: Control Flow (Week 4)
-
-**Goal**: Branches and calls
-
-1. **Branch lowering**
-
-   - Lower Jump and Br instructions
-   - Handle block parameters (phi moves in edge blocks)
-   - Two-dest branch representation
-   - Record branch relocations
-
-2. **Branch resolution** (ISA-agnostic)
-
-   - `backend3/branch.rs`: Resolve two-dest branches
-   - Convert to single-dest branches during emission
-   - Basic branch simplification (empty block elimination)
-
-3. **Call lowering**
-
-   - Lower Call instructions
-   - Argument preparation (registers + stack)
-   - Return value handling
-   - Record function call relocations
-
-4. **Multi-return support**
-
-   - Return area mechanism
-   - Handle >2 return values
-   - Return area pointer passing
-
-5. **Relocation fixup** (ISA-agnostic)
-
-   - `backend3/reloc.rs`: Relocation handling
-   - Fix function call addresses
-   - Resolve branch targets
-
-**Deliverable**: Can compile functions with branches and calls
-
-### Phase 5: Advanced Features (Week 5+)
-
-**Goal**: Complete feature set
-
-1. **Memory operations**
-
-   - Load/store lowering
-   - Stack frame access (SP-relative addressing)
-   - Frame pointer usage (if needed)
-
-2. **Block layout optimization**
-
-   - Cold block sinking
-   - Fallthrough optimization
-   - Block reordering based on branch probabilities
-
-3. **Branch optimization**
-
-   - Advanced branch simplification
-   - Unconditional branch elimination
-   - Branch target optimization
-
-4. **Constant pool** (optional)
-
-   - Large constant storage in data section
-   - PC-relative constant loading
-
-5. **Module compilation**
-   - Multi-function compilation
-   - Function address resolution
-   - Cross-function relocation fixup
-
-**Deliverable**: Complete backend matching current backend features
+See the individual phase documents for detailed task breakdowns, testing strategies, and success criteria.
 
 ## Additional Components
 
@@ -1409,54 +1542,119 @@ trait MachInst {
 
 **Purpose**: Handle constant materialization and storage.
 
-**Strategies**:
+**Constant Materialization Strategies**:
 
-1. **Inline Constants**: Small immediates embedded in instructions
+1. **Inline Constants**: Small immediates embedded directly in instructions
 
-   - RISC-V: 12-bit signed immediates for `addi`, `lw`, `sw`
-   - Larger constants: `lui` + `addi` sequence
+   - **RISC-V 32**: 12-bit signed immediates for `addi`, `lw`, `sw`, etc.
+   - **Range**: -2048 to +2047 (fits in 12 bits)
+   - **Decision**: Use inline if `value >= -2048 && value <= 2047`
+   - **No extra instructions needed**: Constant is part of instruction encoding
 
-2. **Constant Pool** (future): Large constants stored in data section
-   - Used for 64-bit constants, floating point constants
-   - Loaded via PC-relative addressing
+2. **LUI + ADDI Sequence**: Large constants that don't fit in 12 bits
 
-**Implementation**:
+   - **RISC-V 32**: Use `lui` (load upper 20 bits) + `addi` (add lower 12 bits)
+   - **Range**: Full 32-bit signed range
+   - **Decision**: Use if `value < -2048 || value > 2047`
+   - **Cost**: 2 instructions (lui + addi)
+
+3. **Constant Pool** (deferred): Very large constants or frequently used constants
+   - **Future**: Store in data section, load via PC-relative addressing
+   - **Use cases**: 64-bit constants, floating point constants, shared constants
+   - **Not needed for initial implementation**
+
+**Decision Criteria**:
 
 ```rust
-pub enum Constant {
-    /// Inline immediate (fits in instruction encoding)
-    Inline(i32),
-    /// Large constant (requires lui + addi)
-    Large(i32),
-    /// Constant pool reference (future)
-    PoolRef(usize),
-}
-
 impl Lower {
+    /// Determine if a constant fits in 12-bit signed immediate
+    fn fits_in_12_bits(&self, value: i32) -> bool {
+        value >= -2048 && value <= 2047
+    }
+
+    /// Materialize a constant, choosing the appropriate strategy
     fn materialize_constant(&mut self, value: i32) -> VReg {
         if self.fits_in_12_bits(value) {
-            // Use inline immediate
-            let vreg = self.vcode.alloc_vreg();
-            // Will be handled during instruction lowering
-            vreg
+            // Strategy 1: Inline immediate
+            // The constant will be embedded directly in the instruction
+            // during lowering (e.g., addi rd, rs1, value)
+            // Return a VReg that represents this constant value
+            // (The actual instruction will use the immediate directly)
+            self.materialize_inline_constant(value)
         } else {
-            // Materialize via lui + addi
+            // Strategy 2: LUI + ADDI sequence
             self.materialize_large_constant(value)
         }
     }
 
+    /// Materialize inline constant (fits in 12 bits)
+    /// Returns a VReg that will be used in instructions with immediate operands
+    fn materialize_inline_constant(&mut self, value: i32) -> VReg {
+        // For inline constants, we don't need to emit instructions
+        // The constant is embedded in the instruction itself
+        // However, we still need a VReg to represent the value in the IR
+        // This VReg will be marked as a constant/immediate in the instruction
+        let vreg = self.vcode.alloc_vreg();
+        // Store constant value for later use during instruction emission
+        self.vcode.record_constant(vreg, Constant::Inline(value));
+        vreg
+    }
+
+    /// Materialize large constant via LUI + ADDI
     fn materialize_large_constant(&mut self, value: i32) -> VReg {
         let vreg = self.vcode.alloc_vreg();
-        let upper = (value >> 12) & 0xFFFFF;
-        let lower = value & 0xFFF;
 
-        // lui rd, upper
-        // addi rd, rd, lower
-        // ...
+        // Split value into upper 20 bits and lower 12 bits
+        // Note: RISC-V sign-extends the lower 12 bits, so we need to handle sign correctly
+        let lower_12 = value & 0xFFF;
+        let upper_20 = (value >> 12) & 0xFFFFF;
+
+        // If lower 12 bits have sign bit set (bit 11), we need to adjust upper
+        // because addi sign-extends the immediate
+        let upper = if (lower_12 & 0x800) != 0 {
+            // Sign bit set in lower, increment upper
+            (upper_20 + 1) & 0xFFFFF
+        } else {
+            upper_20
+        };
+
+        // Emit LUI: load upper 20 bits
+        let temp_vreg = self.vcode.alloc_vreg();
+        self.vcode.push(MachInst::Lui {
+            rd: temp_vreg,
+            imm: (upper << 12) as u32,
+        });
+
+        // Emit ADDI: add lower 12 bits (sign-extended)
+        self.vcode.push(MachInst::Addi {
+            rd: vreg,
+            rs1: temp_vreg,
+            imm: lower_12 as i32,
+        });
+
         vreg
     }
 }
 ```
+
+**Special Cases**:
+
+1. **Zero Constant**: Can use `x0` register directly (no instruction needed)
+2. **Small Positive Constants**: Use `addi rd, x0, imm` (loads immediate into register)
+3. **Negative Constants**: Use `addi rd, x0, imm` (sign-extended, works for -2048 to -1)
+
+**Future Optimizations** (Deferred):
+
+- **Constant Pool**: For frequently used large constants
+- **Constant Deduplication**: Share constants across instructions
+- **64-bit Constants**: Would need constant pool or multiple instructions
+
+**Implementation Notes**:
+
+- Constants are materialized during lowering (not during emission)
+- Inline constants don't require separate instructions
+- Large constants require 2 instructions (lui + addi)
+- The VReg for a constant represents the value, not a register (until regalloc assigns one)
 
 ### 9. Relocation Handling
 
@@ -1904,6 +2102,18 @@ crates/lpc-codegen/src/isa/riscv32/backend3/
 
 ## Related Documents
 
+### Implementation Plans
+
+- `docs/plans/17-backend3-phase1.md` - Phase 1: Foundation
+- `docs/plans/17-backend3-phase2.md` - Phase 2: Regalloc2 Integration
+- `docs/plans/17-backend3-phase3.md` - Phase 3: Emission
+- `docs/plans/17-backend3-phase4.md` - Phase 4: Control Flow
+- `docs/plans/17-backend3-phase5.md` - Phase 5: Advanced Features
+
+### Supporting Documents
+
+- `docs/plans/17-backend3-notes.md` - Remaining questions and open issues
+- `docs/plans/17-backend3-deferred.md` - Deferred features and optimizations
 - `docs/plans/16-lpir-improvements-for-backend.md` - LPIR improvements needed
 - `docs/plans/10.5-call-handling.md` - Call/return handling details
 - `docs/riscv32-abi.md` - RISC-V 32-bit ABI specification

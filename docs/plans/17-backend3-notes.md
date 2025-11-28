@@ -52,18 +52,15 @@ This document tracks the big remaining questions and open issues for backend3 im
 
 **Question**: How exactly do we implement `regalloc2::Function` trait for VCode?
 
-**Context**:
-- Need to provide block structure, operands, constraints to regalloc2
-- Need to specify register classes and ABI requirements
-- Need to handle block parameters correctly
+**Answer**: Complete implementation added to plan:
+- All required trait methods implemented
+- Operand collection via `MachInst::get_operands()` during lowering
+- Block structure provided (entry, succs, preds, params)
+- Branch arguments handled via `branch_blockparams()`
+- Clobbers provided via `inst_clobbers()`
+- ABI machine spec provided via `VCode::abi.machine_env()`
 
-**Details Needed**:
-- How to map operand constraints (use/def/modify) from MachInst?
-- How to specify register classes for different value types?
-- How to handle block parameters in regalloc2?
-- What ABI configuration is needed?
-
-**Status**: ⚠️ Needs implementation details
+**Status**: ✅ Resolved - Complete implementation documented in plan
 
 ---
 
@@ -85,17 +82,12 @@ This document tracks the big remaining questions and open issues for backend3 im
 
 **Question**: Are we missing any fields in VCode compared to Cranelift's implementation?
 
-**Context**:
-- Cranelift's VCode has many fields (source locations, debug tags, stack maps, etc.)
-- Need to ensure we have what we need, but not over-engineer
+**Answer**: Review completed, comparison added to plan:
+- **Included**: All required fields for basic functionality (insts, operands, blocks, abi, etc.)
+- **Deferred**: Optional fields (vreg_types, srclocs, debug_tags, user_stack_maps, debug_value_labels, facts)
+- **Recommendation**: Start with included fields, add `vreg_types` if needed for validation, add others later if needed
 
-**Fields to Consider**:
-- Source locations per instruction (for debugging)?
-- Debug tags (if needed)?
-- User stack maps (for safepoints/garbage collection)?
-- VReg types (for type checking)?
-
-**Status**: ⚠️ Needs review
+**Status**: ✅ Resolved - Structure reviewed and documented in plan
 
 ---
 
@@ -103,17 +95,14 @@ This document tracks the big remaining questions and open issues for backend3 im
 
 **Question**: When do we use inline constants vs. lui+addi vs. constant pool?
 
-**Context**:
-- Small constants can be inline (12-bit immediates)
-- Large constants need lui+addi sequence
-- Very large constants might need constant pool (deferred)
+**Answer**: Decision criteria added to plan:
+- **Inline**: If `value >= -2048 && value <= 2047` (12-bit signed)
+- **LUI + ADDI**: If `value < -2048 || value > 2047` (full 32-bit range)
+- **Constant Pool**: Deferred (not needed for initial implementation)
+- Special cases: Zero uses `x0`, small positives use `addi rd, x0, imm`
+- 64-bit constants: Deferred (would need constant pool)
 
-**Details Needed**:
-- Decision criteria for each strategy
-- How to handle 64-bit constants (if needed)?
-- When to use constant pool (if implemented)?
-
-**Status**: ⚠️ Needs decision criteria
+**Status**: ✅ Resolved - Decision criteria documented in plan
 
 ---
 
@@ -121,17 +110,14 @@ This document tracks the big remaining questions and open issues for backend3 im
 
 **Question**: Do we need source location tracking, and if so, how?
 
-**Context**:
-- Useful for debugging and error reporting
-- Cranelift tracks source locations per instruction
-- May not be needed initially
+**Answer**: Decision - **Deferred for initial implementation**
+- Not needed for correctness
+- Can be added later if debugging/error reporting requires it
+- Would add `srclocs: Vec<RelSourceLoc>` field to VCode
+- Track through lowering, emit during code generation
+- See deferred features document for details
 
-**Details Needed**:
-- Do we need this for initial implementation?
-- How to track source locations through lowering?
-- How to emit source location info in machine code?
-
-**Status**: ❓ Optional - decide if needed
+**Status**: ✅ Resolved - Decision: Defer to later
 
 ---
 
@@ -141,13 +127,16 @@ This document tracks the big remaining questions and open issues for backend3 im
 
 **Question**: What exactly needs to be added to InstBuffer for label-based emission?
 
-**Details Needed**:
-- Exact API for `emit_branch_with_label()` and `patch_branch()`
-- How to store branch instructions with unresolved labels?
-- How to patch instructions after emission?
-- Do we need to change instruction encoding to support patching?
+**Answer**: API design added to plan:
+- `cur_offset()`: Get current code offset in bytes
+- `emit_branch_with_label()`: Emit branch with placeholder offset, returns instruction index
+- `patch_branch()`: Patch branch instruction at given index with computed offset
+- Uses structured instructions (patch `imm` field directly)
+- RISC-V offsets are in 2-byte units
+- Conditional: ±4KB, Unconditional: ±1MB
+- Panics if out of range (assumes < 4KB functions)
 
-**Status**: ⚠️ Needs API design
+**Status**: ✅ Resolved - API design documented in plan
 
 ---
 
@@ -155,17 +144,14 @@ This document tracks the big remaining questions and open issues for backend3 im
 
 **Question**: How do we validate that branches are within range, and what to do if not?
 
-**Context**:
-- Conditional branches: ±4KB
-- Unconditional jumps: ±1MB
-- Currently assuming < 4KB functions
+**Answer**: Validation strategy added to plan:
+- Check during `patch_branch()` - assert if out of range
+- Conditional branches: assert ±4KB range
+- Unconditional jumps: assert ±1MB range
+- Currently: Panic if out of range (assumes < 4KB functions)
+- Future: Can add veneer/island insertion (deferred feature)
 
-**Details Needed**:
-- When to check branch ranges?
-- What to do if out of range? (panic? add veneer? reorder blocks?)
-- How to detect this during emission?
-
-**Status**: ⚠️ Needs validation strategy
+**Status**: ✅ Resolved - Validation strategy documented in plan
 
 ---
 
