@@ -138,7 +138,7 @@ mod tests {
     fn test_function_creation() {
         let sig = Signature::new(vec![Type::I32, Type::I32], vec![Type::I32]);
         let func = Function::new(sig.clone());
-        // Note: Can't compare functions directly due to f64 in Inst
+        // Note: Can't compare functions directly due to f32 in Inst
         assert_eq!(func.block_count(), 0);
     }
 
@@ -150,7 +150,7 @@ mod tests {
         let index = func.add_block(block.clone());
         assert_eq!(index, 0);
         assert_eq!(func.block_count(), 1);
-        // Note: Can't compare blocks directly due to f64 in Inst
+        // Note: Can't compare blocks directly due to f32 in Inst
         assert_eq!(func.block_count(), 1);
     }
 
@@ -160,7 +160,7 @@ mod tests {
         let mut func = Function::new(sig);
         let block = Block::new();
         func.add_block(block.clone());
-        // Note: Can't compare blocks directly due to f64 in Inst
+        // Note: Can't compare blocks directly due to f32 in Inst
         assert!(func.entry_block().is_some());
     }
 }

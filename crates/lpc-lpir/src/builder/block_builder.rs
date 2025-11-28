@@ -101,10 +101,10 @@ impl<'a> BlockBuilder<'a> {
     }
 
     /// Floating point constant: result = value
-    pub fn fconst(&mut self, result: Value, value: f64) {
+    pub fn fconst(&mut self, result: Value, value: f32) {
         self.push_inst(Inst::Fconst {
             result,
-            value_bits: value.to_bits(), // f64::to_bits() is in core
+            value_bits: value.to_bits(), // f32::to_bits() returns u32
         });
     }
 

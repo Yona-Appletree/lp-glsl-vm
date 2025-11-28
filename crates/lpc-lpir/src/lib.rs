@@ -1,7 +1,7 @@
 //! RISC-V 5 Intermediate Representation (IR).
 //!
 //! This crate defines the core IR types for the compiler:
-//! - Types (i32, i64, f32, f64, etc.)
+//! - Types (i32, u32, f32, etc.)
 //! - Values (SSA value identifiers)
 //! - Instructions (iadd, isub, iconst, return, etc.)
 //! - Blocks (basic blocks)

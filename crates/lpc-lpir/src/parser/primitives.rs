@@ -26,17 +26,16 @@ pub(crate) fn integer(input: &str) -> IResult<&str, i64> {
 }
 
 /// Parse a float literal
-pub(crate) fn float(input: &str) -> IResult<&str, f64> {
-    double(input)
+pub(crate) fn float(input: &str) -> IResult<&str, f32> {
+    map(double, |f: f64| f as f32)(input)
 }
 
-/// Parse a type (i32, i64, f32, f64)
+/// Parse a type (i32, u32, f32)
 pub(crate) fn parse_type(input: &str) -> IResult<&str, Type> {
     alt((
         map(tag("i32"), |_| Type::I32),
-        map(tag("i64"), |_| Type::I64),
+        map(tag("u32"), |_| Type::U32),
         map(tag("f32"), |_| Type::F32),
-        map(tag("f64"), |_| Type::F64),
     ))(input)
 }
 
@@ -85,17 +84,16 @@ mod tests {
 
     #[test]
     fn test_float() {
-        assert_eq!(float("3.14"), Ok(("", 3.14)));
-        assert_eq!(float("-3.14"), Ok(("", -3.14)));
-        assert_eq!(float("0.0"), Ok(("", 0.0)));
+        assert_eq!(float("3.14"), Ok(("", 3.14f32)));
+        assert_eq!(float("-3.14"), Ok(("", -3.14f32)));
+        assert_eq!(float("0.0"), Ok(("", 0.0f32)));
     }
 
     #[test]
     fn test_parse_type() {
         assert_eq!(parse_type("i32"), Ok(("", Type::I32)));
-        assert_eq!(parse_type("i64"), Ok(("", Type::I64)));
+        assert_eq!(parse_type("u32"), Ok(("", Type::U32)));
         assert_eq!(parse_type("f32"), Ok(("", Type::F32)));
-        assert_eq!(parse_type("f64"), Ok(("", Type::F64)));
     }
 
     #[test]
@@ -125,6 +123,7 @@ mod tests {
     #[test]
     fn test_integer_overflow() {
         // Test that very large integers fail to parse (would overflow i64)
+        // Note: integer() still uses i64 for parsing, but IR values are i32/u32
         let result = integer("999999999999999999999999999999999999999");
         assert!(result.is_err(), "Should fail on overflow");
     }

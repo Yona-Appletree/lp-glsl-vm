@@ -82,8 +82,8 @@ pub enum Inst {
     /// Integer constant: result = value
     Iconst { result: Value, value: i64 },
     /// Floating point constant: result = value
-    /// Note: Uses u64 to represent f64 bits for Eq compatibility
-    Fconst { result: Value, value_bits: u64 },
+    /// Note: Uses u32 to represent f32 bits for Eq compatibility
+    Fconst { result: Value, value_bits: u32 },
 
     // Control flow
     /// Jump to block
@@ -305,9 +305,9 @@ impl fmt::Display for Inst {
                 write!(f, "v{} = iconst {}", result.index(), value)
             }
             Inst::Fconst { result, value_bits } => {
-                // Decode f64 from bits
-                let f64_value = f64::from_bits(*value_bits);
-                write!(f, "v{} = fconst {}", result.index(), f64_value)
+                // Decode f32 from bits
+                let f32_value = f32::from_bits(*value_bits);
+                write!(f, "v{} = fconst {}", result.index(), f32_value)
             }
             Inst::Jump { target, args } => {
                 write!(f, "jump block{}", target)?;
@@ -428,7 +428,7 @@ mod tests {
             arg1: v1,
             arg2: v2,
         };
-        // Note: Can't compare Inst directly due to f64, but we can test methods
+        // Note: Can't compare Inst directly due to f32 in Fconst, but we can test methods
         let results = inst.results();
         let args = inst.args();
         assert_eq!(results.len(), 1);

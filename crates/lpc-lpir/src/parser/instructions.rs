@@ -290,6 +290,11 @@ mod tests {
         let (remaining, inst) = result.unwrap();
         assert_eq!(remaining, "", "Should consume all input");
         assert!(matches!(inst, Inst::Fconst { .. }));
+        // Verify it's f32 (value_bits is u32)
+        if let Inst::Fconst { value_bits, .. } = inst {
+            let f32_value = f32::from_bits(value_bits);
+            assert!((f32_value - 3.14f32).abs() < 0.01);
+        }
     }
 
     #[test]

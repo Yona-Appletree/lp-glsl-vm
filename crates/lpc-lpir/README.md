@@ -8,7 +8,7 @@ LPIR is a SSA-based intermediate representation designed for code generation tar
 - **Basic Blocks**: Control flow via basic blocks with parameters (phi nodes)
 - **Explicit Parameter Passing**: Values must be explicitly passed to blocks via jump/branch arguments
 - **Text Format**: Human-readable IR syntax with parsing support
-- **Type System**: Supports i32, i64, f32, f64 types
+- **Type System**: Supports i32, u32, f32 types
 
 ## Validation
 
