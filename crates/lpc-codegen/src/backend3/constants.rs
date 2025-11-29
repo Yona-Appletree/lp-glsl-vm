@@ -43,6 +43,20 @@ fn fits_in_12_bits(value: i32) -> bool {
 }
 
 /// Materialize large constant via LUI + ADDI
+///
+/// This implements the standard RISC-V constant materialization algorithm:
+/// 1. Split the 32-bit value into upper 20 bits and lower 12 bits
+/// 2. If the lower 12 bits have the sign bit set (bit 11), increment the upper bits
+///    because ADDI sign-extends its immediate operand
+/// 3. Emit LUI to load the upper 20 bits (shifted left by 12)
+/// 4. Emit ADDI to add the lower 12 bits (which will be sign-extended)
+///
+/// Example: For value 0x12345800:
+/// - lower_12 = 0x800 (sign bit set)
+/// - upper_20 = 0x12345, adjusted to 0x12346
+/// - LUI loads 0x12346000
+/// - ADDI adds 0x800 (sign-extended to 0xFFFFF800)
+/// - Result: 0x12346000 + 0xFFFFF800 = 0x12345800 ✓
 fn materialize_large_constant<I: MachInst, FLui, FAddi>(
     vcode: &mut VCodeBuilder<I>,
     value: i32,
@@ -57,26 +71,27 @@ where
     let vreg = vcode.alloc_vreg();
 
     // Split value into upper 20 bits and lower 12 bits
-    // Note: RISC-V sign-extends the lower 12 bits, so we need to handle sign correctly
+    // Note: RISC-V sign-extends the lower 12 bits in ADDI, so we need to handle sign correctly
     let lower_12 = value & 0xFFF;
     let upper_20 = (value >> 12) & 0xFFFFF;
 
     // If lower 12 bits have sign bit set (bit 11), we need to adjust upper
-    // because addi sign-extends the immediate
+    // because ADDI sign-extends the immediate, effectively subtracting 0x1000
+    // when bit 11 is set. To compensate, we increment the upper bits.
     let upper = if (lower_12 & 0x800) != 0 {
-        // Sign bit set in lower, increment upper
+        // Sign bit set in lower, increment upper to compensate for sign extension
         (upper_20 + 1) & 0xFFFFF
     } else {
         upper_20
     };
 
-    // Emit LUI: load upper 20 bits
+    // Emit LUI: load upper 20 bits (shifted left by 12)
     let temp_vreg = vcode.alloc_vreg();
     let lui_imm = (upper << 12) as u32;
     let lui_inst = create_lui(Writable::new(temp_vreg), lui_imm);
     vcode.push(lui_inst, srcloc);
 
-    // Emit ADDI: add lower 12 bits (sign-extended)
+    // Emit ADDI: add lower 12 bits (sign-extended by the instruction)
     let addi_inst = create_addi(Writable::new(vreg), temp_vreg, lower_12 as i32);
     vcode.push(addi_inst, srcloc);
 

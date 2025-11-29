@@ -117,6 +117,10 @@ impl<I: MachInst> VCodeBuilder<I> {
     ///
     /// This consumes the builder and produces a VCode structure.
     /// The caller must provide the block order and ABI information.
+    ///
+    /// Note: `block_starts` contains one entry per lowered block (both original
+    /// and edge blocks) in the order they were lowered. This matches the order
+    /// in `block_order.lowered_order`.
     pub fn build(
         self,
         entry: BlockIndex,
@@ -124,6 +128,7 @@ impl<I: MachInst> VCodeBuilder<I> {
         abi: Callee<I::ABIMachineSpec>,
     ) -> VCode<I> {
         // Build block ranges from block_starts
+        // Each entry in block_starts corresponds to one lowered block (original or edge)
         let mut block_ranges = Ranges::new();
         for i in 0..self.block_starts.len() {
             let start = self.block_starts[i];

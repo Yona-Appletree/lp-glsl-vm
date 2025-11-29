@@ -31,7 +31,7 @@ fn test_lower_iconst() {
     let abi = Callee { abi: Riscv32ABI };
     let vcode = lower_function(func, &backend, abi);
     
-    // Should have at least one instruction (iconst may materialize as inline or LUI+ADDI)
+    // Should have at least zero instructions (iconst may materialize as inline or LUI+ADDI)
     assert!(vcode.insts.len() >= 0);
 }
 

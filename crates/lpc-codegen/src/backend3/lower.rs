@@ -72,24 +72,28 @@ impl<I: MachInst> Lower<I> {
         self.build_block_index_mapping(block_order);
 
         // 3. Lower blocks in computed order (not IR layout order)
-        for lowered_block in &block_order.lowered_order {
+        for (idx, lowered_block) in block_order.lowered_order.iter().enumerate() {
             match lowered_block {
                 crate::backend3::vcode::LoweredBlock::Orig { block } => {
                     self.lower_block(backend, *block);
                 }
                 crate::backend3::vcode::LoweredBlock::Edge { from, to } => {
                     // Emit phi moves for edge block
-                    self.lower_edge_block(*from, *to);
+                    // Edge blocks use their position in lowered_order as their BlockIndex
+                    let edge_block_idx = BlockIndex::new(idx as u32);
+                    self.lower_edge_block(edge_block_idx, *from, *to);
                 }
             }
         }
 
         // 4. Build VCode
+        // Find entry block index - entry block must be in block_to_index
+        let entry_block = self.func.entry_block().expect("function must have an entry block");
         let entry = block_order
             .block_to_index
-            .get(&self.func.entry_block().unwrap())
+            .get(&entry_block)
             .copied()
-            .unwrap_or(BlockIndex::new(0));
+            .expect("entry block must be in block_to_index mapping");
         self.vcode.build(entry, block_order.clone(), self.abi)
     }
 
@@ -141,7 +145,13 @@ impl<I: MachInst> Lower<I> {
     }
 
     /// Lower an edge block (phi moves)
-    fn lower_edge_block(&mut self, from: Block, to: Block) {
+    ///
+    /// Edge blocks are synthetic blocks inserted on critical edges to handle
+    /// phi value moves. They need to call start_block/end_block like regular blocks.
+    fn lower_edge_block(&mut self, edge_block_idx: BlockIndex, from: Block, to: Block) {
+        // Edge blocks have no parameters (they're just for moves)
+        self.vcode.start_block(edge_block_idx, Vec::new());
+
         // Get phi values for target block
         if let Some(target_block_data) = self.func.block_data(to) {
             let target_params = &target_block_data.params;
@@ -157,12 +167,15 @@ impl<I: MachInst> Lower<I> {
                         let _target_vreg = self.value_to_vreg[param_value];
                         let _source_vreg = self.value_to_vreg[&source_value];
                         // TODO: Emit move instruction (will be implemented when we add move instructions)
-                        // For now, this is a placeholder
+                        // For now, this is a placeholder - edge blocks may be empty
                         break;
                     }
                 }
             }
         }
+
+        // End block
+        self.vcode.end_block();
     }
 
     /// Lower a block

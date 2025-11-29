@@ -136,20 +136,24 @@ fn detect_critical_edges(
 }
 
 /// Build lowered block order (RPO traversal)
+///
+/// This matches Cranelift's approach: edge blocks are interleaved immediately
+/// after their source blocks in RPO order, not appended at the end.
 fn build_lowered_order(
     func: &lpc_lpir::Function,
     cfg: &ControlFlowGraph,
-    _critical_edges: &[(BlockEntity, BlockEntity)],
-    edge_blocks: &BTreeMap<(BlockEntity, BlockEntity), BlockIndex>,
+    critical_edges: &[(BlockEntity, BlockEntity)],
+    _edge_blocks: &BTreeMap<(BlockEntity, BlockEntity), BlockIndex>,
     _block_to_index: &BTreeMap<BlockEntity, usize>,
 ) -> Vec<LoweredBlock> {
     // Get RPO order of original blocks
     let rpo = cfg.reverse_post_order();
 
-    // Build lowered order: original blocks in RPO, then edge blocks
+    // Build lowered order: original blocks in RPO, with edge blocks interleaved
+    // immediately after their source blocks (matching Cranelift's approach)
     let mut lowered_order = Vec::new();
 
-    // Add original blocks in RPO order
+    // Add original blocks in RPO order, interleaving edge blocks immediately after
     for &block_idx in &rpo {
         let block = func
             .blocks()
@@ -157,16 +161,20 @@ fn build_lowered_order(
             .find(|(idx, _)| *idx == block_idx)
             .map(|(_, block)| block);
         if let Some(block) = block {
+            // Add the original block
             lowered_order.push(LoweredBlock::Orig { block });
-        }
-    }
 
-    // Add edge blocks (order doesn't matter much, but we'll add them after originals)
-    for ((from, to), _edge_block_idx) in edge_blocks {
-        lowered_order.push(LoweredBlock::Edge {
-            from: *from,
-            to: *to,
-        });
+            // Insert edge blocks immediately after this block (if any)
+            // This matches Cranelift's approach where edge blocks follow their source
+            for (from, to) in critical_edges {
+                if *from == block {
+                    lowered_order.push(LoweredBlock::Edge {
+                        from: *from,
+                        to: *to,
+                    });
+                }
+            }
+        }
     }
 
     lowered_order

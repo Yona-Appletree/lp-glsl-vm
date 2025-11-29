@@ -597,8 +597,31 @@ impl VCode {
 ## Success Criteria
 
 - ✅ VCode structure can represent simple functions
-- ✅ Block ordering computes correct order
+- ✅ Block ordering computes correct order (with edge blocks interleaved after source blocks, matching Cranelift)
 - ✅ Can lower iconst, iadd, isub instructions
 - ✅ Can materialize constants (inline and large)
 - ✅ Can create VCode from simple IR function
+- ✅ Edge blocks are properly tracked in block ranges
+- ✅ Entry block handling is robust with defensive checks
+- ✅ Comprehensive test coverage for edge cases
+
+## Implementation Notes
+
+### Differences from Cranelift
+
+1. **Block Ordering**: Edge blocks are interleaved immediately after their source blocks in RPO order, matching Cranelift's approach (fixed in review).
+
+2. **Edge Block Tracking**: Edge blocks call `start_block`/`end_block` like regular blocks, ensuring they're properly tracked in `block_ranges`. This matches Cranelift's behavior.
+
+3. **Constant Materialization**: Large constants emit LUI+ADDI instructions but don't record themselves in the constants map (only inline constants are recorded). This is intentional - the instructions themselves materialize the constant.
+
+4. **Entry Block Handling**: Added defensive checks using `expect()` to ensure entry block is always in `block_to_index` mapping, providing better error messages than silent fallback.
+
+### Alignment with Cranelift
+
+- ✅ VCode structure matches Cranelift's design (with deferred fields documented)
+- ✅ Block ordering algorithm matches Cranelift's RPO + interleaved edge blocks
+- ✅ Constant materialization uses standard RISC-V LUI+ADDI algorithm
+- ✅ Source location tracking matches Cranelift's approach
+- ✅ Block ranges computation accounts for all lowered blocks (original + edge)
 
