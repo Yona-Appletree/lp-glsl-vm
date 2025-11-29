@@ -6,7 +6,7 @@ use lpc_lpir::RelSourceLoc;
 use regalloc2::{Operand, OperandKind, OperandPos, PRegSet, RegClass};
 
 use crate::backend3::{
-    types::{BlockIndex, InsnIndex, Range, Ranges, VReg},
+    types::{BlockIndex, InsnIndex, PINNED_VREGS, Range, Ranges, VReg},
     vcode::{
         BlockLoweringOrder, BlockMetadata, Callee, Constant, MachInst, OperandVisitor, RelocKind,
         VCode, VCodeConstants, VCodeReloc,
@@ -54,7 +54,7 @@ impl<I: MachInst> VCodeBuilder<I> {
             constants: BTreeMap::new(),
             relocations: Vec::new(),
             block_metadata: Vec::new(),
-            next_vreg: 0,
+            next_vreg: PINNED_VREGS as u32, // Start allocating VRegs after pinned range
             current_block: None,
             block_starts: Vec::new(),
             block_params: Vec::new(),

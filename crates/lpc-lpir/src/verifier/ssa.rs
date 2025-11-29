@@ -1,6 +1,6 @@
 //! SSA (Static Single Assignment) verification.
 
-use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
+use alloc::{collections::BTreeMap, collections::BTreeSet, format, string::String, vec::Vec};
 
 use crate::{Function, Value, VerifierError};
 
@@ -43,6 +43,13 @@ fn verify_value_definitions(function: &Function, errors: &mut Vec<VerifierError>
 /// Verify that values are only used after they are defined
 fn verify_value_uses(function: &Function, errors: &mut Vec<VerifierError>) {
     let mut definitions: BTreeMap<Value, String> = BTreeMap::new();
+    
+    // Get entry block to check for entry block parameters
+    let entry_block = function.entry_block();
+    let entry_block_params: alloc::collections::BTreeSet<Value> = entry_block
+        .and_then(|eb| function.block_data(eb))
+        .map(|bd| bd.params.iter().copied().collect())
+        .unwrap_or_default();
 
     for block in function.blocks() {
         for inst in function.block_insts(block) {
@@ -50,13 +57,16 @@ fn verify_value_uses(function: &Function, errors: &mut Vec<VerifierError>) {
                 // Check uses before adding definitions
                 for arg in &inst_data.args {
                     if !definitions.contains_key(arg) {
-                        // Check if it's a block parameter
-                        let is_block_param = function
+                        // Check if it's a block parameter of the current block
+                        let is_current_block_param = function
                             .block_data(block)
                             .map(|bd| bd.params.contains(arg))
                             .unwrap_or(false);
+                        
+                        // Check if it's an entry block parameter (can be used anywhere)
+                        let is_entry_block_param = entry_block_params.contains(arg);
 
-                        if !is_block_param {
+                        if !is_current_block_param && !is_entry_block_param {
                             errors.push(VerifierError::with_location(
                                 format!("Value {} is used before definition", arg),
                                 format!("inst{}", inst.index()),

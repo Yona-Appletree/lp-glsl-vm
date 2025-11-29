@@ -21,6 +21,21 @@ impl Riscv32ABI {
     /// t0-t2 (x5-x7), a0-a7 (x10-x17), t3-t6 (x28-x31)
     pub const CALLER_SAVED_GPRS: &'static [u8] = &[5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 28, 29, 30, 31];
 
+    /// Get ABI argument registers for function parameters
+    ///
+    /// Returns a vector of physical registers used for passing function arguments
+    /// according to the RISC-V 32 calling convention (System V ABI):
+    /// - a0 (x10), a1 (x11), a2 (x12), a3 (x13), a4 (x14), a5 (x15), a6 (x16), a7 (x17)
+    ///
+    /// Up to 8 integer arguments can be passed in registers. Additional arguments
+    /// would be passed on the stack (not handled here).
+    pub fn arg_regs() -> Vec<PReg> {
+        // RISC-V 32: a0-a7 (x10-x17)
+        (10..=17)
+            .map(|n| PReg::new(n, RegClass::Int))
+            .collect()
+    }
+
     /// Create a MachineEnv for RISC-V 32-bit register allocation
     ///
     /// This configures regalloc2 with the available physical registers for RISC-V 32.

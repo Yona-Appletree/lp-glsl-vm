@@ -6,6 +6,7 @@
 pub mod abi;
 pub mod inst;
 pub mod lower;
+pub mod regs;
 pub mod vcode_format;
 pub mod vcode_parser;
 

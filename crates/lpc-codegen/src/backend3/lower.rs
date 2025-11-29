@@ -61,6 +61,22 @@ pub trait LowerBackend {
     /// This creates a placeholder jump instruction. The actual jump targets
     /// are stored in VCode branch metadata.
     fn create_jump(&self) -> Self::MInst;
+
+    /// Emit entry block setup instructions (optional)
+    ///
+    /// This is called for the entry block after start_block() but before
+    /// lowering any instructions. Backends can use this to emit pseudo-instructions
+    /// like Args that define function parameters.
+    ///
+    /// Default implementation does nothing (for backends that don't need this).
+    fn emit_entry_block_setup(
+        &self,
+        _ctx: &mut Lower<Self::MInst>,
+        _entry_block: Block,
+        _srcloc: RelSourceLoc,
+    ) {
+        // Default: do nothing
+    }
 }
 
 /// Lowering context: converts IR to VCode
@@ -313,6 +329,13 @@ impl<I: MachInst> Lower<I> {
 
         // Start block in VCode
         self.vcode.start_block(block_idx, block_params);
+
+        // Emit entry block setup (e.g., Args instruction for function parameters)
+        if block == entry_block {
+            let base_srcloc = self.func.base_srcloc();
+            let dummy_srcloc = RelSourceLoc::from_base_offset(base_srcloc, 0);
+            backend.emit_entry_block_setup(&mut self, entry_block, dummy_srcloc);
+        }
 
         // Lower each instruction and track branch information
         // Collect instructions first to avoid borrow checker issues

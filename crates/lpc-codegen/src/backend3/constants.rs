@@ -4,7 +4,7 @@ use lpc_lpir::RelSourceLoc;
 use regalloc2::RegClass;
 
 use crate::backend3::{
-    types::{VReg, Writable},
+    types::{Reg, VReg, Writable},
     vcode::{Constant, MachInst},
     vcode_builder::VCodeBuilder,
 };
@@ -12,25 +12,29 @@ use crate::backend3::{
 /// Materialize a constant value, choosing the appropriate strategy
 ///
 /// Returns the VReg representing the constant value.
-/// For large constants, this will emit LUI+ADDI instructions via the helpers.
-pub fn materialize_constant<I: MachInst, FLui, FAddi>(
+/// For small constants (<12 bits), emits ADDI with zero_reg().
+/// For large constants, emits LUI+ADDI instructions via the helpers.
+pub fn materialize_constant<I: MachInst, FLui, FAddi, FZeroReg>(
     vcode: &mut VCodeBuilder<I>,
     value: i32,
     srcloc: RelSourceLoc,
     create_lui: FLui,
     create_addi: FAddi,
+    zero_reg: FZeroReg,
 ) -> VReg
 where
-    FLui: FnOnce(Writable<VReg>, u32) -> I,
-    FAddi: FnOnce(Writable<VReg>, VReg, i32) -> I,
+    FLui: FnOnce(Writable<Reg>, u32) -> I,
+    FAddi: FnOnce(Writable<Reg>, Reg, i32) -> I,
+    FZeroReg: FnOnce() -> Reg,
 {
     if fits_in_12_bits(value) {
-        // Strategy 1: Inline immediate
-        // The constant will be embedded directly in the instruction
-        // during lowering (e.g., addi rd, rs1, value)
-        // Return a VReg that represents this constant value
+        // Strategy 1: Emit ADDI with zero_reg() for small constants
+        // This ensures the VReg is properly defined (SSA requirement)
         let vreg = vcode.alloc_vreg(RegClass::Int);
-        vcode.record_constant(vreg, Constant::Inline(value));
+        let rd = Writable::new(Reg::from_virtual_reg(vreg));
+        let rs1 = zero_reg();
+        let addi_inst = create_addi(rd, rs1, value);
+        vcode.push(addi_inst, srcloc);
         vreg
     } else {
         // Strategy 2: LUI + ADDI sequence
@@ -66,8 +70,8 @@ fn materialize_large_constant<I: MachInst, FLui, FAddi>(
     create_addi: FAddi,
 ) -> VReg
 where
-    FLui: FnOnce(Writable<VReg>, u32) -> I,
-    FAddi: FnOnce(Writable<VReg>, VReg, i32) -> I,
+    FLui: FnOnce(Writable<Reg>, u32) -> I,
+    FAddi: FnOnce(Writable<Reg>, Reg, i32) -> I,
 {
     let vreg = vcode.alloc_vreg(RegClass::Int);
 
@@ -88,12 +92,14 @@ where
 
     // Emit LUI: load upper 20 bits (shifted left by 12)
     let temp_vreg = vcode.alloc_vreg(RegClass::Int);
+    let temp_reg = Reg::from_virtual_reg(temp_vreg);
     let lui_imm = (upper << 12) as u32;
-    let lui_inst = create_lui(Writable::new(temp_vreg), lui_imm);
+    let lui_inst = create_lui(Writable::new(temp_reg), lui_imm);
     vcode.push(lui_inst, srcloc);
 
     // Emit ADDI: add lower 12 bits (sign-extended by the instruction)
-    let addi_inst = create_addi(Writable::new(vreg), temp_vreg, lower_12 as i32);
+    let result_reg = Reg::from_virtual_reg(vreg);
+    let addi_inst = create_addi(Writable::new(result_reg), temp_reg, lower_12 as i32);
     vcode.push(addi_inst, srcloc);
 
     vreg

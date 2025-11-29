@@ -7,7 +7,7 @@ use crate::{
     backend3::{
         constants::materialize_constant,
         lower::{Lower, LowerBackend},
-        types::Writable,
+        types::{Reg, Writable},
     },
     isa::riscv32::backend3::inst::Riscv32MachInst,
 };
@@ -65,8 +65,10 @@ impl LowerBackend for Riscv32LowerBackend {
             Opcode::Iadd => {
                 if args.len() >= 2 && !results.is_empty() {
                     if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
-                        let rd = Writable::new(rd_vreg);
-                        let mach_inst = Riscv32MachInst::Add { rd, rs1, rs2 };
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        let mach_inst = Riscv32MachInst::Add { rd, rs1: rs1_reg, rs2: rs2_reg };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -75,8 +77,10 @@ impl LowerBackend for Riscv32LowerBackend {
             Opcode::Isub => {
                 if args.len() >= 2 && !results.is_empty() {
                     if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
-                        let rd = Writable::new(rd_vreg);
-                        let mach_inst = Riscv32MachInst::Sub { rd, rs1, rs2 };
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        let mach_inst = Riscv32MachInst::Sub { rd, rs1: rs1_reg, rs2: rs2_reg };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -92,12 +96,14 @@ impl LowerBackend for Riscv32LowerBackend {
                             _ => 0,
                         };
                         // Materialize constant with ISA-specific helpers
+                        use crate::isa::riscv32::backend3::regs::zero_reg;
                         let vreg = materialize_constant(
                             &mut ctx.vcode,
                             value,
                             srcloc,
                             |rd, imm| Riscv32MachInst::Lui { rd, imm },
                             |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+                            || zero_reg(),
                         );
                         // Now update value_to_vreg (vcode borrow is dropped, so we can borrow ctx mutably)
                         let result_value = results[0];
@@ -108,10 +114,10 @@ impl LowerBackend for Riscv32LowerBackend {
             }
             Opcode::Return => {
                 // Extract return value VRegs from instruction args
-                let ret_vals: alloc::vec::Vec<_> = {
+                let ret_vals: alloc::vec::Vec<Reg> = {
                     let value_to_vreg = ctx.value_to_vreg();
                     args.iter()
-                        .filter_map(|v| value_to_vreg.get(v).copied())
+                        .filter_map(|v| value_to_vreg.get(v).copied().map(Reg::from_virtual_reg))
                         .collect()
                 };
                 let mach_inst = Riscv32MachInst::Return { ret_vals };
@@ -127,10 +133,11 @@ impl LowerBackend for Riscv32LowerBackend {
                 // should be computed during address materialization (iadd base, offset) before load/store.
                 if !results.is_empty() && args.len() >= 1 {
                     if let (Some(address_vreg), Some(result_vreg)) = (rs1_opt, rd_opt) {
-                        let rd = Writable::new(result_vreg);
+                        let rd = Writable::new(Reg::from_virtual_reg(result_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(address_vreg);
                         let mach_inst = Riscv32MachInst::Lw {
                             rd,
-                            rs1: address_vreg,
+                            rs1: rs1_reg,
                             imm: 0,
                         };
                         ctx.vcode.push(mach_inst, srcloc);
@@ -147,9 +154,11 @@ impl LowerBackend for Riscv32LowerBackend {
                 // should be computed during address materialization (iadd base, offset) before load/store.
                 if args.len() >= 2 {
                     if let (Some(address_vreg), Some(value_vreg)) = (rs1_opt, rs2_opt) {
+                        let rs1_reg = Reg::from_virtual_reg(address_vreg);
+                        let rs2_reg = Reg::from_virtual_reg(value_vreg);
                         let mach_inst = Riscv32MachInst::Sw {
-                            rs1: address_vreg,
-                            rs2: value_vreg,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
                             imm: 0,
                         };
                         ctx.vcode.push(mach_inst, srcloc);
@@ -160,8 +169,10 @@ impl LowerBackend for Riscv32LowerBackend {
             Opcode::Imul => {
                 if args.len() >= 2 && !results.is_empty() {
                     if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
-                        let rd = Writable::new(rd_vreg);
-                        let mach_inst = Riscv32MachInst::Mul { rd, rs1, rs2 };
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        let mach_inst = Riscv32MachInst::Mul { rd, rs1: rs1_reg, rs2: rs2_reg };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -170,8 +181,10 @@ impl LowerBackend for Riscv32LowerBackend {
             Opcode::Idiv => {
                 if args.len() >= 2 && !results.is_empty() {
                     if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
-                        let rd = Writable::new(rd_vreg);
-                        let mach_inst = Riscv32MachInst::Div { rd, rs1, rs2 };
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        let mach_inst = Riscv32MachInst::Div { rd, rs1: rs1_reg, rs2: rs2_reg };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -180,8 +193,10 @@ impl LowerBackend for Riscv32LowerBackend {
             Opcode::Irem => {
                 if args.len() >= 2 && !results.is_empty() {
                     if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
-                        let rd = Writable::new(rd_vreg);
-                        let mach_inst = Riscv32MachInst::Rem { rd, rs1, rs2 };
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        let mach_inst = Riscv32MachInst::Rem { rd, rs1: rs1_reg, rs2: rs2_reg };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -191,20 +206,23 @@ impl LowerBackend for Riscv32LowerBackend {
                 // Lower icmp based on condition code
                 if args.len() >= 2 && !results.is_empty() {
                     if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
-                        let rd = Writable::new(rd_vreg);
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
                         if let Some(cond) = icmp_cond {
                             match cond {
                                 IntCC::Equal => {
                                     // eq: sub + sltiu pattern
                                     // Compute diff = rs1 - rs2
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let diff = Writable::new(temp_vreg);
-                                    let sub_inst = Riscv32MachInst::Sub { rd: diff, rs1, rs2 };
+                                    let diff = Writable::new(Reg::from_virtual_reg(temp_vreg));
+                                    let sub_inst = Riscv32MachInst::Sub { rd: diff, rs1: rs1_reg, rs2: rs2_reg };
                                     ctx.vcode.push(sub_inst, srcloc);
                                     // If diff < 1 (i.e., diff == 0), result = 1, else 0
+                                    let temp_reg = Reg::from_virtual_reg(temp_vreg);
                                     let sltiu_inst = Riscv32MachInst::Sltiu {
                                         rd,
-                                        rs1: temp_vreg,
+                                        rs1: temp_reg,
                                         imm: 1,
                                     };
                                     ctx.vcode.push(sltiu_inst, srcloc);
@@ -470,5 +488,43 @@ impl LowerBackend for Riscv32LowerBackend {
 
     fn create_jump(&self) -> Self::MInst {
         Riscv32MachInst::Jump
+    }
+
+    fn emit_entry_block_setup(
+        &self,
+        ctx: &mut crate::backend3::lower::Lower<Self::MInst>,
+        entry_block: lpc_lpir::BlockEntity,
+        srcloc: lpc_lpir::RelSourceLoc,
+    ) {
+        use crate::backend3::types::Reg;
+        use crate::isa::riscv32::backend3::{abi::Riscv32ABI, inst::ArgPair, inst::Riscv32MachInst};
+
+        // Get function parameters from entry block
+        if let Some(block_data) = ctx.func().block_data(entry_block) {
+            let params = &block_data.params;
+            if !params.is_empty() {
+                // Get ABI argument registers
+                let arg_regs = Riscv32ABI::arg_regs();
+
+                // Create ArgPairs: map each parameter Value to its VReg and ABI register
+                let mut arg_pairs = Vec::new();
+                for (idx, param_value) in params.iter().enumerate() {
+                    if let Some(&vreg) = ctx.value_to_vreg().get(param_value) {
+                        if let Some(&preg) = arg_regs.get(idx) {
+                            arg_pairs.push(ArgPair {
+                                vreg: Reg::from_virtual_reg(vreg),
+                                preg: *preg,
+                            });
+                        }
+                    }
+                }
+
+                // Emit Args instruction if we have parameters
+                if !arg_pairs.is_empty() {
+                    let args_inst = Riscv32MachInst::Args { args: arg_pairs };
+                    ctx.vcode.push(args_inst, srcloc);
+                }
+            }
+        }
     }
 }
