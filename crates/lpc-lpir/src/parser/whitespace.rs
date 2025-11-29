@@ -10,11 +10,14 @@ use nom::{
     IResult,
 };
 
-/// Parse a single-line comment starting with `;`
-/// Consumes the `;` and everything until (but not including) the newline
-/// If there's no newline (end of input), consumes everything after `;`
+/// Parse a single-line comment starting with `;` or `#`
+/// Consumes the `;` or `#` and everything until (but not including) the newline
+/// If there's no newline (end of input), consumes everything after `;` or `#`
 pub(crate) fn comment(input: &str) -> IResult<&str, &str> {
-    preceded(char(';'), take_while(|c| c != '\n' && c != '\r'))(input)
+    preceded(
+        alt((char(';'), char('#'))),
+        take_while(|c| c != '\n' && c != '\r'),
+    )(input)
 }
 
 /// Parse whitespace (spaces, tabs, newlines, comments) - returns the matched string
@@ -54,60 +57,90 @@ mod tests {
 
     #[test]
     fn test_comment() {
-        // Single-line comment with text
+        // Single-line comment with text (; style)
         assert_eq!(comment("; comment\n"), Ok(("\n", " comment")));
         assert_eq!(
             comment("; this is a comment\nrest"),
             Ok(("\nrest", " this is a comment"))
         );
 
+        // Single-line comment with text (# style)
+        assert_eq!(comment("# comment\n"), Ok(("\n", " comment")));
+        assert_eq!(
+            comment("# this is a comment\nrest"),
+            Ok(("\nrest", " this is a comment"))
+        );
+
         // Empty comment
         assert_eq!(comment(";\n"), Ok(("\n", "")));
-        // Comment at end of input (no newline) - consumes everything after ;
+        assert_eq!(comment("#\n"), Ok(("\n", "")));
+        // Comment at end of input (no newline) - consumes everything after ; or #
         assert_eq!(comment(";rest"), Ok(("", "rest")));
+        assert_eq!(comment("#rest"), Ok(("", "rest")));
 
         // Comment with only whitespace
         assert_eq!(comment(";   \n"), Ok(("\n", "   ")));
+        assert_eq!(comment("#   \n"), Ok(("\n", "   ")));
 
         // Comment at end of input (no newline)
         assert_eq!(comment("; comment"), Ok(("", " comment")));
+        assert_eq!(comment("# comment"), Ok(("", " comment")));
         assert_eq!(comment(";"), Ok(("", "")));
+        assert_eq!(comment("#"), Ok(("", "")));
 
         // Comment with Windows line ending
         assert_eq!(comment("; comment\r\n"), Ok(("\r\n", " comment")));
+        assert_eq!(comment("# comment\r\n"), Ok(("\r\n", " comment")));
     }
 
     #[test]
     fn test_blank_space_with_comments() {
         // Comment alone
         assert_eq!(blank_space("; comment\n"), Ok(("", "; comment\n")));
+        assert_eq!(blank_space("# comment\n"), Ok(("", "# comment\n")));
 
         // Comment with whitespace
         assert_eq!(blank_space("  ; comment\n"), Ok(("", "  ; comment\n")));
+        assert_eq!(blank_space("  # comment\n"), Ok(("", "  # comment\n")));
         assert_eq!(blank_space("; comment\n  "), Ok(("", "; comment\n  ")));
+        assert_eq!(blank_space("# comment\n  "), Ok(("", "# comment\n  ")));
 
         // Multiple comments
         assert_eq!(
             blank_space("; first\n; second\n"),
             Ok(("", "; first\n; second\n"))
         );
+        assert_eq!(
+            blank_space("# first\n# second\n"),
+            Ok(("", "# first\n# second\n"))
+        );
 
         // Comment between tokens
         assert_eq!(blank_space("  ; comment\n  "), Ok(("", "  ; comment\n  ")));
+        assert_eq!(blank_space("  # comment\n  "), Ok(("", "  # comment\n  ")));
 
         // Comment at end of input
         assert_eq!(blank_space("; comment"), Ok(("", "; comment")));
+        assert_eq!(blank_space("# comment"), Ok(("", "# comment")));
     }
 
     #[test]
     fn test_blank_with_comments() {
         // Comment should be treated as whitespace
         assert_eq!(blank("; comment\n"), Ok(("", ())));
+        assert_eq!(blank("# comment\n"), Ok(("", ())));
         assert_eq!(blank("  ; comment\n  "), Ok(("", ())));
+        assert_eq!(blank("  # comment\n  "), Ok(("", ())));
         assert_eq!(blank("; comment"), Ok(("", ())));
+        assert_eq!(blank("# comment"), Ok(("", ())));
 
         // Comment followed by token
         let result = blank("; comment\nv0");
+        assert!(result.is_ok());
+        let (remaining, _) = result.unwrap();
+        assert_eq!(remaining, "v0");
+
+        let result = blank("# comment\nv0");
         assert!(result.is_ok());
         let (remaining, _) = result.unwrap();
         assert_eq!(remaining, "v0");

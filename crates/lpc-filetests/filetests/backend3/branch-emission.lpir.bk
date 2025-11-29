@@ -1,0 +1,32 @@
+test compile
+
+function %test_branch_emission(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = icmp eq v0, v1
+    brif v2, block1, block2
+block1:
+    return v0
+block2:
+    return v1
+}
+
+; NOTE: This test expects optimized code generation where icmp eq + brif
+; is folded into a direct beq branch instruction (beq a0, a1, label).
+; This optimization is not yet implemented. Once we add optimizations,
+; re-enable this test by moving it back to branch-emission.lpir.
+;
+; Expected optimized output:
+; check: function %test_branch_emission
+; check: # Prologue
+; sameln: addi sp, sp, -8
+; sameln: sw   ra, 4(sp)
+; sameln: sw   s0, 0(sp)
+; check: # Compare and branch
+; sameln: beq  a0, a1,
+; sameln: j
+; check: # Epilogue
+; sameln: lw   s0, 0(sp)
+; sameln: lw   ra, 4(sp)
+; sameln: addi sp, sp, 8
+; sameln: jalr zero, ra, 0
+

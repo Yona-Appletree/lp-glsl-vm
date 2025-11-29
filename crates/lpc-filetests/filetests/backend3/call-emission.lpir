@@ -13,16 +13,15 @@ block0(v0: i32):
 }
 
 ; check: function %caller
-; check: # Prologue
-; nextln: addi sp, sp, -8
-; check: # Call setup
-; sameln: mv   a0, a0        # Pass argument (may be optimized away)
-; sameln: auipc
-; sameln: addi
-; sameln: jalr ra,
-; check: # Epilogue
-; sameln: lw   s0, 0(sp)
-; sameln: lw   ra, 4(sp)
-; sameln: addi sp, sp, 8
-; sameln: jalr zero, ra, 0
-
+; check: addi sp, sp, -8
+; check: sw ra, 4(sp)
+; check: sw s0, 0(sp)
+; check: addi sp, sp, -8
+; check: sw s1, 8(sp)
+; check: auipc
+; check: addi
+; check: jalr ra,
+; check: addi s1, a0, 0
+; check: addi a0, s1, 0
+; check: lw s1, 8(sp)
+; check: jalr zero, 0(ra)

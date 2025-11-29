@@ -11,10 +11,10 @@ block3:
     return
 }
 ; check: cfg_postorder:
-; sameln: block3
-; sameln: block2
-; sameln: block1
-; sameln: block0
+; nextln: block3
+; nextln: block2
+; nextln: block1
+; nextln: block0
 
 ; check: domtree_preorder {
 ; nextln: block0: block1
@@ -32,9 +32,9 @@ block2:
     return
 }
 ; check: cfg_postorder:
-; sameln: block2
-; sameln: block1
-; sameln: block0
+; nextln: block2
+; nextln: block1
+; nextln: block0
 
 ; check: domtree_preorder {
 ; nextln: block0: block1
@@ -53,10 +53,10 @@ block3:
     return
 }
 ; check: cfg_postorder:
-; sameln: block3
-; sameln: block1
-; sameln: block2
-; sameln: block0
+; nextln: block3
+; nextln: block1
+; nextln: block2
+; nextln: block0
 
 ; check: domtree_preorder {
 ; nextln: block0: block1 block2 block3
@@ -80,12 +80,12 @@ block5:
     return
 }
 ; check: cfg_postorder:
-; sameln: block5
-; sameln: block3
-; sameln: block1
-; sameln: block4
-; sameln: block2
-; sameln: block0
+; nextln: block5
+; nextln: block3
+; nextln: block1
+; nextln: block4
+; nextln: block2
+; nextln: block0
 
 ; check: domtree_preorder {
 ; nextln: block0: block1 block2 block5
@@ -109,11 +109,11 @@ block4:
     return
 }
 ; check: cfg_postorder:
-; sameln: block4
-; sameln: block3
-; sameln: block2
-; sameln: block1
-; sameln: block0
+; nextln: block4
+; nextln: block3
+; nextln: block2
+; nextln: block1
+; nextln: block0
 
 ; check: domtree_preorder {
 ; nextln: block0: block1

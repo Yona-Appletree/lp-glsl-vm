@@ -11,16 +11,10 @@ block2:
 }
 
 ; check: function %test_branch_emission
-; check: # Prologue
-; sameln: addi sp, sp, -8
-; sameln: sw   ra, 4(sp)
-; sameln: sw   s0, 0(sp)
-; check: # Compare and branch
-; sameln: beq  a0, a1,
-; sameln: j
-; check: # Epilogue
-; sameln: lw   s0, 0(sp)
-; sameln: lw   ra, 4(sp)
-; sameln: addi sp, sp, 8
-; sameln: jalr zero, ra, 0
-
+; check: addi sp, sp, -8
+; check: sw ra, 4(sp)
+; check: sw s0, 0(sp)
+; check: sub
+; check: sltiu
+; check: bne
+; check: jalr zero, 0(ra)

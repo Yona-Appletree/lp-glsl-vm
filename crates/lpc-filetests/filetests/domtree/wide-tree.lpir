@@ -18,13 +18,13 @@ block6:
     return
 }
 ; check: cfg_postorder:
-; sameln: block6
-; sameln: block5
-; sameln: block3
-; sameln: block1
-; sameln: block4
-; sameln: block2
-; sameln: block0
+; nextln: block6
+; nextln: block5
+; nextln: block3
+; nextln: block1
+; nextln: block4
+; nextln: block2
+; nextln: block0
 
 ; check: domtree_preorder {
 ; nextln: block0: block1 block2 block5 block6
@@ -57,15 +57,15 @@ block8:
     return
 }
 ; check: cfg_postorder:
-; sameln: block8
-; sameln: block7
-; sameln: block5
-; sameln: block3
-; sameln: block1
-; sameln: block6
-; sameln: block4
-; sameln: block2
-; sameln: block0
+; nextln: block8
+; nextln: block7
+; nextln: block5
+; nextln: block3
+; nextln: block1
+; nextln: block6
+; nextln: block4
+; nextln: block2
+; nextln: block0
 
 ; check: domtree_preorder {
 ; nextln: block0: block1 block2 block7 block8

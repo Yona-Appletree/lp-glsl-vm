@@ -6,16 +6,17 @@ block0(v0: i32, v1: i32):
     brif v2, block1, block2
 block1:
     v3 = icmp slt v0, v1
-    brif v3, block3, block0  # Backward branch
+    brif v3, block3, block4  # Backward branch to block4
 block2:
     return v0
 block3:
     return v1
+block4:
+    brif v2, block1, block2  # Branch back using v2 from block0
 }
 
 ; This test verifies label fixup resolution:
-; - Forward branches (block0 -> block1, block0 -> block2)
-; - Backward branches (block1 -> block0)
-; - Multiple branches to same target (block0 -> block1, block1 -> block0)
+; - Forward branches (block0 -> block1, block0 -> block2, block1 -> block3/block4)
+; - Backward branches (block4 -> block1, block4 -> block2)
+; - Multiple branches to same target
 ; The function should compile and all branches should be resolved correctly.
-
