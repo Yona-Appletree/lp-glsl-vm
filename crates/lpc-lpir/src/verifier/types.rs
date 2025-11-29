@@ -29,7 +29,12 @@ fn verify_instruction_types(function: &Function, errors: &mut Vec<VerifierError>
         for inst in function.block_insts(block) {
             if let Some(inst_data) = function.dfg.inst_data(inst) {
                 match &inst_data.opcode {
-                    Opcode::Iadd | Opcode::Isub | Opcode::Imul | Opcode::Idiv | Opcode::Irem => {
+                    Opcode::Iadd
+                    | Opcode::Isub
+                    | Opcode::Imul
+                    | Opcode::Imulh
+                    | Opcode::Idiv
+                    | Opcode::Irem => {
                         // Arithmetic operations: both operands should be integers
                         if inst_data.args.len() >= 2 {
                             let arg1_ty = function.dfg.value_type(inst_data.args[0]);
@@ -41,6 +46,26 @@ fn verify_instruction_types(function: &Function, errors: &mut Vec<VerifierError>
                                         format!(
                                             "Arithmetic operation expects i32 operands, got {:?} \
                                              and {:?}",
+                                            ty1, ty2
+                                        ),
+                                        format!("inst{}", inst.index()),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    Opcode::Fadd | Opcode::Fsub | Opcode::Fmul | Opcode::Fdiv => {
+                        // Floating point arithmetic operations: both operands should be f32
+                        if inst_data.args.len() >= 2 {
+                            let arg1_ty = function.dfg.value_type(inst_data.args[0]);
+                            let arg2_ty = function.dfg.value_type(inst_data.args[1]);
+
+                            if let (Some(ty1), Some(ty2)) = (arg1_ty, arg2_ty) {
+                                if ty1 != Type::F32 || ty2 != Type::F32 {
+                                    errors.push(VerifierError::with_location(
+                                        format!(
+                                            "Floating point arithmetic operation expects f32 \
+                                             operands, got {:?} and {:?}",
                                             ty1, ty2
                                         ),
                                         format!("inst{}", inst.index()),

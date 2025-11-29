@@ -56,6 +56,12 @@ impl<'a> BlockBuilder<'a> {
         self.push_inst_data(InstData::arithmetic(Opcode::Imul, result, arg1, arg2));
     }
 
+    /// Integer multiply high (signed): result = high 32 bits of (arg1 * arg2)
+    /// Maps to RISC-V MULH instruction (M extension).
+    pub fn imulh(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::arithmetic(Opcode::Imulh, result, arg1, arg2));
+    }
+
     /// Integer divide: result = arg1 / arg2
     pub fn idiv(&mut self, result: Value, arg1: Value, arg2: Value) {
         self.push_inst_data(InstData::arithmetic(Opcode::Idiv, result, arg1, arg2));
@@ -126,6 +132,28 @@ impl<'a> BlockBuilder<'a> {
             arg1,
             arg2,
         ));
+    }
+
+    // Floating point arithmetic instructions
+
+    /// Floating point add: result = arg1 + arg2
+    pub fn fadd(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::arithmetic(Opcode::Fadd, result, arg1, arg2));
+    }
+
+    /// Floating point subtract: result = arg1 - arg2
+    pub fn fsub(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::arithmetic(Opcode::Fsub, result, arg1, arg2));
+    }
+
+    /// Floating point multiply: result = arg1 * arg2
+    pub fn fmul(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::arithmetic(Opcode::Fmul, result, arg1, arg2));
+    }
+
+    /// Floating point divide: result = arg1 / arg2
+    pub fn fdiv(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::arithmetic(Opcode::Fdiv, result, arg1, arg2));
     }
 
     // Convenience methods for backward compatibility

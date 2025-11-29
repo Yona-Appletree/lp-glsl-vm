@@ -53,6 +53,9 @@ impl fmt::Display for Riscv32MachInst {
             Riscv32MachInst::Mul { rd, rs1, rs2 } => {
                 write!(f, "mul {}, {}, {}", rd, rs1, rs2)
             }
+            Riscv32MachInst::Mulh { rd, rs1, rs2 } => {
+                write!(f, "mulh {}, {}, {}", rd, rs1, rs2)
+            }
             Riscv32MachInst::Div { rd, rs1, rs2 } => {
                 write!(f, "div {}, {}, {}", rd, rs1, rs2)
             }

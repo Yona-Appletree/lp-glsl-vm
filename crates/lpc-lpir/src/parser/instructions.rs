@@ -21,7 +21,7 @@ use crate::{
     trapcode::TrapCode,
 };
 
-/// Parse an arithmetic instruction (iadd, isub, imul, idiv, irem)
+/// Parse an arithmetic instruction (iadd, isub, imul, imulh, idiv, irem)
 pub(crate) fn parse_arithmetic(input: &str) -> IResult<&str, InstData> {
     let (input, result) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(tag("="), blank)(input)?;
@@ -30,6 +30,7 @@ pub(crate) fn parse_arithmetic(input: &str) -> IResult<&str, InstData> {
             tag("iadd"),
             tag("isub"),
             tag("imul"),
+            tag("imulh"),
             tag("idiv"),
             tag("irem"),
         )),
@@ -43,8 +44,32 @@ pub(crate) fn parse_arithmetic(input: &str) -> IResult<&str, InstData> {
         "iadd" => Opcode::Iadd,
         "isub" => Opcode::Isub,
         "imul" => Opcode::Imul,
+        "imulh" => Opcode::Imulh,
         "idiv" => Opcode::Idiv,
         "irem" => Opcode::Irem,
+        _ => unreachable!(),
+    };
+
+    Ok((input, InstData::arithmetic(opcode, result, arg1, arg2)))
+}
+
+/// Parse a floating point arithmetic instruction (fadd, fsub, fmul, fdiv)
+pub(crate) fn parse_float_arithmetic(input: &str) -> IResult<&str, InstData> {
+    let (input, result) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(tag("="), blank)(input)?;
+    let (input, op) = terminated(
+        alt((tag("fadd"), tag("fsub"), tag("fmul"), tag("fdiv"))),
+        blank,
+    )(input)?;
+    let (input, arg1) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(char(','), blank)(input)?;
+    let (input, arg2) = terminated(parse_value, blank)(input)?;
+
+    let opcode = match op {
+        "fadd" => Opcode::Fadd,
+        "fsub" => Opcode::Fsub,
+        "fmul" => Opcode::Fmul,
+        "fdiv" => Opcode::Fdiv,
         _ => unreachable!(),
     };
 
@@ -469,15 +494,16 @@ pub(crate) fn parse_instruction(input: &str) -> IResult<&str, InstData> {
         parse_trapnz,  // "trapnz v0, int_ovf" - doesn't start with value assignment
         // Instructions that start with "v0 = " come after
         // Try parse_const before parse_stackalloc before parse_load since "iconst" and "stackalloc" are more specific than "load"
-        parse_const,         // "v0 = iconst 42" or "v0 = fconst 3.14"
-        parse_stackalloc,    // "v0 = stackalloc 4" - stack allocation
-        parse_load,          // "v0 = load.i32 v1" - has type suffix
-        parse_fcmp,          // "v0 = fcmp eq v1, v2" - must come before parse_comparison
-        parse_comparison,    // "v0 = icmp eq v1, v2" or "v0 = icmp_eq v1, v2"
-        parse_bitwise_unary, // "v0 = inot v1" - unary, must come before binary bitwise
-        parse_bitwise,       // "v0 = iand v1, v2" or "v0 = ior v1, v2" or "v0 = ixor v1, v2"
-        parse_shift,         // "v0 = ishl v1, v2" or "v0 = ishr v1, v2" or "v0 = iashr v1, v2"
-        parse_arithmetic,    // "v0 = iadd v1, v2"
+        parse_const,            // "v0 = iconst 42" or "v0 = fconst 3.14"
+        parse_stackalloc,       // "v0 = stackalloc 4" - stack allocation
+        parse_load,             // "v0 = load.i32 v1" - has type suffix
+        parse_fcmp,             // "v0 = fcmp eq v1, v2" - must come before parse_comparison
+        parse_comparison,       // "v0 = icmp eq v1, v2" or "v0 = icmp_eq v1, v2"
+        parse_float_arithmetic, // "v0 = fadd v1, v2" - must come before parse_arithmetic
+        parse_bitwise_unary,    // "v0 = inot v1" - unary, must come before binary bitwise
+        parse_bitwise,          // "v0 = iand v1, v2" or "v0 = ior v1, v2" or "v0 = ixor v1, v2"
+        parse_shift,            // "v0 = ishl v1, v2" or "v0 = ishr v1, v2" or "v0 = iashr v1, v2"
+        parse_arithmetic,       // "v0 = iadd v1, v2"
     ))(input)
 }
 

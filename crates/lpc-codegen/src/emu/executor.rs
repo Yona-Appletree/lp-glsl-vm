@@ -80,6 +80,29 @@ pub fn execute_instruction(
                 rd_new: result,
             }
         }
+        Inst::Mulh { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1);
+            let val2 = read_reg(regs, rs2);
+            let rd_old = read_reg(regs, rd);
+            // MULH: high 32 bits of signed multiply
+            let val1_i64 = val1 as i32 as i64;
+            let val2_i64 = val2 as i32 as i64;
+            let product = val1_i64.wrapping_mul(val2_i64);
+            let result = (product >> 32) as i32;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0, // Will be set by emu
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
+        }
         Inst::Mul { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);

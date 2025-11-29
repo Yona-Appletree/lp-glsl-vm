@@ -3,7 +3,7 @@
 //! This module handles emission of VCode to machine code, including
 //! application of register allocations and edits (spills/reloads).
 
-use alloc::{string::String, vec::Vec};
+use alloc::vec::Vec;
 
 use lpc_lpir::RelSourceLoc;
 use regalloc2::{Edit, Function as RegallocFunction};
@@ -198,9 +198,10 @@ impl VCode<Riscv32MachInst> {
 
             // Compute emission order (cold blocks at end)
             let block_order = self.compute_emission_order();
+            let block_order_ref: &[BlockIndex] = &block_order;
 
             // Emit blocks in final order
-            for block_idx in block_order {
+            for block_idx in &block_order {
                 // Is this the entry block? Emit prologue
                 if block_idx.index() == self.entry.index() {
                     self.gen_prologue(&mut buffer, &mut state, &frame_layout);
@@ -224,14 +225,21 @@ impl VCode<Riscv32MachInst> {
 
                 // Bind label for this block
                 let block_start_offset = buffer.cur_offset();
-                state.bind_label(block_idx, block_start_offset);
+                state.bind_label(*block_idx, block_start_offset);
                 buffer.bind_label(block_idx.index() as u32);
 
                 // Emit block instructions and edits
-                self.emit_block(&mut buffer, &mut state, block_idx, regalloc, &frame_layout);
+                self.emit_block(
+                    &mut buffer,
+                    &mut state,
+                    *block_idx,
+                    regalloc,
+                    &frame_layout,
+                    block_order_ref,
+                );
 
                 // Resolve any pending fixups that targeted this label
-                state.resolve_pending_fixups(&mut buffer, block_idx, block_start_offset);
+                state.resolve_pending_fixups(&mut buffer, *block_idx, block_start_offset);
             }
 
             // Resolve any remaining forward references (should be none if order is correct)
@@ -243,9 +251,10 @@ impl VCode<Riscv32MachInst> {
             // No symbol table - emit without relocation resolution
             // Compute emission order (cold blocks at end)
             let block_order = self.compute_emission_order();
+            let block_order_ref: &[BlockIndex] = &block_order;
 
             // Emit blocks in final order
-            for block_idx in block_order {
+            for block_idx in &block_order {
                 // Is this the entry block? Emit prologue
                 if block_idx.index() == self.entry.index() {
                     self.gen_prologue(&mut buffer, &mut state, &frame_layout);
@@ -269,14 +278,21 @@ impl VCode<Riscv32MachInst> {
 
                 // Bind label for this block
                 let block_start_offset = buffer.cur_offset();
-                state.bind_label(block_idx, block_start_offset);
+                state.bind_label(*block_idx, block_start_offset);
                 buffer.bind_label(block_idx.index() as u32);
 
                 // Emit block instructions and edits
-                self.emit_block(&mut buffer, &mut state, block_idx, regalloc, &frame_layout);
+                self.emit_block(
+                    &mut buffer,
+                    &mut state,
+                    *block_idx,
+                    regalloc,
+                    &frame_layout,
+                    block_order_ref,
+                );
 
                 // Resolve any pending fixups that targeted this label
-                state.resolve_pending_fixups(&mut buffer, block_idx, block_start_offset);
+                state.resolve_pending_fixups(&mut buffer, *block_idx, block_start_offset);
             }
 
             // Resolve any remaining forward references (should be none if order is correct)
@@ -419,7 +435,7 @@ impl VCode<Riscv32MachInst> {
     /// Compute emission order (cold blocks at end)
     fn compute_emission_order(&self) -> Vec<BlockIndex> {
         // Start with original order
-        let mut order: Vec<BlockIndex> = (0..self.block_ranges.len())
+        let order: Vec<BlockIndex> = (0..self.block_ranges.len())
             .map(|i| regalloc2::Block::new(i))
             .collect();
 
@@ -583,6 +599,7 @@ impl VCode<Riscv32MachInst> {
         block_idx: BlockIndex,
         regalloc: &regalloc2::Output,
         frame: &FrameLayout,
+        block_order: &[BlockIndex],
     ) {
         // Get the actual range from block_ranges to know the instruction indices
         let block_range = self
@@ -678,7 +695,14 @@ impl VCode<Riscv32MachInst> {
 
             // Handle branches (resolve labels)
             if let Some(branch_info) = self.get_branch_info(&mach_inst, block_idx) {
-                self.emit_branch(buffer, state, mach_inst, branch_info);
+                self.emit_branch(
+                    buffer,
+                    state,
+                    mach_inst,
+                    branch_info,
+                    block_idx,
+                    block_order,
+                );
             } else {
                 // Regular instruction - emit directly
                 self.emit_instruction(buffer, &mach_inst, state, InsnIndex::new(inst_idx), frame);
@@ -725,13 +749,39 @@ impl VCode<Riscv32MachInst> {
         }
     }
 
+    /// Determine which branch target is the fallthrough based on block order
+    fn determine_fallthrough(
+        &self,
+        current_block: BlockIndex,
+        target_true: BlockIndex,
+        target_false: BlockIndex,
+        block_order: &[BlockIndex],
+    ) -> Option<(BlockIndex, bool)> {
+        // Find current block index in order
+        let current_idx = block_order.iter().position(|&b| b == current_block)?;
+        let next_block = block_order.get(current_idx + 1)?;
+
+        if *next_block == target_false {
+            // False branch is fallthrough, branch to true
+            Some((target_true, false))
+        } else if *next_block == target_true {
+            // True branch is fallthrough, branch to false (invert)
+            Some((target_false, true))
+        } else {
+            // Neither branch is fallthrough, default to branching to true
+            Some((target_true, false))
+        }
+    }
+
     /// Emit a branch instruction with label resolution
     fn emit_branch(
         &self,
         buffer: &mut InstBuffer,
         state: &mut EmitState,
-        mut branch: Riscv32MachInst,
+        branch: Riscv32MachInst,
         branch_info: BranchInfo,
+        current_block: BlockIndex,
+        block_order: &[BlockIndex],
     ) {
         match branch_info {
             BranchInfo::TwoDest {
@@ -739,19 +789,13 @@ impl VCode<Riscv32MachInst> {
                 target_false,
             } => {
                 // Convert two-dest branch to single-dest
-                // For now, assume false is fallthrough (next block)
-                // In practice, need to check block order
-                let current_offset = buffer.cur_offset();
-                let _true_offset = state.get_label_offset(target_true);
-                let false_offset = state.get_label_offset(target_false);
-
-                // Determine if one target is fallthrough
-                // Simplified: assume false is fallthrough if it's next block
-                let (target_block, invert) = if false_offset == current_offset + 4 {
-                    (target_true, false)
-                } else {
-                    (target_false, true)
-                };
+                // Determine fallthrough based on block order
+                let (target_block, invert) = self
+                    .determine_fallthrough(current_block, target_true, target_false, block_order)
+                    .unwrap_or_else(|| {
+                        // Fallback: if we can't determine fallthrough, branch to true
+                        (target_true, false)
+                    });
 
                 // Emit branch with label target (condition inversion handled in convert_branch_to_inst)
                 let inst = self.convert_branch_to_inst(&branch, target_block, invert);
@@ -769,12 +813,7 @@ impl VCode<Riscv32MachInst> {
                 let inst = self.convert_branch_to_inst(&branch, target, false);
                 let inst_idx = buffer.emit_branch_with_label(inst, target.index() as u32);
 
-                state.resolve_or_record_fixup(
-                    buffer,
-                    inst_idx,
-                    target,
-                    BranchType::Unconditional,
-                );
+                state.resolve_or_record_fixup(buffer, inst_idx, target, BranchType::Unconditional);
             }
         }
     }
@@ -850,7 +889,7 @@ impl VCode<Riscv32MachInst> {
                 // Conditional trap if zero: skip EBREAK if condition != 0
                 // Emit: BEQ condition, zero, skip_label (skip EBREAK if condition != 0)
                 let condition_gpr = self.reg_to_gpr(*condition);
-                
+
                 // Emit branch with placeholder offset
                 let branch_inst_idx = buffer.instructions().len();
                 buffer.emit(Inst::Beq {
@@ -858,13 +897,14 @@ impl VCode<Riscv32MachInst> {
                     rs2: Gpr::Zero,
                     imm: 0, // Placeholder, will be patched
                 });
-                
+
                 // Emit EBREAK
                 buffer.emit(Inst::Ebreak);
-                
+
                 // Patch branch: skip EBREAK (4 bytes = 1 instruction)
-                // Offset is in 2-byte units, so 4 bytes = 2 units
-                let skip_offset = buffer.cur_offset();
+                // Compute skip offset relative to branch instruction
+                let branch_offset = (branch_inst_idx * 4) as u32;
+                let skip_offset = branch_offset + 4; // Skip EBREAK (4 bytes)
                 buffer.patch_branch(branch_inst_idx, skip_offset, BranchType::Conditional);
                 return;
             }
@@ -872,7 +912,7 @@ impl VCode<Riscv32MachInst> {
                 // Conditional trap if non-zero: skip EBREAK if condition == 0
                 // Emit: BNE condition, zero, skip_label (skip EBREAK if condition == 0)
                 let condition_gpr = self.reg_to_gpr(*condition);
-                
+
                 // Emit branch with placeholder offset
                 let branch_inst_idx = buffer.instructions().len();
                 buffer.emit(Inst::Bne {
@@ -880,29 +920,43 @@ impl VCode<Riscv32MachInst> {
                     rs2: Gpr::Zero,
                     imm: 0, // Placeholder, will be patched
                 });
-                
+
                 // Emit EBREAK
                 buffer.emit(Inst::Ebreak);
-                
+
                 // Patch branch: skip EBREAK (4 bytes = 1 instruction)
-                // Offset is in 2-byte units, so 4 bytes = 2 units
-                let skip_offset = buffer.cur_offset();
+                // Compute skip offset relative to branch instruction
+                let branch_offset = (branch_inst_idx * 4) as u32;
+                let skip_offset = branch_offset + 4; // Skip EBREAK (4 bytes)
                 buffer.patch_branch(branch_inst_idx, skip_offset, BranchType::Conditional);
                 return;
             }
-            Riscv32MachInst::Ecall { number, args, result } => {
+            Riscv32MachInst::Ecall {
+                number,
+                args,
+                result,
+            } => {
                 // System call ABI:
                 // - Syscall number goes in a7 (x17)
                 // - Arguments go in a0-a6 (x10-x16)
                 // - Return value comes from a0 (x10)
-                
+
                 // Move syscall number to a7
-                // For now, assume number is a constant immediate
-                // TODO: Handle case where number is in a register
+                // Note: Currently Ecall instruction only supports constant immediate numbers.
+                // To support register-based syscall numbers, the instruction structure would
+                // need to be changed to accept Reg instead of i32.
                 buffer.push_addi(Gpr::A7, Gpr::Zero, *number);
-                
+
                 // Move arguments to a0-a6
-                let arg_regs = [Gpr::A0, Gpr::A1, Gpr::A2, Gpr::A3, Gpr::A4, Gpr::A5, Gpr::A6];
+                let arg_regs = [
+                    Gpr::A0,
+                    Gpr::A1,
+                    Gpr::A2,
+                    Gpr::A3,
+                    Gpr::A4,
+                    Gpr::A5,
+                    Gpr::A6,
+                ];
                 for (i, arg) in args.iter().take(7).enumerate() {
                     let arg_gpr = self.reg_to_gpr(*arg);
                     if arg_gpr != arg_regs[i] {
@@ -910,10 +964,10 @@ impl VCode<Riscv32MachInst> {
                         buffer.push_addi(arg_regs[i], arg_gpr, 0);
                     }
                 }
-                
+
                 // Emit ECALL
                 buffer.emit(Inst::Ecall);
-                
+
                 // Move return value from a0 to result register if needed
                 if let Some(result_reg) = result {
                     let result_gpr = self.reg_to_gpr(result_reg.to_reg());
@@ -928,10 +982,17 @@ impl VCode<Riscv32MachInst> {
                 // - First 8 integer args in a0-a7 (x10-x17)
                 // - Additional args on stack (outgoing args area)
                 // - Return value in a0 (x10), second return in a1 (x11) if applicable
-                
+
                 // Move arguments to ABI registers (a0-a7)
                 let arg_regs = [
-                    Gpr::A0, Gpr::A1, Gpr::A2, Gpr::A3, Gpr::A4, Gpr::A5, Gpr::A6, Gpr::A7,
+                    Gpr::A0,
+                    Gpr::A1,
+                    Gpr::A2,
+                    Gpr::A3,
+                    Gpr::A4,
+                    Gpr::A5,
+                    Gpr::A6,
+                    Gpr::A7,
                 ];
                 for (i, arg) in args.iter().take(8).enumerate() {
                     let arg_gpr = self.reg_to_gpr(*arg);
@@ -940,7 +1001,7 @@ impl VCode<Riscv32MachInst> {
                         buffer.push_addi(arg_regs[i], arg_gpr, 0);
                     }
                 }
-                
+
                 // Handle additional arguments on stack (outgoing args area)
                 // Outgoing args are stored at the top of the frame (highest addresses)
                 // After prologue, SP points to the bottom of the frame
@@ -949,17 +1010,19 @@ impl VCode<Riscv32MachInst> {
                 for (idx, arg) in args.iter().enumerate().skip(8) {
                     let arg_gpr = self.reg_to_gpr(*arg);
                     // Stack offset: base offset to outgoing args area + per-arg offset
-                    let base_offset = (frame.setup_area_size + frame.clobber_area_size + frame.spill_slots_size) as i32;
+                    let base_offset = (frame.setup_area_size
+                        + frame.clobber_area_size
+                        + frame.spill_slots_size) as i32;
                     let arg_offset = ((idx - 8) * 4) as i32;
                     let stack_offset = base_offset + arg_offset;
                     buffer.push_sw(Gpr::Sp, arg_gpr, stack_offset);
                 }
-                
+
                 // Emit function call sequence: AUIPC + ADDI + JALR
                 // This allows us to call functions at arbitrary addresses
                 // We'll use a temporary register (t0) to hold the function address
                 let temp_reg = Gpr::T0; // t0 is a caller-saved temporary
-                
+
                 // Record relocation for the AUIPC instruction
                 // The relocation will patch both AUIPC and ADDI
                 let auipc_offset = buffer.cur_offset();
@@ -968,14 +1031,14 @@ impl VCode<Riscv32MachInst> {
                     kind: RelocKind::FunctionCall,
                     target: Symbol::local(callee.clone()), // Convert String to Symbol::local
                 });
-                
+
                 // Emit AUIPC with placeholder immediate (will be patched by relocation)
                 // AUIPC: temp_reg = (imm << 12) + pc
                 buffer.emit(Inst::Auipc {
                     rd: temp_reg,
                     imm: 0, // Placeholder, will be patched
                 });
-                
+
                 // Emit ADDI with placeholder immediate (will be patched by relocation)
                 // ADDI: temp_reg = temp_reg + imm
                 buffer.emit(Inst::Addi {
@@ -983,7 +1046,7 @@ impl VCode<Riscv32MachInst> {
                     rs1: temp_reg,
                     imm: 0, // Placeholder, will be patched
                 });
-                
+
                 // Emit JALR: ra = pc + 4; pc = temp_reg + 0
                 // JALR: rd = pc + 4; pc = rs1 + imm
                 buffer.emit(Inst::Jalr {
@@ -991,7 +1054,7 @@ impl VCode<Riscv32MachInst> {
                     rs1: temp_reg,
                     imm: 0, // No offset needed
                 });
-                
+
                 // Move return value from a0 to destination register if needed
                 if let Some(rd_reg) = rd.to_reg().to_real_reg() {
                     let rd_gpr = preg_to_gpr(rd_reg);
@@ -1045,6 +1108,11 @@ impl VCode<Riscv32MachInst> {
                 imm: 0,
             },
             Riscv32MachInst::Mul { rd, rs1, rs2 } => Inst::Mul {
+                rd: self.reg_to_gpr(rd.to_reg()),
+                rs1: self.reg_to_gpr(*rs1),
+                rs2: self.reg_to_gpr(*rs2),
+            },
+            Riscv32MachInst::Mulh { rd, rs1, rs2 } => Inst::Mulh {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 rs2: self.reg_to_gpr(*rs2),
@@ -1173,7 +1241,11 @@ impl VCode<Riscv32MachInst> {
         if let Some(preg) = reg.to_real_reg() {
             preg_to_gpr(preg)
         } else {
-            panic!("Virtual register not allocated: {:?}", reg);
+            panic!(
+                "Virtual register not allocated: {:?}. This indicates a register allocation error \
+                 - all virtual registers should be allocated before emission.",
+                reg
+            );
         }
     }
 
@@ -1396,6 +1468,28 @@ impl ApplyAllocations for Riscv32MachInst {
                 *operand_idx += 1;
             }
             Riscv32MachInst::Mul { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Mulh { rd, rs1, rs2 } => {
                 if let Some(alloc) = allocs.get(*operand_idx) {
                     if let Some(preg) = alloc.as_reg() {
                         *rd = crate::backend3::types::Writable::new(
@@ -1783,7 +1877,11 @@ impl ApplyAllocations for Riscv32MachInst {
                     *operand_idx += 1;
                 }
             }
-            Riscv32MachInst::Jal { rd, callee: _, args } => {
+            Riscv32MachInst::Jal {
+                rd,
+                callee: _,
+                args,
+            } => {
                 if let Some(alloc) = allocs.get(*operand_idx) {
                     if let Some(preg) = alloc.as_reg() {
                         *rd = crate::backend3::types::Writable::new(
@@ -1801,7 +1899,11 @@ impl ApplyAllocations for Riscv32MachInst {
                     *operand_idx += 1;
                 }
             }
-            Riscv32MachInst::Ecall { number: _, args, result } => {
+            Riscv32MachInst::Ecall {
+                number: _,
+                args,
+                result,
+            } => {
                 for arg in args.iter_mut() {
                     if let Some(alloc) = allocs.get(*operand_idx) {
                         if let Some(preg) = alloc.as_reg() {

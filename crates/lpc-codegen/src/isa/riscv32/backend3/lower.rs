@@ -231,6 +231,22 @@ impl LowerBackend for Riscv32LowerBackend {
                     }
                 }
             }
+            Opcode::Imulh => {
+                if args.len() >= 2 && !results.is_empty() {
+                    if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        let mach_inst = Riscv32MachInst::Mulh {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
+                        ctx.vcode.push(mach_inst, srcloc);
+                        return true;
+                    }
+                }
+            }
             Opcode::Idiv => {
                 if args.len() >= 2 && !results.is_empty() {
                     if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {

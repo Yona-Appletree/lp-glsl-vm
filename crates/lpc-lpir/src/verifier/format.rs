@@ -32,7 +32,16 @@ fn verify_instruction_format(
 ) {
     match &inst_data.opcode {
         // Arithmetic ops: 2 args, 1 result, no block_args, no ty, no imm
-        Opcode::Iadd | Opcode::Isub | Opcode::Imul | Opcode::Idiv | Opcode::Irem => {
+        Opcode::Iadd
+        | Opcode::Isub
+        | Opcode::Imul
+        | Opcode::Imulh
+        | Opcode::Idiv
+        | Opcode::Irem
+        | Opcode::Fadd
+        | Opcode::Fsub
+        | Opcode::Fmul
+        | Opcode::Fdiv => {
             if inst_data.args.len() != 2 {
                 errors.push(VerifierError::with_location(
                     format!(

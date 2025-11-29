@@ -276,6 +276,24 @@ fn parse_mul(input: &str) -> IResult<&str, Riscv32MachInst> {
     ))
 }
 
+/// Parse a mulh instruction: mulh v0, v1, v2
+fn parse_mulh(input: &str) -> IResult<&str, Riscv32MachInst> {
+    let (input, _) = terminated(tag("mulh"), multispace1)(input)?;
+    let (input, rd) = terminated(parse_vreg, opt(char(',')))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, rs1) = terminated(parse_vreg, opt(char(',')))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, rs2) = parse_vreg(input)?;
+    Ok((
+        input,
+        Riscv32MachInst::Mulh {
+            rd: Writable::new(Reg::from_virtual_reg(rd)),
+            rs1: Reg::from_virtual_reg(rs1),
+            rs2: Reg::from_virtual_reg(rs2),
+        },
+    ))
+}
+
 /// Parse a div instruction: div v0, v1, v2
 fn parse_div(input: &str) -> IResult<&str, Riscv32MachInst> {
     let (input, _) = terminated(tag("div"), multispace1)(input)?;
@@ -327,6 +345,7 @@ fn parse_instruction(input: &str) -> IResult<&str, Riscv32MachInst> {
         parse_sub,
         parse_add,
         parse_mul,
+        parse_mulh,
         parse_div,
         parse_rem,
     ))(input)

@@ -21,6 +21,10 @@ pub enum Opcode {
     Isub,
     /// Integer multiply: result = arg1 * arg2
     Imul,
+    /// Integer multiply high (signed): result = high 32 bits of (arg1 * arg2)
+    /// This is used for extended precision arithmetic and fixed-point operations.
+    /// Maps to RISC-V MULH instruction (M extension).
+    Imulh,
     /// Integer divide: result = arg1 / arg2
     Idiv,
     /// Integer remainder: result = arg1 % arg2
@@ -56,6 +60,16 @@ pub enum Opcode {
         /// Condition code for the comparison
         cond: FloatCC,
     },
+
+    // Floating point arithmetic
+    /// Floating point add: result = arg1 + arg2
+    Fadd,
+    /// Floating point subtract: result = arg1 - arg2
+    Fsub,
+    /// Floating point multiply: result = arg1 * arg2
+    Fmul,
+    /// Floating point divide: result = arg1 / arg2
+    Fdiv,
 
     // Constants
     /// Integer constant: result = value

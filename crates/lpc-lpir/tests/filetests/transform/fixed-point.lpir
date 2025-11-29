@@ -1,0 +1,231 @@
+test transform fixed-point
+
+function %test_fconst_zero() -> f32 {
+block0:
+    v0 = fconst 0.0
+    return v0
+}
+
+; function %test_fconst_zero() -> i32 {
+; block0:
+;     v0 = iconst 0
+;     return v0
+; }
+
+function %test_fconst_one() -> f32 {
+block0:
+    v0 = fconst 1.0
+    return v0
+}
+
+; function %test_fconst_one() -> i32 {
+; block0:
+;     v0 = iconst 65536
+;     return v0
+; }
+
+function %test_fconst_half() -> f32 {
+block0:
+    v0 = fconst 0.5
+    return v0
+}
+
+; function %test_fconst_half() -> i32 {
+; block0:
+;     v0 = iconst 32768
+;     return v0
+; }
+
+function %test_fconst_two() -> f32 {
+block0:
+    v0 = fconst 2.0
+    return v0
+}
+
+; function %test_fconst_two() -> i32 {
+; block0:
+;     v0 = iconst 131072
+;     return v0
+; }
+
+function %test_fconst_negative() -> f32 {
+block0:
+    v0 = fconst -1.5
+    return v0
+}
+
+; function %test_fconst_negative() -> i32 {
+; block0:
+;     v0 = iconst -98304
+;     return v0
+; }
+
+function %test_fadd(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fadd v0, v1
+    return v2
+}
+
+; function %test_fadd(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v2 = iadd v0, v1
+;     return v2
+; }
+
+function %test_fsub(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fsub v0, v1
+    return v2
+}
+
+; function %test_fsub(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v2 = isub v0, v1
+;     return v2
+; }
+
+function %test_fmul(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fmul v0, v1
+    return v2
+}
+
+; function %test_fmul(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v7 = iconst 16
+;     v3 = imulh v0, v1
+;     v4 = imul v0, v1
+;     v5 = ishl v3, v7
+;     v6 = ishr v4, v7
+;     v2 = ior v5, v6
+;     return v2
+; }
+
+function %test_fdiv(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fdiv v0, v1
+    return v2
+}
+
+; function %test_fdiv(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v4 = iconst 16
+;     v3 = ishl v0, v4
+;     v2 = idiv v3, v1
+;     return v2
+; }
+
+function %test_fcmp_eq(f32, f32) -> i32 {
+block0(v0: f32, v1: f32):
+    v2 = fcmp eq v0, v1
+    return v2
+}
+
+; function %test_fcmp_eq(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v2 = icmp eq v0, v1
+;     return v2
+; }
+
+function %test_fcmp_lt(f32, f32) -> i32 {
+block0(v0: f32, v1: f32):
+    v2 = fcmp lt v0, v1
+    return v2
+}
+
+; function %test_fcmp_lt(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v2 = icmp slt v0, v1
+;     return v2
+; }
+
+function %test_fcmp_le(f32, f32) -> i32 {
+block0(v0: f32, v1: f32):
+    v2 = fcmp le v0, v1
+    return v2
+}
+
+; function %test_fcmp_le(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v2 = icmp sle v0, v1
+;     return v2
+; }
+
+function %test_fcmp_gt(f32, f32) -> i32 {
+block0(v0: f32, v1: f32):
+    v2 = fcmp gt v0, v1
+    return v2
+}
+
+; function %test_fcmp_gt(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v2 = icmp sgt v0, v1
+;     return v2
+; }
+
+function %test_fcmp_ge(f32, f32) -> i32 {
+block0(v0: f32, v1: f32):
+    v2 = fcmp ge v0, v1
+    return v2
+}
+
+; function %test_fcmp_ge(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v2 = icmp sge v0, v1
+;     return v2
+; }
+
+function %test_fcmp_ne(f32, f32) -> i32 {
+block0(v0: f32, v1: f32):
+    v2 = fcmp ne v0, v1
+    return v2
+}
+
+; function %test_fcmp_ne(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v2 = icmp ne v0, v1
+;     return v2
+; }
+
+function %test_complex(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fconst 2.0
+    v3 = fadd v0, v2
+    v4 = fmul v3, v1
+    return v4
+}
+
+; function %test_complex(i32, i32) -> i32 {
+; block0(v0: i32, v1: i32):
+;     v2 = iconst 131072
+;     v3 = iadd v0, v2
+;     v9 = iconst 16
+;     v5 = imulh v3, v1
+;     v6 = imul v3, v1
+;     v7 = ishl v5, v9
+;     v8 = ishr v6, v9
+;     v4 = ior v7, v8
+;     return v4
+; }
+
+function %test_multiple_ops(f32, f32, f32) -> f32 {
+block0(v0: f32, v1: f32, v2: f32):
+    v3 = fadd v0, v1
+    v4 = fsub v3, v2
+    v5 = fmul v4, v0
+    return v5
+}
+
+; function %test_multiple_ops(i32, i32, i32) -> i32 {
+; block0(v0: i32, v1: i32, v2: i32):
+;     v3 = iadd v0, v1
+;     v4 = isub v3, v2
+;     v10 = iconst 16
+;     v6 = imulh v4, v0
+;     v7 = imul v4, v0
+;     v8 = ishl v6, v10
+;     v9 = ishr v7, v10
+;     v5 = ior v8, v9
+;     return v5
+; }
+

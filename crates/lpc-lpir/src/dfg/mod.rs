@@ -135,6 +135,7 @@ impl DFG {
             Opcode::Iadd
             | Opcode::Isub
             | Opcode::Imul
+            | Opcode::Imulh
             | Opcode::Idiv
             | Opcode::Irem
             | Opcode::Iand
@@ -148,6 +149,7 @@ impl DFG {
             | Opcode::StackAlloc { .. } => Some(Type::I32),
             Opcode::Icmp { .. } => Some(Type::I32), // Integer comparisons return i32 (0/1)
             Opcode::Fcmp { .. } => Some(Type::I32), // Floating point comparisons return i32 (0/1)
+            Opcode::Fadd | Opcode::Fsub | Opcode::Fmul | Opcode::Fdiv => Some(Type::F32),
             Opcode::Fconst => Some(Type::F32),
             Opcode::Load => None, // Must be specified explicitly
             Opcode::Store

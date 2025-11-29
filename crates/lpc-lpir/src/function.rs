@@ -336,12 +336,18 @@ impl Function {
 
         match &inst_data.opcode {
             // Arithmetic
-            Opcode::Iadd | Opcode::Isub | Opcode::Imul | Opcode::Idiv | Opcode::Irem => {
+            Opcode::Iadd
+            | Opcode::Isub
+            | Opcode::Imul
+            | Opcode::Imulh
+            | Opcode::Idiv
+            | Opcode::Irem => {
                 if inst_data.results.len() == 1 && inst_data.args.len() == 2 {
                     let opname = match inst_data.opcode {
                         Opcode::Iadd => "iadd",
                         Opcode::Isub => "isub",
                         Opcode::Imul => "imul",
+                        Opcode::Imulh => "imulh",
                         Opcode::Idiv => "idiv",
                         Opcode::Irem => "irem",
                         _ => unreachable!(),
@@ -421,6 +427,28 @@ impl Function {
                         "v{} = icmp {} v{}, v{}",
                         inst_data.results[0].index(),
                         cond,
+                        inst_data.args[0].index(),
+                        inst_data.args[1].index()
+                    )
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            // Floating point arithmetic operations
+            Opcode::Fadd | Opcode::Fsub | Opcode::Fmul | Opcode::Fdiv => {
+                if inst_data.results.len() == 1 && inst_data.args.len() == 2 {
+                    let opname = match inst_data.opcode {
+                        Opcode::Fadd => "fadd",
+                        Opcode::Fsub => "fsub",
+                        Opcode::Fmul => "fmul",
+                        Opcode::Fdiv => "fdiv",
+                        _ => unreachable!(),
+                    };
+                    write!(
+                        f,
+                        "v{} = {} v{}, v{}",
+                        inst_data.results[0].index(),
+                        opname,
                         inst_data.args[0].index(),
                         inst_data.args[1].index()
                     )

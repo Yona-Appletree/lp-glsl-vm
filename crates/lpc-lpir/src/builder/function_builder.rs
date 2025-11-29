@@ -73,6 +73,14 @@ impl FunctionBuilder {
         &mut self.function
     }
 
+    /// Get an immutable reference to the function.
+    ///
+    /// This allows reading the function structure during codegen,
+    /// which is useful for dominance analysis and other queries.
+    pub fn function(&self) -> &Function {
+        &self.function
+    }
+
     /// Get the current block entity.
     pub fn current_block(&self) -> Option<BlockEntity> {
         self.current_block

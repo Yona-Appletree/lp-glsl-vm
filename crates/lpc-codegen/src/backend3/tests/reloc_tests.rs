@@ -38,7 +38,8 @@ block0(v0: i32):
                     "Function call should have FunctionCall relocation kind"
                 );
                 assert_eq!(
-                    reloc.target.name(), callee,
+                    reloc.target.name(),
+                    callee,
                     "Relocation target should match function name"
                 );
             }
@@ -71,7 +72,11 @@ fn test_relocation_structure() {
 
     // Record a relocation
     let inst_idx = InsnIndex::new(0);
-    builder.record_reloc(inst_idx, RelocKind::FunctionCall, crate::backend3::symbols::Symbol::local("test_func"));
+    builder.record_reloc(
+        inst_idx,
+        RelocKind::FunctionCall,
+        crate::backend3::symbols::Symbol::local("test_func"),
+    );
 
     builder.end_block();
 
@@ -102,7 +107,8 @@ fn test_relocation_structure() {
         "Relocation should have correct kind"
     );
     assert_eq!(
-        reloc.target.name(), "test_func",
+        reloc.target.name(),
+        "test_func",
         "Relocation should have correct target"
     );
 }
@@ -126,11 +132,19 @@ fn test_multiple_relocations() {
     // Add multiple instructions
     let inst1 = Riscv32MachInst::Ebreak;
     builder.push(inst1, lpc_lpir::RelSourceLoc::default());
-    builder.record_reloc(InsnIndex::new(0), RelocKind::FunctionCall, crate::backend3::symbols::Symbol::local("func1"));
+    builder.record_reloc(
+        InsnIndex::new(0),
+        RelocKind::FunctionCall,
+        crate::backend3::symbols::Symbol::local("func1"),
+    );
 
     let inst2 = Riscv32MachInst::Ebreak;
     builder.push(inst2, lpc_lpir::RelSourceLoc::default());
-    builder.record_reloc(InsnIndex::new(1), RelocKind::FunctionCall, crate::backend3::symbols::Symbol::local("func2"));
+    builder.record_reloc(
+        InsnIndex::new(1),
+        RelocKind::FunctionCall,
+        crate::backend3::symbols::Symbol::local("func2"),
+    );
 
     builder.end_block();
 
@@ -151,11 +165,13 @@ fn test_multiple_relocations() {
     // Verify multiple relocations
     assert_eq!(vcode.relocations.len(), 2, "Should have two relocations");
     assert_eq!(
-        vcode.relocations[0].target.name(), "func1",
+        vcode.relocations[0].target.name(),
+        "func1",
         "First relocation should have correct target"
     );
     assert_eq!(
-        vcode.relocations[1].target.name(), "func2",
+        vcode.relocations[1].target.name(),
+        "func2",
         "Second relocation should have correct target"
     );
 }

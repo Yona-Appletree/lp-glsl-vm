@@ -238,20 +238,28 @@ impl InstBuffer {
                 | Inst::Bge { imm, .. },
                 BranchType::Conditional,
             ) => {
-                assert!(
-                    offset_in_units >= -2048 && offset_in_units <= 2047,
-                    "Branch offset {} out of range for conditional branch (max ±4KB)",
-                    offset_in_units * 2
-                );
+                if offset_in_units < -2048 || offset_in_units > 2047 {
+                    panic!(
+                        "Branch offset {} bytes ({} 2-byte units) out of range for conditional branch at offset {} (max ±4KB, ±2048 2-byte units). Branch distance: {} bytes",
+                        delta,
+                        offset_in_units,
+                        branch_offset,
+                        delta.abs()
+                    );
+                }
                 *imm = offset_in_units as i32;
             }
             // Unconditional jumps: 20-bit signed offset (in 2-byte units)
             (Inst::Jal { imm, .. }, BranchType::Unconditional) => {
-                assert!(
-                    offset_in_units >= -524288 && offset_in_units <= 524287,
-                    "Jump offset {} out of range for unconditional jump (max ±1MB)",
-                    offset_in_units * 2
-                );
+                if offset_in_units < -524288 || offset_in_units > 524287 {
+                    panic!(
+                        "Jump offset {} bytes ({} 2-byte units) out of range for unconditional jump at offset {} (max ±1MB, ±524288 2-byte units). Jump distance: {} bytes",
+                        delta,
+                        offset_in_units,
+                        branch_offset,
+                        delta.abs()
+                    );
+                }
                 *imm = offset_in_units as i32;
             }
             _ => panic!("Mismatch between instruction type and branch type"),

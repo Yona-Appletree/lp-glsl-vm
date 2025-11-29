@@ -121,6 +121,11 @@ pub fn mul(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
     encode_r(0x33, rd, rs1, rs2, 0x0, 0x01)
 }
 
+/// MULH: rd = high 32 bits of (rs1 * rs2) (signed, M extension)
+pub fn mulh(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x1, 0x01)
+}
+
 /// DIV: rd = rs1 / rs2 (signed, M extension)
 pub fn div(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
     encode_r(0x33, rd, rs1, rs2, 0x4, 0x01)

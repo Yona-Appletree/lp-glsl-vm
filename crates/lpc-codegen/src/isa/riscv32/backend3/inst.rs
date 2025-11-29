@@ -72,6 +72,13 @@ pub enum Riscv32MachInst {
         rs2: Reg,
     },
 
+    /// MULH: rd = high 32 bits of (rs1 * rs2) (signed, RISC-V M extension)
+    Mulh {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        rs2: Reg,
+    },
+
     /// DIV: rd = rs1 / rs2 (signed, RISC-V M extension)
     Div {
         rd: Writable<Reg>,
@@ -301,6 +308,11 @@ impl MachInst for Riscv32MachInst {
                 }
             }
             Riscv32MachInst::Mul { rd, rs1, rs2 } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs2), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Mulh { rd, rs1, rs2 } => {
                 collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
                 collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
                 collector.visit_use(VReg::from(*rs2), OperandConstraint::Any);
