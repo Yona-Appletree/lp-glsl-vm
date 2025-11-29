@@ -1,0 +1,21 @@
+test compile
+
+function %callee(i32) -> i32 {
+block0(v0: i32):
+    v1 = iadd v0, v0
+    return v1
+}
+
+function %caller(i32) -> i32 {
+block0(v0: i32):
+    v1 = call %callee(v0)
+    return v1
+}
+
+; This test verifies that Call instructions are lowered correctly.
+; The function should compile without errors.
+; VCode structure should have:
+; - Jal instruction for the call
+; - Relocation recorded for function call
+; - Argument VRegs extracted correctly
+

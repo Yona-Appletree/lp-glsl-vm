@@ -106,6 +106,9 @@ pub struct FrameLayout {
     pub spill_slots_size: u32,
     /// ABI size: space for ABI requirements (outgoing args, etc.)
     pub abi_size: u32,
+    /// Return area size: space for storing return values beyond a0/a1 (>2 values)
+    /// This is allocated by the caller and passed as a hidden argument
+    pub return_area_size: u32,
     /// List of callee-saved registers that are clobbered
     pub clobbered_regs: Vec<Gpr>,
 }
@@ -113,7 +116,11 @@ pub struct FrameLayout {
 impl FrameLayout {
     /// Compute total frame size
     pub fn total_size(&self) -> u32 {
-        self.setup_area_size + self.clobber_area_size + self.spill_slots_size + self.abi_size
+        self.setup_area_size
+            + self.clobber_area_size
+            + self.spill_slots_size
+            + self.abi_size
+            + (if self.return_area_size > 0 { 4 } else { 0 }) // Space for saving return area pointer
     }
 
     /// Compute spill slot offset from SP (after prologue)

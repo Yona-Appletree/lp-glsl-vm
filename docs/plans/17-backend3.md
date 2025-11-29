@@ -348,7 +348,7 @@ crates/lpc-codegen/src/isa/riscv32/backend3/
 fn test_example() {
     // Input: textual LPIR format for clarity
     let lpir_text = r#"
-        function @test(i32 %a, i32 %b) -> i32 {
+        function %test(i32 %a, i32 %b) -> i32 {
         entry:
             %0 = iadd %a, %b
             ret %0

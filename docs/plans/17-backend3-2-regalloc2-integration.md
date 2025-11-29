@@ -278,7 +278,7 @@ impl ABIMachineSpec for Riscv32ABI {
 fn test_regalloc_simple() {
     // Input: textual LPIR format for clarity
     let lpir_text = r#"
-        function @test(i32 %a, i32 %b) -> i32 {
+        function %test(i32 %a, i32 %b) -> i32 {
         entry:
             %0 = iadd %a, %b
             ret %0
@@ -296,7 +296,7 @@ fn test_regalloc_simple() {
 fn test_regalloc_with_spilling() {
     // Input: textual LPIR format - function with register pressure
     let lpir_text = r#"
-        function @test(i32 %a, i32 %b, i32 %c, i32 %d, i32 %e, i32 %f, i32 %g, i32 %h, i32 %i, i32 %j) -> i32 {
+        function %test(i32 %a, i32 %b, i32 %c, i32 %d, i32 %e, i32 %f, i32 %g, i32 %h, i32 %i, i32 %j) -> i32 {
         entry:
             %0 = iadd %a, %b
             %1 = iadd %c, %d

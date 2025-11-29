@@ -107,7 +107,7 @@
 ```lpir
 test compile
 
-function @test(i32* %ptr, i32 %val) -> i32 {
+function %test(i32* %ptr, i32 %val) -> i32 {
 block0(v0: i32*, v1: i32):
     store v1, v0
     %0 = load v0
@@ -132,7 +132,7 @@ block0(v0: i32*, v1: i32):
 ```lpir
 test compile
 
-function @test(i32 %a) -> i32 {
+function %test(i32 %a) -> i32 {
 block0(v0: i32):
     %cond = icmp eq v0, 0
     brif %cond, block1, block2
@@ -169,22 +169,22 @@ block2:
 ```lpir
 test compile
 
-function @helper(i32 %x) -> i32 {
+function %helper(i32 %x) -> i32 {
 block0(v0: i32):
     %0 = iadd v0, 1
     return %0
 }
 
-function @main(i32 %a) -> i32 {
+function %main(i32 %a) -> i32 {
 block0(v0: i32):
     %0 = call @helper(v0)
     %1 = call @helper(%0)
     return %1
 }
 
-; check: function @helper
+; check: function %helper
 ; sameln: # Prologue
-; check: function @main
+; check: function %main
 ; sameln: # Prologue
 ; check: # Call @helper
 ; sameln: mv   a0, a0

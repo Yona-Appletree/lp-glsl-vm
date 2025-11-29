@@ -1052,6 +1052,7 @@ dependencies = [
 name = "lpc-filetests"
 version = "0.1.0"
 dependencies = [
+ "lpc-codegen",
  "lpc-lpir",
 ]
 

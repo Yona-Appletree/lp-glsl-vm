@@ -7,11 +7,11 @@
 
 extern crate alloc;
 
-mod backend3;
+pub mod backend3;
 pub mod debug;
 mod elf;
 pub mod emu;
-mod isa;
+pub mod isa;
 
 // Re-export modules from isa::riscv32
 // Re-export emu items for convenience

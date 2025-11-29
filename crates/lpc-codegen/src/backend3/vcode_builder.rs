@@ -78,9 +78,12 @@ impl<I: MachInst> VCodeBuilder<I> {
     }
 
     /// Push an instruction with source location
-    pub fn push(&mut self, inst: I, srcloc: RelSourceLoc) {
+    /// Returns the instruction index
+    pub fn push(&mut self, inst: I, srcloc: RelSourceLoc) -> usize {
+        let idx = self.insts.len();
         self.insts.push(inst);
         self.srclocs.push(srcloc);
+        idx
     }
 
     /// Record a constant for a virtual register

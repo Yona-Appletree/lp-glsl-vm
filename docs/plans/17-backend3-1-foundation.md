@@ -642,7 +642,7 @@ impl VCode {
 fn test_lower_iadd() {
     // Input: textual LPIR format for clarity
     let lpir_text = r#"
-        function @test(i32 %a, i32 %b) -> i32 {
+        function %test(i32 %a, i32 %b) -> i32 {
         entry:
             %0 = iadd %a, %b
             ret %0
@@ -659,7 +659,7 @@ fn test_lower_iadd() {
 fn test_constant_materialization_large() {
     // Input: textual LPIR format
     let lpir_text = r#"
-        function @test() -> i32 {
+        function %test() -> i32 {
         entry:
             %0 = iconst 50000
             ret %0

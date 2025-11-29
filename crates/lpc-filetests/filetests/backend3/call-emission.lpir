@@ -1,0 +1,28 @@
+test compile
+
+function %callee(i32) -> i32 {
+block0(v0: i32):
+    v1 = iadd v0, v0
+    return v1
+}
+
+function %caller(i32) -> i32 {
+block0(v0: i32):
+    v1 = call %callee(v0)
+    return v1
+}
+
+; check: function %caller
+; check: # Prologue
+; sameln: addi sp, sp, -8
+; check: # Call setup
+; sameln: mv   a0, a0        # Pass argument (may be optimized away)
+; sameln: auipc
+; sameln: addi
+; sameln: jalr ra,
+; check: # Epilogue
+; sameln: lw   s0, 0(sp)
+; sameln: lw   ra, 4(sp)
+; sameln: addi sp, sp, 8
+; sameln: jalr zero, ra, 0
+

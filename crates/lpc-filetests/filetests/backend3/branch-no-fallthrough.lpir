@@ -1,0 +1,20 @@
+test compile
+
+function %test_no_fallthrough(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = icmp eq v0, v1
+    brif v2, block2, block3
+block1:
+    v3 = iadd v0, v1
+    return v3
+block2:
+    return v0
+block3:
+    return v1
+}
+
+; This test verifies two-dest branch handling when neither target is fallthrough.
+; Block0 branches to block2 or block3, but block1 comes next in emission order.
+; Expected: emit inverted conditional branch to one target, then unconditional jump to the other.
+; The function should compile without errors.
+

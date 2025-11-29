@@ -1,0 +1,19 @@
+test compile
+
+function %callee(i32) -> i32 {
+block0(v0: i32):
+    v1 = iadd v0, v0
+    return v1
+}
+
+function %caller(i32) -> i32 {
+block0(v0: i32):
+    v1 = call %callee(v0)
+    return v1
+}
+
+; This test verifies that relocation fixup works correctly.
+; The function should compile without errors.
+; Function call addresses should be patched correctly.
+; Local vs external symbol resolution should work.
+

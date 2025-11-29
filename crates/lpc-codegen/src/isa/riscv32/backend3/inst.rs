@@ -203,6 +203,9 @@ pub enum Riscv32MachInst {
         rd: Writable<Reg>,
         callee: alloc::string::String,
         args: alloc::vec::Vec<Reg>,
+        /// Number of return values (for multi-return support)
+        /// If > 2, caller must allocate return area and pass pointer in a0
+        return_count: usize,
     },
 
     /// ECALL: system call

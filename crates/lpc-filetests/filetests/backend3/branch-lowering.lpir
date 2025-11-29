@@ -1,0 +1,19 @@
+test compile
+
+function %test_branch(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = icmp eq v0, v1
+    brif v2, block1, block2
+block1:
+    return v0
+block2:
+    return v1
+}
+
+; This test verifies that Br (conditional branch) is lowered correctly.
+; The function should compile without errors.
+; VCode structure should have:
+; - Block0 with Br instruction
+; - Block1 and block2 as successors
+; - Branch arguments (phi moves) handled via edge blocks
+

@@ -1,0 +1,26 @@
+test compile
+
+function %complex_cfg(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = icmp eq v0, v1
+    brif v3, block1, block2
+block1:
+    v4 = icmp slt v1, v2
+    brif v4, block3, block4
+block2:
+    v5 = iadd v0, v2
+    return v5
+block3:
+    v6 = isub v1, v2
+    return v6
+block4:
+    v7 = imul v1, v2
+    return v7
+}
+
+; This test verifies complex control flow patterns:
+; - Nested branches
+; - Multiple branches in sequence
+; - Mixed control flow
+; The function should compile and emit correct code.
+

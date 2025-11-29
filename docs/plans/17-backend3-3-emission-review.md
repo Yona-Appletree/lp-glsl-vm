@@ -523,7 +523,7 @@ Following the plan document's guidelines:
 fn test_function_call_with_stack_args() {
     // Input: textual LPIR format
     let lpir_text = r#"
-        function @test(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+        function %test(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
         block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32):
             v10 = call @other(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9)
             return v10

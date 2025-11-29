@@ -14,6 +14,7 @@ pub mod parser;
 
 mod test_cat;
 mod test_cfg;
+mod test_compile;
 mod test_domtree;
 mod test_transform;
 mod test_verifier;

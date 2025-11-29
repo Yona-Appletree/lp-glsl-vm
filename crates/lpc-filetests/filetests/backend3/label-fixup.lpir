@@ -1,0 +1,21 @@
+test compile
+
+function %test_label_fixup(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = icmp eq v0, v1
+    brif v2, block1, block2
+block1:
+    v3 = icmp slt v0, v1
+    brif v3, block3, block0  # Backward branch
+block2:
+    return v0
+block3:
+    return v1
+}
+
+; This test verifies label fixup resolution:
+; - Forward branches (block0 -> block1, block0 -> block2)
+; - Backward branches (block1 -> block0)
+; - Multiple branches to same target (block0 -> block1, block1 -> block0)
+; The function should compile and all branches should be resolved correctly.
+

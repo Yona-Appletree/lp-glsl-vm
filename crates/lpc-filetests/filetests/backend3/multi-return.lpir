@@ -1,0 +1,16 @@
+test compile
+
+function %test_multi_return(i32, i32, i32) -> (i32, i32, i32) {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = iadd v0, v1
+    v4 = isub v0, v1
+    v5 = imul v1, v2
+    return v3, v4, v5
+}
+
+; This test verifies multi-return support (>2 return values).
+; The function should compile without errors.
+; Return values 1-2 should go to a0-a1.
+; Return value 3+ should be stored to return area.
+; Return area pointer should be saved in prologue.
+

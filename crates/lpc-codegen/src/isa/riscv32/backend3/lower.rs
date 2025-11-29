@@ -497,8 +497,18 @@ impl LowerBackend for Riscv32LowerBackend {
                     rd,
                     callee: callee.clone(),
                     args: arg_vregs,
+                    return_count: results.len(),
                 };
-                ctx.vcode.push(mach_inst, srcloc);
+                let inst_idx = ctx.vcode.push(mach_inst, srcloc);
+
+                // Record relocation for function call
+                use crate::backend3::{symbols::Symbol, types::InsnIndex, vcode::RelocKind};
+                ctx.vcode.record_reloc(
+                    InsnIndex::new(inst_idx),
+                    RelocKind::FunctionCall,
+                    Symbol::local(callee.clone()),
+                );
+
                 return true;
             }
             Opcode::Syscall => {

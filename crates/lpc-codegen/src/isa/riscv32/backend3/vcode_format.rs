@@ -107,7 +107,12 @@ impl fmt::Display for Riscv32MachInst {
             Riscv32MachInst::Srai { rd, rs1, imm } => {
                 write!(f, "srai {}, {}, {}", rd, rs1, imm)
             }
-            Riscv32MachInst::Jal { rd, callee, args } => {
+            Riscv32MachInst::Jal {
+                rd,
+                callee,
+                args,
+                return_count: _,
+            } => {
                 write!(
                     f,
                     "jal {}, {}({})",

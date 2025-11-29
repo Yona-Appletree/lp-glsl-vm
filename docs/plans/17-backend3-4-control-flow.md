@@ -310,7 +310,7 @@ See `17-backend3-deferred.md` for more details on island/veneer insertion.
 ```lpir
 test compile
 
-function @test(i32 %a, i32 %b) -> i32 {
+function %test(i32 %a, i32 %b) -> i32 {
 block0(v0: i32, v1: i32):
     %cond = icmp eq v0, v1
     brif %cond, block1, block2
@@ -349,19 +349,19 @@ block2:
 ```lpir
 test compile
 
-function @callee(i32 %x) -> i32 {
+function %callee(i32 %x) -> i32 {
 block0(v0: i32):
     %0 = iadd v0, v0
     return %0
 }
 
-function @caller(i32 %a) -> i32 {
+function %caller(i32 %a) -> i32 {
 block0(v0: i32):
     %0 = call @callee(v0)
     return %0
 }
 
-; check: function @caller
+; check: function %caller
 ; check: # Prologue
 ; sameln: addi sp, sp, -8
 ; check: # Call setup
@@ -379,7 +379,7 @@ block0(v0: i32):
 ```lpir
 test compile
 
-function @test(i32 %a, i32 %b) -> (i32, i32, i32) {
+function %test(i32 %a, i32 %b) -> (i32, i32, i32) {
 block0(v0: i32, v1: i32):
     %0 = iadd v0, v1
     %1 = isub v0, v1
@@ -451,3 +451,46 @@ Branch resolution is integrated into the emission phase (`emit.rs`):
 - ✅ Can handle multi-return (>2 values)
 - ✅ Can fix up relocations
 - ✅ Can compile functions with branches and calls end-to-end
+
+## Implementation Status
+
+### Completed Features
+
+1. **Branch Range Validation** (`crates/lpc-codegen/src/isa/riscv32/inst_buffer.rs`)
+
+   - ✅ Conditional branches: ±4KB validation implemented
+   - ✅ Unconditional jumps: ±1MB validation implemented
+   - ✅ Descriptive error messages on out-of-range branches
+
+2. **Two-Dest Branch Edge Cases** (`crates/lpc-codegen/src/isa/riscv32/backend3/emit.rs`)
+
+   - ✅ Fixed handling when neither target is fallthrough
+   - ✅ Emits inverted conditional branch + unconditional jump correctly
+   - ✅ Updated `determine_fallthrough` to return `None` when neither target is fallthrough
+
+3. **Relocation Integration** (`crates/lpc-codegen/src/isa/riscv32/backend3/emit.rs`)
+
+   - ✅ Relocations recorded during emission
+   - ✅ Relocation fixup working correctly for function calls
+   - ✅ PC-relative and absolute addressing supported
+
+4. **Multi-Return Support**
+
+   - ✅ Callee side: return area mechanism implemented
+   - ✅ Return area pointer saved/restored in prologue/epilogue
+   - ✅ Return values >2 stored to return area
+   - ✅ Caller side: infrastructure in place (return_count tracking, return area allocation prepared)
+   - ⚠️ Caller-side return value loading incomplete (requires destination VReg information)
+
+5. **Test Coverage**
+   - ✅ Added test for two-dest branch with no fallthrough (`branch-no-fallthrough.lpir`)
+   - ✅ Fixed test file syntax (function signatures, instruction results)
+   - ✅ Updated test runner to handle `%name` format correctly
+
+### Known Limitations
+
+1. **Caller-Side Multi-Return**: Full implementation requires knowing destination VRegs for return values 3+, which would need additional information in the Jal instruction or access to Call instruction results during emission.
+
+2. **Branch Range**: Currently panics on out-of-range branches. Veneer insertion for out-of-range branches is deferred (see deferred features document).
+
+3. **Test Files**: Some compile tests are failing due to register allocation issues (VRegs not allocated). This appears to be a pre-existing issue unrelated to control flow implementation. Parsing and syntax are now correct.

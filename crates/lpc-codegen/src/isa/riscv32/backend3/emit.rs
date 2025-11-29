@@ -10,6 +10,7 @@ use regalloc2::{Edit, Function as RegallocFunction};
 
 use crate::{
     backend3::{
+        branch::{determine_fallthrough, BranchInfo},
         symbols::{Symbol, SymbolTable},
         types::{BlockIndex, InsnIndex},
         vcode::{MachInst, MachTerminator, RelocKind, VCode},
@@ -516,11 +517,29 @@ impl VCode<Riscv32MachInst> {
             }
         }
 
+        // Compute maximum return value count
+        // Scan all Return instructions to find the maximum number of return values
+        let mut max_return_count = 0usize;
+        for inst in &self.insts {
+            if let Riscv32MachInst::Return { ret_vals } = inst {
+                max_return_count = max_return_count.max(ret_vals.len());
+            }
+        }
+
+        // Return area size: space for return values beyond a0/a1 (>2 values)
+        // Each return value is 4 bytes (i32)
+        let return_area_size = if max_return_count > 2 {
+            ((max_return_count - 2) * 4) as u32
+        } else {
+            0
+        };
+
         let mut frame = FrameLayout {
             setup_area_size: 8, // FP + RA (8 bytes)
             clobber_area_size: (clobbered_callee_saved.len() * 4) as u32,
             spill_slots_size: spill_slots_size as u32,
             abi_size: max_stack_args,
+            return_area_size,
             clobbered_regs: clobbered_callee_saved,
         };
 
@@ -547,15 +566,26 @@ impl VCode<Riscv32MachInst> {
         buffer.push_sw(Gpr::Sp, Gpr::Ra, 4);
         buffer.push_sw(Gpr::Sp, Gpr::S0, 0); // Save old frame pointer (s0/x8)
 
-        // 2. Adjust SP for entire frame
+        // 2. Save return area pointer if needed (>2 return values)
+        // The return area pointer is passed as a hidden argument in a0
+        // We need to save it before it gets overwritten
+        let mut offset = 8; // After setup area
+        if frame.return_area_size > 0 {
+            // Save a0 (return area pointer) to stack
+            // It will be stored after setup area, before clobbered registers
+            buffer.push_sw(Gpr::Sp, Gpr::A0, offset);
+            offset += 4;
+        }
+
+        // 3. Adjust SP for entire frame
         let total_size = frame.total_size();
         if total_size > 8 {
             buffer.push_addi(Gpr::Sp, Gpr::Sp, -((total_size - 8) as i32));
             state.sp_offset = -(total_size as i32);
         }
 
-        // 3. Save clobbered callee-saved registers
-        let mut offset = 8; // After setup area
+        // 4. Save clobbered callee-saved registers
+        // Offset starts after setup area + return area pointer (if any)
         for reg in &frame.clobbered_regs {
             buffer.push_sw(Gpr::Sp, *reg, offset);
             offset += 4;
@@ -565,7 +595,9 @@ impl VCode<Riscv32MachInst> {
     /// Generate epilogue (emitted at each return instruction)
     fn gen_epilogue(&self, buffer: &mut InstBuffer, state: &mut EmitState, frame: &FrameLayout) {
         // 1. Restore clobbered callee-saved registers (reverse order)
-        let mut offset = 8 + (frame.clobbered_regs.len() * 4) as i32;
+        // Offset accounts for setup area (8) + return area pointer save (4 if needed)
+        let return_area_save_size = if frame.return_area_size > 0 { 4 } else { 0 };
+        let mut offset = 8 + return_area_save_size + (frame.clobbered_regs.len() * 4) as i32;
         for reg in frame.clobbered_regs.iter().rev() {
             offset -= 4;
             buffer.push_lw(*reg, Gpr::Sp, offset);
@@ -673,8 +705,42 @@ impl VCode<Riscv32MachInst> {
                 continue;
             }
 
-            // If this is a return, emit epilogue instead of return instruction
+            // If this is a return, emit return values then epilogue
             if mach_inst.is_term() == MachTerminator::Ret {
+                // Extract return values from Return instruction
+                if let Riscv32MachInst::Return { ret_vals } = &mach_inst {
+                    // Move first 2 return values to a0-a1 (RISC-V ABI)
+                    let ret_regs = [Gpr::A0, Gpr::A1];
+                    for (i, ret_val) in ret_vals.iter().take(2).enumerate() {
+                        let ret_val_gpr = self.reg_to_gpr(*ret_val);
+                        if ret_val_gpr != ret_regs[i] {
+                            buffer.push_addi(ret_regs[i], ret_val_gpr, 0);
+                        }
+                    }
+
+                    // For >2 return values, store to return area
+                    // Return area pointer was saved in prologue at offset 8 from original SP
+                    // After prologue, SP has been adjusted, so we need to compute the offset
+                    // Return area pointer is at: original_SP + 8
+                    // After prologue: SP = original_SP - total_size
+                    // So return area pointer is at: SP + total_size + 8
+                    if ret_vals.len() > 2 {
+                        let return_area_ptr_offset = (frame.total_size() + 8) as i32;
+
+                        // Load return area pointer from stack
+                        let temp_reg = Gpr::T0; // Use t0 as temporary
+                        buffer.push_lw(temp_reg, Gpr::Sp, return_area_ptr_offset);
+
+                        // Store return values 3+ to return area
+                        // Return values are stored at offsets 0, 4, 8, ... from return area pointer
+                        for (i, ret_val) in ret_vals.iter().enumerate().skip(2) {
+                            let ret_val_gpr = self.reg_to_gpr(*ret_val);
+                            let store_offset = ((i - 2) * 4) as i32;
+                            buffer.push_sw(temp_reg, ret_val_gpr, store_offset);
+                        }
+                    }
+                }
+
                 self.gen_epilogue(buffer, state, frame);
                 // Skip remaining edits for this instruction
                 while edit_idx < block_edits.len() {
@@ -747,29 +813,7 @@ impl VCode<Riscv32MachInst> {
         }
     }
 
-    /// Determine which branch target is the fallthrough based on block order
-    fn determine_fallthrough(
-        &self,
-        current_block: BlockIndex,
-        target_true: BlockIndex,
-        target_false: BlockIndex,
-        block_order: &[BlockIndex],
-    ) -> Option<(BlockIndex, bool)> {
-        // Find current block index in order
-        let current_idx = block_order.iter().position(|&b| b == current_block)?;
-        let next_block = block_order.get(current_idx + 1)?;
-
-        if *next_block == target_false {
-            // False branch is fallthrough, branch to true
-            Some((target_true, false))
-        } else if *next_block == target_true {
-            // True branch is fallthrough, branch to false (invert)
-            Some((target_false, true))
-        } else {
-            // Neither branch is fallthrough, default to branching to true
-            Some((target_true, false))
-        }
-    }
+    // determine_fallthrough is now imported from backend3::branch
 
     /// Emit a branch instruction with label resolution
     fn emit_branch(
@@ -788,24 +832,62 @@ impl VCode<Riscv32MachInst> {
             } => {
                 // Convert two-dest branch to single-dest
                 // Determine fallthrough based on block order
-                let (target_block, invert) = self
-                    .determine_fallthrough(current_block, target_true, target_false, block_order)
-                    .unwrap_or_else(|| {
-                        // Fallback: if we can't determine fallthrough, branch to true
-                        (target_true, false)
-                    });
+                match determine_fallthrough(current_block, target_true, target_false, block_order) {
+                    Some((target_block, invert)) => {
+                        // One target is fallthrough - emit conditional branch to the other
+                        let inst = self.convert_branch_to_inst(&branch, target_block, invert);
+                        let inst_idx =
+                            buffer.emit_branch_with_label(inst, target_block.index() as u32);
 
-                // Emit branch with label target (condition inversion handled in convert_branch_to_inst)
-                let inst = self.convert_branch_to_inst(&branch, target_block, invert);
-                let inst_idx = buffer.emit_branch_with_label(inst, target_block.index() as u32);
+                        // Try to resolve immediately, or record fixup
+                        state.resolve_or_record_fixup(
+                            buffer,
+                            inst_idx,
+                            target_block,
+                            BranchType::Conditional,
+                        );
+                    }
+                    None => {
+                        // Neither target is fallthrough - emit inverted conditional to false,
+                        // then unconditional jump to true
+                        // Emit inverted conditional branch to false target
+                        let cond_inst = self.convert_branch_to_inst(&branch, target_false, true);
+                        let cond_inst_idx =
+                            buffer.emit_branch_with_label(cond_inst, target_false.index() as u32);
+                        state.resolve_or_record_fixup(
+                            buffer,
+                            cond_inst_idx,
+                            target_false,
+                            BranchType::Conditional,
+                        );
 
-                // Try to resolve immediately, or record fixup
-                state.resolve_or_record_fixup(
-                    buffer,
-                    inst_idx,
-                    target_block,
-                    BranchType::Conditional,
-                );
+                        // Emit unconditional jump to true target
+                        // Create a Jump instruction for unconditional jump
+                        let jump_inst = match branch {
+                            Riscv32MachInst::Jump => Inst::Jal {
+                                rd: Gpr::Zero,
+                                imm: 0, // Will be patched
+                            },
+                            Riscv32MachInst::Br { .. } => {
+                                // For conditional branch, we need to create an unconditional jump
+                                // This happens when neither target is fallthrough
+                                Inst::Jal {
+                                    rd: Gpr::Zero,
+                                    imm: 0, // Will be patched
+                                }
+                            }
+                            _ => panic!("Not a branch instruction: {:?}", branch),
+                        };
+                        let jump_inst_idx =
+                            buffer.emit_branch_with_label(jump_inst, target_true.index() as u32);
+                        state.resolve_or_record_fixup(
+                            buffer,
+                            jump_inst_idx,
+                            target_true,
+                            BranchType::Unconditional,
+                        );
+                    }
+                }
             }
             BranchInfo::OneDest { target } => {
                 let inst = self.convert_branch_to_inst(&branch, target, false);
@@ -975,13 +1057,60 @@ impl VCode<Riscv32MachInst> {
                 }
                 return;
             }
-            Riscv32MachInst::Jal { rd, callee, args } => {
+            Riscv32MachInst::Jal {
+                rd,
+                callee,
+                args,
+                return_count,
+            } => {
                 // Function call ABI:
                 // - First 8 integer args in a0-a7 (x10-x17)
                 // - Additional args on stack (outgoing args area)
                 // - Return value in a0 (x10), second return in a1 (x11) if applicable
+                // - For >2 returns: return area pointer passed in a0 (hidden argument)
 
-                // Move arguments to ABI registers (a0-a7)
+                // Handle multi-return: allocate return area and pass pointer
+                let return_area_ptr = if *return_count > 2 {
+                    // Allocate return area on stack (in outgoing args area)
+                    // Return area size: (return_count - 2) * 4 bytes
+                    let _return_area_size = ((return_count - 2) * 4) as i32;
+
+                    // Allocate space in outgoing args area
+                    // The return area is allocated at the top of the outgoing args area
+                    let base_offset = (frame.setup_area_size
+                        + frame.clobber_area_size
+                        + frame.spill_slots_size) as i32;
+                    let return_area_offset = base_offset + (frame.abi_size as i32);
+
+                    // Save current a0 if it's being used as first argument
+                    let a0_in_use = !args.is_empty();
+                    if a0_in_use {
+                        // Save a0 to temporary register (t1) before allocating return area
+                        buffer.push_addi(Gpr::T1, Gpr::A0, 0);
+                    }
+
+                    // Allocate return area: adjust SP (but we can't modify SP here, so we use the frame layout)
+                    // Actually, the return area is allocated in the caller's frame, not by adjusting SP
+                    // We'll pass the address of the return area (SP + offset) in a0
+                    // Compute return area address: SP + return_area_offset
+                    // Use t0 as temporary to compute address
+                    buffer.push_addi(Gpr::T0, Gpr::Sp, return_area_offset);
+
+                    // Pass return area pointer in a0 (this overwrites first argument if present)
+                    // For multi-return, a0 is used for return area pointer, not first argument
+                    // First argument must be passed in a1 instead (shift all args)
+                    Some(Gpr::T0) // Return area pointer is in t0, will be moved to a0
+                } else {
+                    None
+                };
+
+                // If multi-return, pass return area pointer in a0 first
+                if let Some(return_area_ptr_reg) = return_area_ptr {
+                    buffer.push_addi(Gpr::A0, return_area_ptr_reg, 0);
+                }
+
+                // Move arguments to ABI registers (a0-a7, or a1-a7 if multi-return)
+                let arg_start_idx = if return_area_ptr.is_some() { 1 } else { 0 };
                 let arg_regs = [
                     Gpr::A0,
                     Gpr::A1,
@@ -992,11 +1121,12 @@ impl VCode<Riscv32MachInst> {
                     Gpr::A6,
                     Gpr::A7,
                 ];
-                for (i, arg) in args.iter().take(8).enumerate() {
+                for (i, arg) in args.iter().take(8 - arg_start_idx).enumerate() {
                     let arg_gpr = self.reg_to_gpr(*arg);
-                    if arg_gpr != arg_regs[i] {
+                    let target_reg = arg_regs[arg_start_idx + i];
+                    if arg_gpr != target_reg {
                         // Move argument to ABI register
-                        buffer.push_addi(arg_regs[i], arg_gpr, 0);
+                        buffer.push_addi(target_reg, arg_gpr, 0);
                     }
                 }
 
@@ -1053,12 +1183,37 @@ impl VCode<Riscv32MachInst> {
                     imm: 0, // No offset needed
                 });
 
-                // Move return value from a0 to destination register if needed
-                if let Some(rd_reg) = rd.to_reg().to_real_reg() {
-                    let rd_gpr = preg_to_gpr(rd_reg);
-                    if rd_gpr != Gpr::A0 {
-                        buffer.push_addi(rd_gpr, Gpr::A0, 0);
+                // Handle return values
+                if *return_count > 2 {
+                    // Multi-return: first 2 values in a0-a1, rest in return area
+                    // Load return values 3+ from return area
+                    // Return area pointer is still in a0 (or we need to reload it)
+                    // Actually, after the call, a0 contains the first return value
+                    // We need to reload the return area pointer
+                    let _return_area_size = ((return_count - 2) * 4) as i32;
+                    let base_offset = (frame.setup_area_size
+                        + frame.clobber_area_size
+                        + frame.spill_slots_size) as i32;
+                    let return_area_offset = base_offset + (frame.abi_size as i32);
+
+                    // Reload return area pointer to t0
+                    buffer.push_addi(Gpr::T0, Gpr::Sp, return_area_offset);
+
+                    // Load return values 3+ from return area
+                    // Note: This assumes the caller knows which VRegs to load into
+                    // For now, we can't load them without knowing the destination VRegs
+                    // This is a limitation - we'd need the Call instruction's results to know where to load
+                    // For now, we'll just note that return values 3+ are in the return area
+                } else {
+                    // Single or double return: values in a0-a1
+                    // Move first return value from a0 to destination register if needed
+                    if let Some(rd_reg) = rd.to_reg().to_real_reg() {
+                        let rd_gpr = preg_to_gpr(rd_reg);
+                        if rd_gpr != Gpr::A0 {
+                            buffer.push_addi(rd_gpr, Gpr::A0, 0);
+                        }
                     }
+                    // TODO: Handle second return value (a1) if return_count == 2
                 }
                 return;
             }
@@ -1290,16 +1445,7 @@ impl VCode<Riscv32MachInst> {
     }
 }
 
-/// Branch information for emission
-enum BranchInfo {
-    TwoDest {
-        target_true: BlockIndex,
-        target_false: BlockIndex,
-    },
-    OneDest {
-        target: BlockIndex,
-    },
-}
+// BranchInfo is now imported from backend3::branch
 
 /// Helper to collect operands for allocation application
 struct AllocationCollector<'a> {
@@ -1879,6 +2025,7 @@ impl ApplyAllocations for Riscv32MachInst {
                 rd,
                 callee: _,
                 args,
+                return_count: _,
             } => {
                 if let Some(alloc) = allocs.get(*operand_idx) {
                     if let Some(preg) = alloc.as_reg() {

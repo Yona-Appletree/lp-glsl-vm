@@ -1,0 +1,18 @@
+test compile
+
+function %test_branch_range(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = icmp eq v0, v1
+    brif v2, block1, block2
+block1:
+    return v0
+block2:
+    return v1
+}
+
+; This test verifies branch range validation.
+; For small functions (<4KB), branches should be in range.
+; The function should compile successfully.
+; Note: Out-of-range branches would panic during emission,
+; but this function is small enough to be in range.
+

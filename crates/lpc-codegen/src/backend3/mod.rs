@@ -4,6 +4,7 @@
 //! with any ISA through traits. See docs/plans/17-backend3.md for details.
 
 pub mod blockorder;
+pub mod branch;
 pub mod constants;
 pub mod lower;
 pub mod regalloc;

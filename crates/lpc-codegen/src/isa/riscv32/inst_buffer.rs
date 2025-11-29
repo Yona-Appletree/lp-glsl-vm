@@ -240,12 +240,11 @@ impl InstBuffer {
             ) => {
                 if offset_in_units < -2048 || offset_in_units > 2047 {
                     panic!(
-                        "Emission error: conditional branch offset out of range.\n\
-                         Branch at offset {} bytes targets offset {} bytes.\n\
-                         Distance: {} bytes ({} 2-byte units).\n\
-                         Maximum range: ±4KB (±2048 2-byte units).\n\
-                         This function is too large for conditional branches. \
-                         Consider splitting the function or using unconditional jumps.",
+                        "Emission error: conditional branch offset out of range.\nBranch at \
+                         offset {} bytes targets offset {} bytes.\nDistance: {} bytes ({} 2-byte \
+                         units).\nMaximum range: ±4KB (±2048 2-byte units).\nThis function is too \
+                         large for conditional branches. Consider splitting the function or using \
+                         unconditional jumps.",
                         branch_offset,
                         target_offset,
                         delta.abs(),
@@ -258,12 +257,11 @@ impl InstBuffer {
             (Inst::Jal { imm, .. }, BranchType::Unconditional) => {
                 if offset_in_units < -524288 || offset_in_units > 524287 {
                     panic!(
-                        "Emission error: unconditional jump offset out of range.\n\
-                         Jump at offset {} bytes targets offset {} bytes.\n\
-                         Distance: {} bytes ({} 2-byte units).\n\
-                         Maximum range: ±1MB (±524288 2-byte units).\n\
-                         This function is too large for unconditional jumps. \
-                         Consider splitting the function or using indirect jumps.",
+                        "Emission error: unconditional jump offset out of range.\nJump at offset \
+                         {} bytes targets offset {} bytes.\nDistance: {} bytes ({} 2-byte \
+                         units).\nMaximum range: ±1MB (±524288 2-byte units).\nThis function is \
+                         too large for unconditional jumps. Consider splitting the function or \
+                         using indirect jumps.",
                         branch_offset,
                         target_offset,
                         delta.abs(),
