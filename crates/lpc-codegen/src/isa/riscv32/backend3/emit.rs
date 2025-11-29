@@ -705,6 +705,10 @@ impl VCode<Riscv32MachInst> {
                 continue;
             }
 
+            // Apply register allocations to operands BEFORE using them
+            // This must happen before we check for Return or Branch instructions
+            self.apply_allocations(&mut mach_inst, allocs);
+
             // If this is a return, emit return values then epilogue
             if mach_inst.is_term() == MachTerminator::Ret {
                 // Extract return values from Return instruction
@@ -753,9 +757,6 @@ impl VCode<Riscv32MachInst> {
                 }
                 continue;
             }
-
-            // Apply register allocations to operands
-            self.apply_allocations(&mut mach_inst, allocs);
 
             // Handle branches (resolve labels)
             if let Some(branch_info) = self.get_branch_info(&mach_inst, block_idx) {
@@ -941,7 +942,6 @@ impl VCode<Riscv32MachInst> {
         // Get operands for this instruction
         let mut operand_idx = 0;
         let mut collector = AllocationCollector {
-            allocs,
             operand_idx: &mut operand_idx,
         };
 
@@ -1449,7 +1449,6 @@ impl VCode<Riscv32MachInst> {
 
 /// Helper to collect operands for allocation application
 struct AllocationCollector<'a> {
-    allocs: &'a [regalloc2::Allocation],
     operand_idx: &'a mut usize,
 }
 
