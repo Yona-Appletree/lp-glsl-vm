@@ -5,13 +5,43 @@ extern crate alloc;
 use lpc_lpir::RelSourceLoc;
 
 use crate::{
-    backend3::{constants::materialize_constant, vcode::Constant, vcode_builder::VCodeBuilder},
-    isa::riscv32::backend3::inst::Riscv32MachInst,
+    backend3::{
+        constants::materialize_constant,
+        types::BlockIndex,
+        vcode::{BlockLoweringOrder, Callee, Constant, LoweredBlock},
+        vcode_builder::VCodeBuilder,
+    },
+    isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32EmitInfo, Riscv32MachInst},
 };
+
+/// Helper to build VCode with a single empty block
+fn build_vcode_with_single_block(
+    builder: VCodeBuilder<Riscv32MachInst>,
+) -> crate::backend3::vcode::VCode<Riscv32MachInst> {
+    let entry = BlockIndex::new(0);
+    let mut block_to_index = alloc::collections::BTreeMap::new();
+    block_to_index.insert(lpc_lpir::BlockEntity::new(0), entry);
+    let block_order = BlockLoweringOrder {
+        lowered_order: alloc::vec![LoweredBlock::Orig {
+            block: lpc_lpir::BlockEntity::new(0),
+        }],
+        lowered_succs: alloc::vec![alloc::vec![]],
+        block_to_index,
+        cold_blocks: alloc::collections::BTreeSet::new(),
+        indirect_targets: alloc::collections::BTreeSet::new(),
+    };
+    let abi = Callee { abi: Riscv32ABI };
+    builder.build(entry, block_order, abi)
+}
 
 #[test]
 fn test_materialize_inline_constant() {
-    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new();
+    use crate::backend3::vcode::LoweredBlock;
+
+    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
+    let block_idx = crate::backend3::types::BlockIndex::new(0);
+    vcode.start_block(block_idx, alloc::vec![]);
+
     let srcloc = RelSourceLoc::default();
 
     // Small constant that fits in 12 bits
@@ -23,19 +53,10 @@ fn test_materialize_inline_constant() {
         |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
     );
 
+    vcode.end_block();
+
     // Build VCode to check constants
-    let entry = crate::backend3::types::BlockIndex::new(0);
-    let block_order = crate::backend3::vcode::BlockLoweringOrder {
-        lowered_order: alloc::vec::Vec::new(),
-        lowered_succs: alloc::vec::Vec::new(),
-        block_to_index: alloc::collections::BTreeMap::new(),
-        cold_blocks: alloc::collections::BTreeSet::new(),
-        indirect_targets: alloc::collections::BTreeSet::new(),
-    };
-    let abi = crate::backend3::vcode::Callee {
-        abi: crate::isa::riscv32::backend3::inst::Riscv32ABI,
-    };
-    let built_vcode = vcode.build(entry, block_order, abi);
+    let built_vcode = build_vcode_with_single_block(vcode);
     // Should have recorded the constant
     assert!(built_vcode.constants.constants.contains_key(&vreg));
     // Should not have emitted any instructions for inline constants
@@ -44,7 +65,10 @@ fn test_materialize_inline_constant() {
 
 #[test]
 fn test_materialize_large_constant() {
-    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new();
+    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
+    let block_idx = BlockIndex::new(0);
+    vcode.start_block(block_idx, alloc::vec![]);
+
     let srcloc = RelSourceLoc::default();
 
     // Large constant that doesn't fit in 12 bits
@@ -56,20 +80,11 @@ fn test_materialize_large_constant() {
         |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
     );
 
+    vcode.end_block();
+
     // Should have emitted LUI + ADDI instructions
     // Build VCode to check instructions
-    let entry = crate::backend3::types::BlockIndex::new(0);
-    let block_order = crate::backend3::vcode::BlockLoweringOrder {
-        lowered_order: alloc::vec::Vec::new(),
-        lowered_succs: alloc::vec::Vec::new(),
-        block_to_index: alloc::collections::BTreeMap::new(),
-        cold_blocks: alloc::collections::BTreeSet::new(),
-        indirect_targets: alloc::collections::BTreeSet::new(),
-    };
-    let abi = crate::backend3::vcode::Callee {
-        abi: crate::isa::riscv32::backend3::inst::Riscv32ABI,
-    };
-    let vcode = vcode.build(entry, block_order, abi);
+    let vcode = build_vcode_with_single_block(vcode);
     assert_eq!(vcode.insts.len(), 2);
 
     // Check that first instruction is LUI
@@ -87,7 +102,10 @@ fn test_materialize_large_constant() {
 
 #[test]
 fn test_materialize_negative_constant() {
-    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new();
+    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
+    let block_idx = BlockIndex::new(0);
+    vcode.start_block(block_idx, alloc::vec![]);
+
     let srcloc = RelSourceLoc::default();
 
     // Negative constant that fits in 12 bits (inline)
@@ -99,19 +117,10 @@ fn test_materialize_negative_constant() {
         |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
     );
 
+    vcode.end_block();
+
     // Build VCode to check constants
-    let entry = crate::backend3::types::BlockIndex::new(0);
-    let block_order = crate::backend3::vcode::BlockLoweringOrder {
-        lowered_order: alloc::vec::Vec::new(),
-        lowered_succs: alloc::vec::Vec::new(),
-        block_to_index: alloc::collections::BTreeMap::new(),
-        cold_blocks: alloc::collections::BTreeSet::new(),
-        indirect_targets: alloc::collections::BTreeSet::new(),
-    };
-    let abi = crate::backend3::vcode::Callee {
-        abi: crate::isa::riscv32::backend3::inst::Riscv32ABI,
-    };
-    let built_vcode = vcode.build(entry, block_order, abi);
+    let built_vcode = build_vcode_with_single_block(vcode);
     // Should have recorded the constant
     assert!(built_vcode.constants.constants.contains_key(&vreg));
     // Should not have emitted any instructions for inline constants
@@ -120,7 +129,10 @@ fn test_materialize_negative_constant() {
 
 #[test]
 fn test_materialize_large_negative_constant() {
-    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new();
+    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
+    let block_idx = BlockIndex::new(0);
+    vcode.start_block(block_idx, alloc::vec![]);
+
     let srcloc = RelSourceLoc::default();
 
     // Large negative constant that doesn't fit in 12 bits
@@ -132,20 +144,11 @@ fn test_materialize_large_negative_constant() {
         |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
     );
 
+    vcode.end_block();
+
     // Should have emitted LUI + ADDI instructions
     // Build VCode to check instructions
-    let entry = crate::backend3::types::BlockIndex::new(0);
-    let block_order = crate::backend3::vcode::BlockLoweringOrder {
-        lowered_order: alloc::vec::Vec::new(),
-        lowered_succs: alloc::vec::Vec::new(),
-        block_to_index: alloc::collections::BTreeMap::new(),
-        cold_blocks: alloc::collections::BTreeSet::new(),
-        indirect_targets: alloc::collections::BTreeSet::new(),
-    };
-    let abi = crate::backend3::vcode::Callee {
-        abi: crate::isa::riscv32::backend3::inst::Riscv32ABI,
-    };
-    let vcode = vcode.build(entry, block_order, abi);
+    let vcode = build_vcode_with_single_block(vcode);
     assert_eq!(vcode.insts.len(), 2);
 }
 
@@ -154,7 +157,10 @@ fn test_materialize_large_negative_constant() {
 /// requiring adjustment of the upper bits.
 #[test]
 fn test_materialize_constant_with_sign_bit_in_lower() {
-    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new();
+    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
+    let block_idx = BlockIndex::new(0);
+    vcode.start_block(block_idx, alloc::vec![]);
+
     let srcloc = RelSourceLoc::default();
 
     // Constant where lower 12 bits have sign bit set (bit 11 = 1)
@@ -168,19 +174,10 @@ fn test_materialize_constant_with_sign_bit_in_lower() {
         |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
     );
 
+    vcode.end_block();
+
     // Should have emitted LUI + ADDI instructions
-    let entry = crate::backend3::types::BlockIndex::new(0);
-    let block_order = crate::backend3::vcode::BlockLoweringOrder {
-        lowered_order: alloc::vec::Vec::new(),
-        lowered_succs: alloc::vec::Vec::new(),
-        block_to_index: alloc::collections::BTreeMap::new(),
-        cold_blocks: alloc::collections::BTreeSet::new(),
-        indirect_targets: alloc::collections::BTreeSet::new(),
-    };
-    let abi = crate::backend3::vcode::Callee {
-        abi: crate::isa::riscv32::backend3::inst::Riscv32ABI,
-    };
-    let vcode = vcode.build(entry, block_order, abi);
+    let vcode = build_vcode_with_single_block(vcode);
     assert_eq!(vcode.insts.len(), 2);
 
     // Verify LUI instruction has adjusted upper bits
@@ -209,7 +206,10 @@ fn test_materialize_constant_with_sign_bit_in_lower() {
 /// Test constant materialization at boundary values
 #[test]
 fn test_materialize_boundary_constants() {
-    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new();
+    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
+    let block_idx = BlockIndex::new(0);
+    vcode.start_block(block_idx, alloc::vec![]);
+
     let srcloc = RelSourceLoc::default();
 
     // Test at the boundary: 2047 (fits in 12 bits, should be inline)
@@ -248,18 +248,9 @@ fn test_materialize_boundary_constants() {
         |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
     );
 
-    let entry = crate::backend3::types::BlockIndex::new(0);
-    let block_order = crate::backend3::vcode::BlockLoweringOrder {
-        lowered_order: alloc::vec::Vec::new(),
-        lowered_succs: alloc::vec::Vec::new(),
-        block_to_index: alloc::collections::BTreeMap::new(),
-        cold_blocks: alloc::collections::BTreeSet::new(),
-        indirect_targets: alloc::collections::BTreeSet::new(),
-    };
-    let abi = crate::backend3::vcode::Callee {
-        abi: crate::isa::riscv32::backend3::inst::Riscv32ABI,
-    };
-    let vcode = vcode.build(entry, block_order, abi);
+    vcode.end_block();
+
+    let vcode = build_vcode_with_single_block(vcode);
 
     // Inline constants (vreg1, vreg3) are recorded in constants map
     // Large constants (vreg2, vreg4) emit instructions but don't record in constants map
@@ -291,7 +282,10 @@ fn test_materialize_boundary_constants() {
 /// Test zero constant handling
 #[test]
 fn test_zero_constant() {
-    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new();
+    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
+    let block_idx = BlockIndex::new(0);
+    vcode.start_block(block_idx, alloc::vec![]);
+
     let srcloc = RelSourceLoc::default();
 
     // Zero constant fits in 12 bits, so it's recorded as an inline constant
@@ -303,19 +297,10 @@ fn test_zero_constant() {
         |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
     );
 
+    vcode.end_block();
+
     // Build VCode to check constants
-    let entry = crate::backend3::types::BlockIndex::new(0);
-    let block_order = crate::backend3::vcode::BlockLoweringOrder {
-        lowered_order: alloc::vec::Vec::new(),
-        lowered_succs: alloc::vec::Vec::new(),
-        block_to_index: alloc::collections::BTreeMap::new(),
-        cold_blocks: alloc::collections::BTreeSet::new(),
-        indirect_targets: alloc::collections::BTreeSet::new(),
-    };
-    let abi = crate::backend3::vcode::Callee {
-        abi: crate::isa::riscv32::backend3::inst::Riscv32ABI,
-    };
-    let built_vcode = vcode.build(entry, block_order, abi);
+    let built_vcode = build_vcode_with_single_block(vcode);
 
     // Zero should be recorded as an inline constant
     assert!(
@@ -344,7 +329,10 @@ fn test_zero_constant() {
 /// Test constant reuse (same constant used multiple times)
 #[test]
 fn test_constant_reuse() {
-    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new();
+    let mut vcode = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
+    let block_idx = BlockIndex::new(0);
+    vcode.start_block(block_idx, alloc::vec![]);
+
     let srcloc = RelSourceLoc::default();
 
     // Materialize the same constant twice
@@ -364,19 +352,10 @@ fn test_constant_reuse() {
         |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
     );
 
+    vcode.end_block();
+
     // Build VCode
-    let entry = crate::backend3::types::BlockIndex::new(0);
-    let block_order = crate::backend3::vcode::BlockLoweringOrder {
-        lowered_order: alloc::vec::Vec::new(),
-        lowered_succs: alloc::vec::Vec::new(),
-        block_to_index: alloc::collections::BTreeMap::new(),
-        cold_blocks: alloc::collections::BTreeSet::new(),
-        indirect_targets: alloc::collections::BTreeSet::new(),
-    };
-    let abi = crate::backend3::vcode::Callee {
-        abi: crate::isa::riscv32::backend3::inst::Riscv32ABI,
-    };
-    let built_vcode = vcode.build(entry, block_order, abi);
+    let built_vcode = build_vcode_with_single_block(vcode);
 
     // Both VRegs should be recorded as constants
     assert!(

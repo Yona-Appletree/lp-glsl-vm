@@ -175,6 +175,12 @@ impl Ranges {
         self.ranges.get(index).copied()
     }
 
+    /// Set the range for an entity by index
+    /// Panics if index is out of bounds
+    pub fn set(&mut self, index: usize, range: Range) {
+        self.ranges[index] = range;
+    }
+
     /// Get the number of ranges
     pub fn len(&self) -> usize {
         self.ranges.len()

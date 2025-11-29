@@ -324,7 +324,7 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
     where
         Self: Sized,
     {
-        let _ = self.build(InstData::syscall(number, args));
+        let _ = self.build(InstData::syscall(number, args, alloc::vec::Vec::new()));
     }
 }
 

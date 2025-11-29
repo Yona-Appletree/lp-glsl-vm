@@ -187,7 +187,7 @@ impl<'a> BlockBuilder<'a> {
 
     /// System call: syscall(number, args...)
     pub fn syscall(&mut self, number: i32, args: Vec<Value>) {
-        self.push_inst_data(InstData::syscall(number, args));
+        self.push_inst_data(InstData::syscall(number, args, alloc::vec::Vec::new()));
     }
 
     /// Halt execution (ebreak)

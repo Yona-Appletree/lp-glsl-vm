@@ -185,11 +185,11 @@ impl InstData {
     }
 
     /// Create a syscall instruction
-    pub fn syscall(number: i32, args: Vec<Value>) -> Self {
+    pub fn syscall(number: i32, args: Vec<Value>, results: Vec<Value>) -> Self {
         Self {
             opcode: crate::dfg::opcode::Opcode::Syscall,
             args,
-            results: Vec::new(),
+            results,
             block_args: None,
             ty: None,
             imm: Some(Immediate::I32(number)),

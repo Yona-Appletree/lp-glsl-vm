@@ -594,3 +594,4 @@ The soft-float calling convention is used on RV32 implementations that lack floa
 - **Result** (`double`): Returned in `a0-a1` (x10-x11) - 8 bytes in integer registers
 
 The dynamic rounding mode and accrued exception flags are accessed through the routines provided by the C99 header `fenv.h`.
+

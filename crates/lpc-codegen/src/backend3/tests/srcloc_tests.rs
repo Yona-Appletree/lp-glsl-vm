@@ -2,8 +2,9 @@
 
 extern crate alloc;
 
-use crate::backend3::tests::vcode_test_helpers::LowerTest;
 use lpc_lpir::RelSourceLoc;
+
+use crate::backend3::tests::vcode_test_helpers::LowerTest;
 
 /// Test that source locations are tracked for all instructions
 #[test]
@@ -164,7 +165,8 @@ block0:
             | crate::isa::riscv32::backend3::inst::Riscv32MachInst::Addi { .. } => {
                 assert!(
                     inst_idx < vcode.srclocs.len(),
-                    "Constant materialization instruction at index {} should have a source location",
+                    "Constant materialization instruction at index {} should have a source \
+                     location",
                     inst_idx
                 );
                 let _srcloc = vcode.srclocs[inst_idx];

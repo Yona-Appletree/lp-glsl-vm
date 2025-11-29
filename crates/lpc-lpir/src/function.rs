@@ -560,7 +560,17 @@ impl Function {
                     }
                     write!(f, "v{}", arg.index())?;
                 }
-                write!(f, ")")
+                write!(f, ")")?;
+                if !inst_data.results.is_empty() {
+                    write!(f, " -> ")?;
+                    for (i, res) in inst_data.results.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "v{}", res.index())?;
+                    }
+                }
+                Ok(())
             }
             // Memory
             Opcode::Load => {

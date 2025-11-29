@@ -777,7 +777,7 @@ mod tests {
         let block = func.create_block();
         func.append_block(block);
 
-        let mut inst_data = InstData::syscall(1, vec![]);
+        let mut inst_data = InstData::syscall(1, vec![], vec![]);
         inst_data.imm = None; // Remove immediate
         let inst = func.create_inst(inst_data);
         func.append_inst(inst, block);

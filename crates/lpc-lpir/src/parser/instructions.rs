@@ -308,7 +308,17 @@ pub(crate) fn parse_syscall(input: &str) -> IResult<&str, InstData> {
         separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
         terminated(char(')'), blank),
     )(input)?;
-    Ok((input, InstData::syscall(number as i32, args)))
+    
+    // Parse results list: comma-separated values (same format as call)
+    let (input, results) = opt(map(
+        tuple((
+            terminated(tag("->"), blank),
+            separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
+        )),
+        |(_, values)| values,
+    ))(input)?;
+    
+    Ok((input, InstData::syscall(number as i32, args, results.unwrap_or_default())))
 }
 
 /// Parse a load instruction
@@ -651,6 +661,24 @@ mod tests {
             panic!("Expected I32 immediate");
         }
         assert_eq!(inst_data.args.len(), 2);
+        assert_eq!(inst_data.results.len(), 0, "Syscall without return value should have empty results");
+    }
+
+    #[test]
+    fn test_parse_syscall_with_return() {
+        let input = "syscall 1(v0, v1) -> v2";
+        let result = parse_syscall(input);
+        assert!(result.is_ok(), "parse_syscall failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Syscall);
+        if let Some(Immediate::I32(number)) = inst_data.imm {
+            assert_eq!(number, 1);
+        } else {
+            panic!("Expected I32 immediate");
+        }
+        assert_eq!(inst_data.args.len(), 2);
+        assert_eq!(inst_data.results.len(), 1, "Syscall with return value should have one result");
+        assert_eq!(inst_data.results[0].index(), 2);
     }
 
     #[test]

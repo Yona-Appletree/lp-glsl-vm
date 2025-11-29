@@ -1,4 +1,63 @@
 //! VCode structure: Virtual-register code with machine instructions
+//!
+//! # Operand Constraints
+//!
+//! The operand constraint system allows instructions to specify requirements for
+//! register allocation. Constraints are collected during operand collection and
+//! used by regalloc2 to assign physical registers.
+//!
+//! ## Constraint Types
+//!
+//! - **`OperandConstraint::Any`**: The operand can be assigned to any register.
+//!   This is the default for most instructions.
+//!
+//! - **`OperandConstraint::Fixed(u32)`**: The operand must be assigned to a
+//!   specific physical register (represented as u32 for now). This is used for
+//!   instructions that require specific registers (e.g., system calls, ABI
+//!   requirements).
+//!
+//! - **`OperandConstraint::RegClass(RegClass)`**: The operand must be assigned to
+//!   a register in a specific register class (e.g., GPR for integer registers,
+//!   FPR for floating-point registers).
+//!
+//! ## Operand Kinds
+//!
+//! - **`OperandKind::Use`**: The operand is read (input to the instruction).
+//! - **`OperandKind::Def`**: The operand is written (output from the instruction).
+//! - **`OperandKind::Mod`**: The operand is both read and written (read-modify-write).
+//!
+//! ## ISA-Specific Constraints
+//!
+//! ISA-specific backends implement `MachInst::get_operands()` to specify constraints
+//! for each instruction type. Currently, RISC-V instructions use `OperandConstraint::Any`
+//! for all operands, but the system is designed to support fixed registers and register
+//! classes when needed.
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! // RISC-V ADD instruction (conceptual example)
+//! // In actual implementation:
+//! match inst {
+//!     Riscv32MachInst::Add { rd, rs1, rs2 } => {
+//!         collector.visit_def(rd.to_reg(), OperandConstraint::Any);  // Def: result register
+//!         collector.visit_use(*rs1, OperandConstraint::Any);         // Use: first source
+//!         collector.visit_use(*rs2, OperandConstraint::Any);         // Use: second source
+//!     }
+//!     _ => {}
+//! }
+//! ```
+//!
+//! ## Interaction with regalloc2
+//!
+//! The operand constraint system is designed to work with regalloc2. Constraints
+//! are collected into flat arrays (`operands` and `operand_ranges`) that regalloc2
+//! can efficiently process. The regalloc2 library uses these constraints to:
+//!
+//! - Assign physical registers that satisfy the constraints
+//! - Handle fixed register requirements
+//! - Respect register class restrictions
+//! - Optimize register allocation based on operand kinds (use/def/mod)
 
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use core::fmt;
@@ -50,6 +109,13 @@ pub struct VCode<I: MachInst> {
     /// ABI information
     pub abi: Callee<I::ABIMachineSpec>,
 
+    /// ISA-specific emission information
+    ///
+    /// This contains information needed during code emission (Phase 3),
+    /// such as ISA-specific flags and settings. It should be immutable
+    /// across function compilations within the same module.
+    pub emit_info: I::Info,
+
     /// Constants (inline or pool references)
     pub constants: VCodeConstants,
 
@@ -75,29 +141,74 @@ pub struct Operand {
     pub kind: OperandKind,
 }
 
-/// Operand constraint
+/// Operand constraint for register allocation
+///
+/// Constraints specify requirements for register allocation. They are collected
+/// during operand collection and used by regalloc2 to assign physical registers.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// # // Note: This is a conceptual example. In actual code, use:
+/// # // use lpc_codegen::backend3::vcode::{OperandConstraint, RegClass};
+/// 
+/// // Any register is acceptable
+/// OperandConstraint::Any
+///
+/// // Must be assigned to physical register 5 (e.g., a0 for RISC-V)
+/// OperandConstraint::Fixed(5)
+///
+/// // Must be in general-purpose register class
+/// OperandConstraint::RegClass(RegClass::Gpr)
+/// ```
 ///
 /// Note: PReg is a trait, so we can't use it directly in an enum.
 /// For now, we use a placeholder. ISA-specific code will provide
 /// concrete constraint types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperandConstraint {
-    /// Any register
+    /// Any register is acceptable (default for most instructions)
     Any,
     /// Fixed physical register (represented as u32 for now)
+    ///
+    /// Used when an instruction requires a specific physical register,
+    /// such as system calls or ABI requirements.
     Fixed(u32),
     /// Register class constraint
+    ///
+    /// Used when an operand must be in a specific register class
+    /// (e.g., integer registers vs. floating-point registers).
     RegClass(RegClass),
 }
 
-/// Operand kind
+/// Operand kind: how an operand is used in an instruction
+///
+/// This distinguishes between operands that are read, written, or both.
+/// Register allocation uses this information to determine liveness and
+/// optimize register assignment.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// # // Note: This is a conceptual example. In actual code, use:
+/// # // use lpc_codegen::backend3::vcode::OperandKind;
+///
+/// // Input operand (read before instruction executes)
+/// OperandKind::Use
+///
+/// // Output operand (written by instruction)
+/// OperandKind::Def
+///
+/// // Read-modify-write operand (read before, written after)
+/// OperandKind::Mod
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperandKind {
-    /// Use (read)
+    /// Use (read): operand is read by the instruction
     Use,
-    /// Def (write)
+    /// Def (write): operand is written by the instruction
     Def,
-    /// Mod (read and write)
+    /// Mod (read and write): operand is both read and written
     Mod,
 }
 
@@ -113,7 +224,24 @@ pub trait PReg: Copy + Clone + PartialEq + Eq + core::hash::Hash + fmt::Debug {}
 /// provide concrete implementations.
 pub type PRegSet = alloc::collections::BTreeSet<u32>; // Placeholder: will be ISA-specific
 
-/// Register class
+/// Register class: category of registers for an operand
+///
+/// Register classes distinguish between different types of registers
+/// (e.g., integer vs. floating-point). This allows register allocation
+/// to ensure operands are assigned to appropriate registers.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// # // Note: This is a conceptual example. In actual code, use:
+/// # // use lpc_codegen::backend3::vcode::RegClass;
+///
+/// // Integer operand (must be in GPR)
+/// RegClass::Gpr
+///
+/// // Floating-point operand (must be in FPR)
+/// RegClass::Fpr
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegClass {
     /// General-purpose integer registers
@@ -217,6 +345,13 @@ pub trait MachInst: Clone + fmt::Debug {
     /// ABI machine spec type
     type ABIMachineSpec: fmt::Debug;
 
+    /// ISA-specific emission information
+    ///
+    /// This type contains information needed during code emission (Phase 3),
+    /// such as ISA-specific flags and settings. It should be immutable across
+    /// function compilations within the same module.
+    type Info: Clone + fmt::Debug;
+
     /// Get operands for this instruction
     ///
     /// The visitor will be called for each operand (use, def, mod).
@@ -248,6 +383,7 @@ impl<I: MachInst> VCode<I> {
         entry: BlockIndex,
         block_order: BlockLoweringOrder,
         abi: Callee<I::ABIMachineSpec>,
+        emit_info: I::Info,
     ) -> Self {
         VCode {
             insts: Vec::new(),
@@ -267,6 +403,7 @@ impl<I: MachInst> VCode<I> {
             entry,
             block_order,
             abi,
+            emit_info,
             constants: VCodeConstants {
                 constants: BTreeMap::new(),
             },

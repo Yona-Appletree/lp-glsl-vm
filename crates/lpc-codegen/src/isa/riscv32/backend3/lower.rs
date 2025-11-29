@@ -18,6 +18,11 @@ pub struct Riscv32LowerBackend;
 impl LowerBackend for Riscv32LowerBackend {
     type MInst = Riscv32MachInst;
 
+    fn emit_info(&self) -> <Self::MInst as crate::backend3::vcode::MachInst>::Info {
+        use crate::isa::riscv32::backend3::inst::Riscv32EmitInfo;
+        Riscv32EmitInfo
+    }
+
     fn lower_inst(
         &self,
         ctx: &mut Lower<Self::MInst>,
@@ -114,7 +119,11 @@ impl LowerBackend for Riscv32LowerBackend {
             }
             Opcode::Load => {
                 // Load: result = mem[address]
-                // Lower to: lw result, 0(address)
+                // Lower to: lw result, imm(address)
+                // TODO: Currently hardcodes offset to 0. In LPIR, the address is a Value that may
+                // be the result of an iadd with a constant. Future improvement: detect if address
+                // is iadd(base, const) and extract the constant as the offset. For now, offsets
+                // should be computed during address materialization (iadd base, offset) before load/store.
                 if !results.is_empty() && args.len() >= 1 {
                     if let (Some(address_vreg), Some(result_vreg)) = (rs1_opt, rd_opt) {
                         let rd = Writable::new(result_vreg);
@@ -130,7 +139,11 @@ impl LowerBackend for Riscv32LowerBackend {
             }
             Opcode::Store => {
                 // Store: mem[address] = value
-                // Lower to: sw value, 0(address)
+                // Lower to: sw value, imm(address)
+                // TODO: Currently hardcodes offset to 0. In LPIR, the address is a Value that may
+                // be the result of an iadd with a constant. Future improvement: detect if address
+                // is iadd(base, const) and extract the constant as the offset. For now, offsets
+                // should be computed during address materialization (iadd base, offset) before load/store.
                 if args.len() >= 2 {
                     if let (Some(address_vreg), Some(value_vreg)) = (rs1_opt, rs2_opt) {
                         let mach_inst = Riscv32MachInst::Sw {
@@ -383,9 +396,20 @@ impl LowerBackend for Riscv32LowerBackend {
                         .collect()
                 };
 
+                // Get result VReg (if any)
+                let result_vreg = if !results.is_empty() {
+                    results.get(0).and_then(|v| {
+                        let value_to_vreg = ctx.value_to_vreg();
+                        value_to_vreg.get(v).copied()
+                    })
+                } else {
+                    None
+                };
+
                 let mach_inst = Riscv32MachInst::Ecall {
                     number: syscall_number,
                     args: arg_vregs,
+                    result: result_vreg.map(Writable::new),
                 };
                 ctx.vcode.push(mach_inst, srcloc);
                 return true;

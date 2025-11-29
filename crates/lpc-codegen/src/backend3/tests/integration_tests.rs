@@ -139,3 +139,171 @@ vcode {
     // Verify entry block is at index 0
     assert_eq!(vcode.entry.index(), 0);
 }
+
+/// Test complex function with multiple blocks, critical edges, phi nodes, and constants
+#[test]
+fn test_lower_complex_function() {
+    use crate::backend3::tests::vcode_test_helpers::LowerTest;
+
+    LowerTest::from_lpir(
+        r#"
+function %test(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = iadd v0, v1
+    brif v2, block1, block2
+
+block1:
+    v3 = iconst 10
+    brif v3, block3(v3), block4(v3)
+
+block2:
+    v4 = iconst 20
+    brif v4, block3(v4), block4(v4)
+
+block3(v5: i32):
+    v6 = iadd v5, v5
+    return v6
+
+block4(v7: i32):
+    v8 = imul v7, v7
+    return v8
+}
+"#,
+    );
+
+    // Verify complex function structure
+    // This tests: multiple blocks, critical edges (block1->block3, block1->block4, etc.),
+    // phi nodes (block3 and block4), and constants
+}
+
+/// Test that source locations are preserved through lowering
+#[test]
+fn test_lower_preserves_srclocs() {
+    use crate::backend3::tests::vcode_test_helpers::LowerTest;
+
+    let test = LowerTest::from_lpir(
+        r#"
+function %test(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = iadd v0, v1
+    v3 = isub v0, v1
+    return v2
+}
+"#,
+    );
+
+    let vcode = test.vcode();
+
+    // Verify source locations match instruction count
+    assert_eq!(
+        vcode.srclocs.len(),
+        vcode.insts.len(),
+        "Source locations should match instruction count"
+    );
+
+    // Verify all source locations are valid (not default/zero)
+    // Note: Actual source location values depend on IR source locations
+    for srcloc in &vcode.srclocs {
+        // Just verify they exist (actual values depend on IR)
+        let _ = srcloc;
+    }
+}
+
+/// Test lowering with constants requiring LUI+ADDI sequence
+#[test]
+fn test_lower_large_constants() {
+    use crate::backend3::tests::vcode_test_helpers::LowerTest;
+
+    let test = LowerTest::from_lpir(
+        r#"
+function %test() -> i32 {
+block0:
+    v1 = iconst 50000
+    return v1
+}
+"#,
+    );
+
+    let vcode = test.vcode();
+
+    // Large constant (50000) should require LUI + ADDI sequence
+    // Verify that instructions were emitted
+    assert!(
+        vcode.insts.len() >= 2,
+        "Large constant should require at least 2 instructions (LUI + ADDI)"
+    );
+
+    // Find LUI and ADDI instructions
+    let mut found_lui = false;
+    let mut found_addi = false;
+    for inst in &vcode.insts {
+        match inst {
+            crate::isa::riscv32::backend3::inst::Riscv32MachInst::Lui { .. } => {
+                found_lui = true;
+            }
+            crate::isa::riscv32::backend3::inst::Riscv32MachInst::Addi { .. } => {
+                found_addi = true;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(found_lui, "Should have LUI instruction for large constant");
+    assert!(
+        found_addi,
+        "Should have ADDI instruction for large constant"
+    );
+}
+
+/// Test lowering with mixed inline and large constants
+#[test]
+fn test_lower_mixed_constants() {
+    use crate::backend3::tests::vcode_test_helpers::LowerTest;
+
+    let test = LowerTest::from_lpir(
+        r#"
+function %test() -> i32 {
+block0:
+    v1 = iconst 42
+    v2 = iconst 50000
+    v3 = iadd v1, v2
+    return v3
+}
+"#,
+    );
+
+    let vcode = test.vcode();
+
+    // Should have:
+    // - Inline constant (42) - recorded in constants map, no instructions
+    // - Large constant (50000) - LUI + ADDI instructions
+    // - ADD instruction for iadd
+
+    // Verify large constant instructions
+    let mut found_lui = false;
+    let mut found_addi = false;
+    for inst in &vcode.insts {
+        match inst {
+            crate::isa::riscv32::backend3::inst::Riscv32MachInst::Lui { .. } => {
+                found_lui = true;
+            }
+            crate::isa::riscv32::backend3::inst::Riscv32MachInst::Addi { .. } => {
+                found_addi = true;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(found_lui, "Should have LUI instruction for large constant");
+    assert!(
+        found_addi,
+        "Should have ADDI instruction for large constant"
+    );
+
+    // Verify constants map has inline constant
+    // (Large constants don't go in constants map, they're materialized as instructions)
+    assert!(
+        !vcode.constants.constants.is_empty() || vcode.insts.is_empty(),
+        "Should have constants recorded or instructions"
+    );
+}

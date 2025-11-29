@@ -40,11 +40,13 @@ pub struct VCodeBuilder<I: MachInst> {
     branch_block_arg_range: Ranges,
     /// Branch block arg succ ranges
     branch_block_arg_succ_range: Ranges,
+    /// ISA-specific emission information
+    emit_info: I::Info,
 }
 
 impl<I: MachInst> VCodeBuilder<I> {
     /// Create a new VCodeBuilder
-    pub fn new() -> Self {
+    pub fn new(emit_info: I::Info) -> Self {
         VCodeBuilder {
             insts: Vec::new(),
             srclocs: Vec::new(),
@@ -59,6 +61,7 @@ impl<I: MachInst> VCodeBuilder<I> {
             branch_block_args: Vec::new(),
             branch_block_arg_range: Ranges::new(),
             branch_block_arg_succ_range: Ranges::new(),
+            emit_info,
         }
     }
 
@@ -112,10 +115,27 @@ impl<I: MachInst> VCodeBuilder<I> {
     ///
     /// This should be called after end_block() to record the branch arguments
     /// for each successor of the block that was just ended.
-    pub fn add_branch_args(&mut self, succs: &[BlockIndex], args_per_succ: &[Vec<VReg>]) {
+    ///
+    /// `block_idx` is the BlockIndex of the block these branch args belong to.
+    pub fn add_branch_args(
+        &mut self,
+        block_idx: BlockIndex,
+        succs: &[BlockIndex],
+        args_per_succ: &[Vec<VReg>],
+    ) {
         assert_eq!(succs.len(), args_per_succ.len());
 
-        let succ_start = self.branch_block_arg_succ_range.len();
+        // Ensure branch_block_arg_succ_range is large enough
+        let block_idx_usize = block_idx.index() as usize;
+        while self.branch_block_arg_succ_range.len() <= block_idx_usize {
+            // Push empty range for blocks without branch args
+            self.branch_block_arg_succ_range.push(Range::new(0, 0));
+        }
+
+        // Record where we start adding ranges for this block's successors
+        let succ_start = self.branch_block_arg_range.len();
+        
+        // Add argument ranges for each successor
         for args in args_per_succ {
             let arg_start = self.branch_block_args.len();
             self.branch_block_args.extend(args.iter().copied());
@@ -123,9 +143,10 @@ impl<I: MachInst> VCodeBuilder<I> {
             self.branch_block_arg_range
                 .push(Range::new(arg_start, arg_end));
         }
-        let succ_end = self.branch_block_arg_succ_range.len();
-        self.branch_block_arg_succ_range
-            .push(Range::new(succ_start, succ_end));
+        
+        // Record the range in branch_block_arg_range that corresponds to this block's successors
+        let succ_end = self.branch_block_arg_range.len();
+        self.branch_block_arg_succ_range.set(block_idx_usize, Range::new(succ_start, succ_end));
     }
 
     /// Add block metadata
@@ -141,6 +162,12 @@ impl<I: MachInst> VCodeBuilder<I> {
     /// - Source locations match instruction count
     /// - Entry block is valid
     /// - Block metadata matches block count
+    /// - Branch arguments match target block parameter counts
+    /// - Branch targets exist in block_order
+    ///
+    /// Note: Block termination validation (ensuring blocks end with terminators)
+    /// is not performed here as it requires ISA-specific knowledge of which
+    /// instructions are terminators. This could be added in the future if needed.
     fn validate_vcode_invariants(
         insts: &[I],
         srclocs: &[RelSourceLoc],
@@ -150,11 +177,14 @@ impl<I: MachInst> VCodeBuilder<I> {
         block_succ_range: &Ranges,
         block_succs: &[BlockIndex],
         block_pred_range: &Ranges,
-        block_preds: &[BlockIndex],
+        _block_preds: &[BlockIndex],
         block_params_range: &Ranges,
         block_metadata: &[BlockMetadata],
         entry: BlockIndex,
-        block_order: &BlockLoweringOrder,
+        _block_order: &BlockLoweringOrder,
+        branch_block_args: &[VReg],
+        branch_block_arg_range: &Ranges,
+        branch_block_arg_succ_range: &Ranges,
     ) {
         // Check source locations match instruction count
         assert_eq!(
@@ -218,7 +248,8 @@ impl<I: MachInst> VCodeBuilder<I> {
                         assert_eq!(
                             range.end,
                             next_range.start,
-                            "Block ranges must be contiguous: range {} ends at {}, range {} starts at {}",
+                            "Block ranges must be contiguous: range {} ends at {}, range {} \
+                             starts at {}",
                             i,
                             range.end,
                             i + 1,
@@ -262,7 +293,8 @@ impl<I: MachInst> VCodeBuilder<I> {
                         assert_eq!(
                             range.end,
                             next_range.start,
-                            "Operand ranges must be contiguous: range {} ends at {}, range {} starts at {}",
+                            "Operand ranges must be contiguous: range {} ends at {}, range {} \
+                             starts at {}",
                             i,
                             range.end,
                             i + 1,
@@ -291,6 +323,109 @@ impl<I: MachInst> VCodeBuilder<I> {
             block_ranges.len(),
             "Block predecessor ranges must match block count"
         );
+
+        // Validate branch arguments match target block parameter counts
+        Self::validate_branch_args(
+            block_ranges,
+            block_succ_range,
+            block_succs,
+            block_params_range,
+            branch_block_args,
+            branch_block_arg_range,
+            branch_block_arg_succ_range,
+        );
+
+        // Validate branch targets exist in block_order
+        Self::validate_branch_targets(block_succs, block_ranges.len());
+    }
+
+    /// Validate that branch arguments match target block parameter counts
+    ///
+    /// This validates that:
+    /// 1. Blocks with successors must have branch args recorded (even if empty)
+    /// 2. Branch argument counts match target block parameter counts
+    fn validate_branch_args(
+        block_ranges: &Ranges,
+        block_succ_range: &Ranges,
+        block_succs: &[BlockIndex],
+        block_params_range: &Ranges,
+        _branch_block_args: &[VReg],
+        branch_block_arg_range: &Ranges,
+        branch_block_arg_succ_range: &Ranges,
+    ) {
+        // For each block, check that branch arguments match target block parameters
+        for block_idx in 0..block_ranges.len() {
+            // Get successors for this block
+            if let Some(succ_range) = block_succ_range.get(block_idx) {
+                let succs = &block_succs[succ_range.start..succ_range.end];
+
+                // Skip blocks with no successors (e.g., return blocks)
+                if succs.is_empty() {
+                    continue;
+                }
+
+                // Blocks with successors must have branch args recorded
+                // But only if branch args were actually recorded (branch_block_arg_succ_range has an entry)
+                if let Some(arg_succ_range) = branch_block_arg_succ_range.get(block_idx) {
+                    let arg_succ_start = arg_succ_range.start;
+                    let arg_succ_end = arg_succ_range.end;
+
+                // Each successor should have a corresponding argument range
+                assert_eq!(
+                    arg_succ_end - arg_succ_start,
+                    succs.len(),
+                    "Block {}: branch argument successor range count {} must match successor \
+                     count {}",
+                    block_idx,
+                    arg_succ_end - arg_succ_start,
+                    succs.len()
+                );
+
+                // Check each successor's arguments match its parameter count
+                for (succ_idx, &succ_block) in succs.iter().enumerate() {
+                    let succ_block_idx = succ_block.index() as usize;
+
+                    // Get argument range for this successor
+                    if let Some(arg_range) =
+                        branch_block_arg_range.get(arg_succ_start + succ_idx)
+                    {
+                        let arg_count = arg_range.len();
+
+                        // Get parameter count for target block
+                        if let Some(param_range) = block_params_range.get(succ_block_idx) {
+                            let param_count = param_range.len();
+
+                            assert_eq!(
+                                arg_count, param_count,
+                                "Block {} -> Block {}: branch argument count {} must match \
+                                 target block parameter count {}",
+                                block_idx, succ_block_idx, arg_count, param_count
+                            );
+                        }
+                    }
+                }
+                } else {
+                    // Block has successors but no branch args recorded - this is an error
+                    // It means a Br/Jump instruction didn't record branch args
+                    panic!(
+                        "Block {} has {} successors but no branch arguments recorded (missing Br/Jump branch args)",
+                        block_idx, succs.len()
+                    );
+                }
+            }
+        }
+    }
+
+    /// Validate that all branch targets exist in block_order
+    fn validate_branch_targets(block_succs: &[BlockIndex], num_blocks: usize) {
+        for &target in block_succs {
+            assert!(
+                target.index() < num_blocks as u32,
+                "Branch target block {} must be less than block count {}",
+                target.index(),
+                num_blocks
+            );
+        }
     }
 
     /// Compute predecessors from successors using counting sort
@@ -476,10 +611,22 @@ impl<I: MachInst> VCodeBuilder<I> {
             let block_idx = BlockIndex::new(idx as u32);
             let cold = block_order.cold_blocks.contains(&block_idx);
             let indirect_target = block_order.indirect_targets.contains(&block_idx);
+
+            // Determine alignment requirement for this block
+            // Currently, RISC-V doesn't require special block alignment for most cases
+            // Indirect branch targets may require alignment in the future
+            let alignment = if indirect_target {
+                // Indirect branch targets may require 4-byte alignment (RISC-V instruction alignment)
+                // This is a placeholder - actual alignment requirements depend on ISA and use case
+                Some(4)
+            } else {
+                None
+            };
+
             block_metadata.push(BlockMetadata {
                 cold,
                 indirect_target,
-                alignment: None, // Not implemented yet
+                alignment,
             });
         }
 
@@ -498,6 +645,9 @@ impl<I: MachInst> VCodeBuilder<I> {
             &block_metadata,
             entry,
             &block_order,
+            &self.branch_block_args,
+            &self.branch_block_arg_range,
+            &self.branch_block_arg_succ_range,
         );
 
         VCode {
@@ -518,6 +668,7 @@ impl<I: MachInst> VCodeBuilder<I> {
             entry,
             block_order,
             abi,
+            emit_info: self.emit_info,
             constants: VCodeConstants {
                 constants: self.constants,
             },
@@ -525,11 +676,5 @@ impl<I: MachInst> VCodeBuilder<I> {
             relocations: self.relocations,
             srclocs: self.srclocs,
         }
-    }
-}
-
-impl<I: MachInst> Default for VCodeBuilder<I> {
-    fn default() -> Self {
-        Self::new()
     }
 }

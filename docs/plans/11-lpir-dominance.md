@@ -350,3 +350,4 @@ This is a **breaking change** for IR that was written with explicit parameter pa
 - CLIF Dominance Implementation: `cranelift/codegen/src/dominator_tree/simple.rs`
 - CLIF Verifier: `cranelift/codegen/src/verifier/mod.rs` (lines 1007-1053)
 - Cooper's Algorithm: "A Simple, Fast Dominance Algorithm" (2001)
+

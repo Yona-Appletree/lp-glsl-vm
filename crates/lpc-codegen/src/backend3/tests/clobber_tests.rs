@@ -11,7 +11,7 @@ fn test_clobbers_for_function_calls() {
         r#"
 function %test(i32) -> i32 {
 block0(v0: i32):
-    v1 = call @other(v0)
+    call %other(v0) -> v1
     return v1
 }
 "#,
@@ -43,8 +43,8 @@ fn test_clobbers_for_syscalls() {
         r#"
 function %test(i32) -> i32 {
 block0(v0: i32):
-    syscall 1, v0
-    return v0
+    syscall 1(v0) -> v1
+    return v1
 }
 "#,
     );
@@ -75,8 +75,8 @@ fn test_clobbers_associated_with_instructions() {
         r#"
 function %test(i32) -> i32 {
 block0(v0: i32):
-    v1 = call @other(v0)
-    v2 = call @another(v1)
+    call %other(v0) -> v1
+    call %another(v1) -> v2
     return v2
 }
 "#,
@@ -132,7 +132,7 @@ fn test_clobber_sets_valid() {
         r#"
 function %test(i32) -> i32 {
 block0(v0: i32):
-    v1 = call @other(v0)
+    call %other(v0) -> v1
     return v1
 }
 "#,
@@ -188,4 +188,3 @@ block0(v0: i32, v1: i32):
         }
     }
 }
-

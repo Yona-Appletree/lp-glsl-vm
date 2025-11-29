@@ -33,17 +33,16 @@ vcode {
   entry: block0
 
   block0(v0):
-    br block3
-    br block1
+    brif v0, block2, block1
 
   block1:
-    br block3
+    jump block3(v4)
 
   block2:
-    br block3
+    jump block3(v5)
 
-  block3(v3):
-    return v3
+  block3(v1):
+    return v1
 
 }
 "#,
@@ -220,11 +219,7 @@ block10:
     );
 
     // Verify all blocks are reachable from entry
-    assert_eq!(
-        vcode.entry.index(),
-        0,
-        "Entry block should be at index 0"
-    );
+    assert_eq!(vcode.entry.index(), 0, "Entry block should be at index 0");
 }
 
 /// Test function with early returns

@@ -142,3 +142,4 @@ mod tests {
         assert_eq!("users".parse::<TrapCode>(), Err(()));
     }
 }
+

@@ -78,3 +78,4 @@ mod tests {
         midpoint(20, 10);
     }
 }
+

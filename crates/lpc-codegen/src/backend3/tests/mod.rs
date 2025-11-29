@@ -7,6 +7,7 @@ pub mod clobber_tests;
 pub mod constants_tests;
 pub mod integration_tests;
 pub mod lower_tests;
+pub mod operand_collection_completeness_tests;
 pub mod operand_tests;
 pub mod reloc_tests;
 pub mod srcloc_tests;

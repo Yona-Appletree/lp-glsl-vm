@@ -2,7 +2,7 @@
 
 use crate::backend3::{
     types::{VReg, Writable},
-    vcode::{MachInst, OperandConstraint, OperandVisitor},
+    vcode::{MachInst, OperandConstraint, OperandVisitor, PRegSet},
 };
 
 /// RISC-V 32-bit machine instruction with virtual registers
@@ -109,9 +109,11 @@ pub enum Riscv32MachInst {
     },
 
     /// ECALL: system call
+    /// After execution, return value is in a0 (x10) register
     Ecall {
         number: i32,
         args: alloc::vec::Vec<VReg>,
+        result: Option<Writable<VReg>>, // Result register (receives a0 after ecall)
     },
 
     /// EBREAK: halt/breakpoint
@@ -141,8 +143,17 @@ pub enum Riscv32MachInst {
     Jump,
 }
 
+/// RISC-V 32-bit emission information
+///
+/// This contains ISA-specific information needed during code emission (Phase 3).
+/// For now, this is a placeholder that can be extended with flags and settings
+/// as needed.
+#[derive(Debug, Clone)]
+pub struct Riscv32EmitInfo;
+
 impl MachInst for Riscv32MachInst {
     type ABIMachineSpec = Riscv32ABI;
+    type Info = Riscv32EmitInfo;
 
     fn get_operands(&mut self, collector: &mut impl OperandVisitor) {
         match self {
@@ -224,9 +235,12 @@ impl MachInst for Riscv32MachInst {
                     collector.visit_use(*arg, OperandConstraint::Any);
                 }
             }
-            Riscv32MachInst::Ecall { args, .. } => {
+            Riscv32MachInst::Ecall { args, result, .. } => {
                 for arg in args.iter() {
                     collector.visit_use(*arg, OperandConstraint::Any);
+                }
+                if let Some(result) = result {
+                    collector.visit_def(result.to_reg(), OperandConstraint::Any);
                 }
             }
             Riscv32MachInst::Ebreak => {
@@ -247,6 +261,40 @@ impl MachInst for Riscv32MachInst {
             Riscv32MachInst::Jump => {
                 // No operands (unconditional)
             }
+        }
+    }
+
+    /// Get clobbered registers (for function calls, etc.)
+    ///
+    /// Returns None if no explicit clobbers, or Some(set) if there are clobbers.
+    /// For RISC-V 32, function calls (JAL) clobber caller-saved registers.
+    fn get_clobbers(&self) -> Option<PRegSet> {
+        match self {
+            Riscv32MachInst::Jal { .. } => {
+                // Function calls clobber caller-saved registers
+                // RISC-V 32 calling convention (System V ABI):
+                // Caller-saved: t0-t6 (x5-x7, x28-x31), a0-a7 (x10-x17)
+                // Note: PRegSet is currently BTreeSet<u32> as a placeholder.
+                // When proper PRegSet is implemented (from regalloc2), this should
+                // return the actual caller-saved register set from the ABI.
+                use alloc::collections::BTreeSet;
+                let mut clobbers = BTreeSet::new();
+                // Placeholder: mark caller-saved registers
+                // t0-t6: x5-x7, x28-x31
+                clobbers.insert(5); // t0
+                clobbers.insert(6); // t1
+                clobbers.insert(7); // t2
+                clobbers.insert(28); // t3
+                clobbers.insert(29); // t4
+                clobbers.insert(30); // t5
+                clobbers.insert(31); // t6
+                                     // a0-a7: x10-x17
+                for i in 10..=17 {
+                    clobbers.insert(i);
+                }
+                Some(clobbers)
+            }
+            _ => None,
         }
     }
 }

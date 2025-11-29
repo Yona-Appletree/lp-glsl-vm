@@ -78,29 +78,32 @@ pub fn compute_block_order(
         }
     }
 
-    // 6. Identify cold blocks (deferred: mark blocks unlikely to execute)
+    // 6. Identify cold blocks (basic heuristics)
     //
     // Cold blocks are blocks that are unlikely to execute (e.g., error handling paths).
     // These can be placed at the end of the function during block layout optimization
     // to improve code locality for the hot path.
     //
-    // TODO: Implement cold block identification in a future phase. This could use:
-    // - Profile data (if available)
-    // - Heuristics (e.g., blocks dominated by unlikely conditions)
-    // - User annotations
-    let cold_blocks = BTreeSet::new();
+    // Basic heuristics implemented:
+    // - Blocks that are not the entry block and have no predecessors (unreachable)
+    // - Future: Profile data, blocks dominated by unlikely conditions, user annotations
+    let cold_blocks = identify_cold_blocks(func, cfg, &block_to_index, &lowered_order);
 
-    // 7. Identify indirect branch targets (deferred: track blocks that are indirect targets)
+    // 7. Identify indirect branch targets
     //
     // Indirect branch targets are blocks that are reached via indirect branches
     // (e.g., computed jumps, switch statements with jump tables). These blocks
     // may require special alignment or handling during emission.
     //
-    // TODO: Implement indirect branch target tracking in a future phase. This requires:
-    // - Analysis of branch instructions to identify indirect branches
-    // - Tracking which blocks are targets of indirect branches
-    // - Potentially marking these blocks for special alignment
-    let indirect_targets = BTreeSet::new();
+    // Currently, LPIR does not have indirect branches (no br_table, computed jumps, etc.).
+    // When indirect branches are added to LPIR, this function should:
+    // - Analyze branch instructions to identify indirect branches
+    // - Track which blocks are targets of indirect branches
+    // - Mark these blocks for special alignment if needed
+    //
+    // For now, we return an empty set since there are no indirect branches.
+    let indirect_targets =
+        identify_indirect_branch_targets(func, cfg, &block_to_index, &lowered_order);
 
     BlockLoweringOrder {
         lowered_order,
@@ -303,4 +306,115 @@ fn build_lowered_succs(
     }
 
     lowered_succs
+}
+
+/// Identify cold blocks using basic heuristics
+///
+/// Cold blocks are blocks that are unlikely to execute. This function implements
+/// basic heuristics to identify such blocks:
+///
+/// 1. Unreachable blocks: Blocks that are not the entry block and have no predecessors
+///    (these are dead code and should be marked as cold)
+///
+/// Future heuristics that could be added:
+/// - Blocks dominated by unlikely conditions (e.g., error checks)
+/// - Blocks that are only reached via error paths
+/// - Profile-guided identification (if profile data is available)
+/// - User annotations
+fn identify_cold_blocks(
+    func: &lpc_lpir::Function,
+    cfg: &ControlFlowGraph,
+    block_to_index: &BTreeMap<BlockEntity, usize>,
+    lowered_order: &[LoweredBlock],
+) -> BTreeSet<BlockIndex> {
+    let mut cold_blocks = BTreeSet::new();
+
+    // Find entry block
+    let entry_block = func.entry_block();
+    let entry_block_idx = entry_block.and_then(|b| block_to_index.get(&b).copied());
+
+    // Identify unreachable blocks (blocks with no predecessors that aren't the entry block)
+    for block in func.blocks() {
+        let block_idx = match block_to_index.get(&block) {
+            Some(&idx) => idx,
+            None => continue,
+        };
+
+        // Skip entry block (it's always hot)
+        if Some(block_idx) == entry_block_idx {
+            continue;
+        }
+
+        // Check if block has predecessors
+        let preds = cfg.predecessors(block_idx);
+        if preds.is_empty() {
+            // Unreachable block - mark as cold
+            // Find the lowered block index for this IR block
+            for (lowered_idx, lowered_block) in lowered_order.iter().enumerate() {
+                match lowered_block {
+                    LoweredBlock::Orig { block: orig_block } if *orig_block == block => {
+                        cold_blocks.insert(BlockIndex::new(lowered_idx as u32));
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    cold_blocks
+}
+
+/// Identify indirect branch targets
+///
+/// Indirect branch targets are blocks that are reached via indirect branches
+/// (e.g., computed jumps, switch statements with jump tables). These blocks
+/// may require special alignment or handling during emission.
+///
+/// # Current Status
+///
+/// LPIR does not currently have indirect branches (no br_table, computed jumps, etc.).
+/// This function returns an empty set for now.
+///
+/// # Future Implementation
+///
+/// When indirect branches are added to LPIR, this function should:
+///
+/// 1. **Identify indirect branch instructions**: Look for opcodes like:
+///    - `br_table` (switch statements with jump tables)
+///    - Computed jumps (jumps where the target is computed at runtime)
+///    - Indirect calls (if they can branch to blocks)
+///
+/// 2. **Track target blocks**: For each indirect branch, identify which blocks
+///    can be reached via that branch and mark them as indirect targets.
+///
+/// 3. **Mark for alignment**: Indirect branch targets may require special alignment
+///    (e.g., 4-byte alignment for jump tables) to ensure efficient branching.
+///
+/// # Example (Future)
+///
+/// ```rust,ignore
+/// // When LPIR has br_table, this function will identify indirect branch targets:
+/// // for block in func.blocks() {
+/// //     for inst in func.block_insts(block) {
+/// //         if let Some(inst_data) = func.dfg.inst_data(inst) {
+/// //             if matches!(inst_data.opcode, Opcode::BrTable) {
+/// //                 // Mark all targets of this br_table as indirect targets
+/// //                 for target_block in br_table_targets {
+/// //                     indirect_targets.insert(target_block);
+/// //                 }
+/// //             }
+/// //         }
+/// //     }
+/// // }
+/// ```
+fn identify_indirect_branch_targets(
+    _func: &lpc_lpir::Function,
+    _cfg: &ControlFlowGraph,
+    _block_to_index: &BTreeMap<BlockEntity, usize>,
+    _lowered_order: &[LoweredBlock],
+) -> BTreeSet<BlockIndex> {
+    // LPIR does not currently have indirect branches
+    // Return empty set for now
+    BTreeSet::new()
 }

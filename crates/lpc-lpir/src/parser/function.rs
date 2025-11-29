@@ -1,6 +1,7 @@
 //! Function and signature parsers.
 
 use nom::{
+    branch::alt,
     bytes::complete::tag,
     character::complete::char,
     combinator::{map, opt},
@@ -16,7 +17,7 @@ use super::{
 };
 use crate::{function::Function, signature::Signature};
 
-/// Parse a function signature: (i32, i32) -> i32
+/// Parse a function signature: (i32, i32) -> i32 or (i32, i32) -> void
 pub(crate) fn parse_signature(input: &str) -> IResult<&str, Signature> {
     let (input, params) = delimited(
         terminated(char('('), blank),
@@ -24,15 +25,23 @@ pub(crate) fn parse_signature(input: &str) -> IResult<&str, Signature> {
         terminated(char(')'), blank),
     )(input)?;
 
-    let (input, returns) = opt(map(
-        tuple((
-            blank,
-            tag("->"),
-            blank,
-            separated_list0(terminated(char(','), blank), terminated(parse_type, blank)),
-        )),
-        |(_, _, _, types)| types,
-    ))(input)?;
+    let (input, returns) = opt(alt((
+        // Handle -> void (syntactic sugar for empty return list)
+        map(
+            tuple((blank, tag("->"), blank, terminated(tag("void"), blank))),
+            |_| alloc::vec::Vec::<crate::types::Type>::new(),
+        ),
+        // Handle -> type1, type2, ... (normal return types)
+        map(
+            tuple((
+                blank,
+                tag("->"),
+                blank,
+                separated_list0(terminated(char(','), blank), terminated(parse_type, blank)),
+            )),
+            |(_, _, _, types)| types,
+        ),
+    )))(input)?;
 
     Ok((
         input,
@@ -179,5 +188,56 @@ block0:
         let (remaining, func) = result.unwrap();
         assert_eq!(remaining, "", "Should consume all input");
         assert_eq!(func.signature.returns.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_signature_void() {
+        let input = "() -> void";
+        let result = parse_signature(input);
+        assert!(result.is_ok(), "parse_signature failed: {:?}", result);
+        let (remaining, sig) = result.unwrap();
+        assert_eq!(remaining, "", "Should consume all input");
+        assert_eq!(sig.params.len(), 0);
+        assert_eq!(
+            sig.returns.len(),
+            0,
+            "void should result in empty return list"
+        );
+    }
+
+    #[test]
+    fn test_parse_signature_with_params_void() {
+        let input = "(i32, i32) -> void";
+        let result = parse_signature(input);
+        assert!(result.is_ok(), "parse_signature failed: {:?}", result);
+        let (remaining, sig) = result.unwrap();
+        assert_eq!(remaining, "", "Should consume all input");
+        assert_eq!(sig.params.len(), 2);
+        assert_eq!(
+            sig.returns.len(),
+            0,
+            "void should result in empty return list"
+        );
+    }
+
+    #[test]
+    fn test_parse_function_with_void() {
+        let input = r#"function %test() -> void {
+block0:
+    halt
+}"#;
+        let result = parse_function_internal(input, 0);
+        assert!(
+            result.is_ok(),
+            "parse_function_internal failed: {:?}",
+            result
+        );
+        let (remaining, func) = result.unwrap();
+        assert_eq!(remaining, "", "Should consume all input");
+        assert_eq!(
+            func.signature.returns.len(),
+            0,
+            "void function should have no returns"
+        );
     }
 }

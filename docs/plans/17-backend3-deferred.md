@@ -26,7 +26,7 @@ This document tracks features and optimizations that are **not** part of the ini
 ### Block Layout Optimization
 
 - **Profile-Guided Optimization**: Use execution profiles to identify hot/cold blocks
-- **Advanced Cold Block Sinking**: More sophisticated cold block placement
+- **Advanced Cold Block Sinking**: More sophisticated cold block placement (basic heuristics implemented)
 - **Block Reordering**: Optimize block order based on branch probabilities
 
 ## Code Generation Features
@@ -130,13 +130,16 @@ This document tracks features and optimizations that are **not** part of the ini
 - Some may require significant refactoring
 - Prioritize based on actual needs and performance requirements
 
-  // 6. Identify cold blocks (deferred: mark blocks unlikely to execute)
+  // 6. Identify cold blocks (IMPLEMENTED: basic heuristics)
   //
   // Cold blocks are blocks that are unlikely to execute (e.g., error handling paths).
   // These can be placed at the end of the function during block layout optimization
   // to improve code locality for the hot path.
   //
-  // TODO: Implement cold block identification in a future phase. This could use:
+  // Basic implementation: Identifies unreachable blocks (blocks with no predecessors
+  // that aren't the entry block) as cold.
+  //
+  // Future enhancements:
   // - Profile data (if available)
-  // - Heuristics (e.g., blocks dominated by unlikely conditions)
+  // - Blocks dominated by unlikely conditions
   // - User annotations

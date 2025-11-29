@@ -11,7 +11,7 @@ fn test_relocations_for_function_calls() {
         r#"
 function %test(i32) -> i32 {
 block0(v0: i32):
-    v1 = call @other(v0)
+    call %other(v0) -> v1
     return v1
 }
 "#,
@@ -27,10 +27,7 @@ block0(v0: i32):
 
             // Check if relocation is recorded for this instruction
             let insn_idx = crate::backend3::types::InsnIndex::new(inst_idx as u32);
-            let reloc = vcode
-                .relocations
-                .iter()
-                .find(|r| r.inst_idx == insn_idx);
+            let reloc = vcode.relocations.iter().find(|r| r.inst_idx == insn_idx);
 
             // Note: Currently, relocations are not automatically recorded during lowering
             // This test verifies the structure exists and can be used when relocations are implemented
@@ -55,14 +52,16 @@ block0(v0: i32):
 #[test]
 fn test_relocation_structure() {
     // Create a VCode with a relocation manually (for testing structure)
-    use crate::backend3::{
-        types::{BlockIndex, InsnIndex},
-        vcode::{BlockLoweringOrder, Callee, RelocKind, VCodeReloc},
-        vcode_builder::VCodeBuilder,
+    use crate::{
+        backend3::{
+            types::{BlockIndex, InsnIndex},
+            vcode::{BlockLoweringOrder, Callee, RelocKind, VCodeReloc},
+            vcode_builder::VCodeBuilder,
+        },
+        isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32EmitInfo, Riscv32MachInst},
     };
-    use crate::isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32MachInst};
 
-    let mut builder = VCodeBuilder::<Riscv32MachInst>::new();
+    let mut builder = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
     let block_idx = BlockIndex::new(0);
     builder.start_block(block_idx, alloc::vec![]);
 
@@ -93,7 +92,10 @@ fn test_relocation_structure() {
     // Verify relocation structure
     assert_eq!(vcode.relocations.len(), 1, "Should have one relocation");
     let reloc = &vcode.relocations[0];
-    assert_eq!(reloc.inst_idx, inst_idx, "Relocation should reference correct instruction");
+    assert_eq!(
+        reloc.inst_idx, inst_idx,
+        "Relocation should reference correct instruction"
+    );
     assert_eq!(
         reloc.kind,
         RelocKind::FunctionCall,
@@ -108,14 +110,16 @@ fn test_relocation_structure() {
 /// Test multiple relocations in one function
 #[test]
 fn test_multiple_relocations() {
-    use crate::backend3::{
-        types::{BlockIndex, InsnIndex},
-        vcode::{BlockLoweringOrder, Callee, RelocKind},
-        vcode_builder::VCodeBuilder,
+    use crate::{
+        backend3::{
+            types::{BlockIndex, InsnIndex},
+            vcode::{BlockLoweringOrder, Callee, RelocKind},
+            vcode_builder::VCodeBuilder,
+        },
+        isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32EmitInfo, Riscv32MachInst},
     };
-    use crate::isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32MachInst};
 
-    let mut builder = VCodeBuilder::<Riscv32MachInst>::new();
+    let mut builder = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
     let block_idx = BlockIndex::new(0);
     builder.start_block(block_idx, alloc::vec![]);
 
@@ -145,11 +149,7 @@ fn test_multiple_relocations() {
     let vcode = builder.build(entry, block_order, abi);
 
     // Verify multiple relocations
-    assert_eq!(
-        vcode.relocations.len(),
-        2,
-        "Should have two relocations"
-    );
+    assert_eq!(vcode.relocations.len(), 2, "Should have two relocations");
     assert_eq!(
         vcode.relocations[0].target, "func1",
         "First relocation should have correct target"
@@ -202,4 +202,3 @@ fn test_relocation_kinds() {
         "Relocation kinds should be distinct"
     );
 }
-

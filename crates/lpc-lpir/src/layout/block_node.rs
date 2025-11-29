@@ -95,3 +95,4 @@ mod tests {
         assert!(node.cold);
     }
 }
+

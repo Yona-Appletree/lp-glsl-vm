@@ -23,6 +23,12 @@ pub trait LowerBackend {
     /// The machine instruction type for this backend
     type MInst: MachInst;
 
+    /// Get the emission info for this backend
+    ///
+    /// This provides ISA-specific information needed during code emission.
+    /// It should be immutable across function compilations within the same module.
+    fn emit_info(&self) -> <Self::MInst as MachInst>::Info;
+
     /// Lower a single IR instruction to machine instructions
     ///
     /// The backend should create the appropriate machine instructions and
@@ -95,7 +101,7 @@ impl<I: MachInst> Lower<I> {
         for (idx, lowered_block) in block_order.lowered_order.iter().enumerate() {
             match lowered_block {
                 crate::backend3::vcode::LoweredBlock::Orig { block } => {
-                    self.lower_block(backend, *block);
+                    self.lower_block(backend, *block, block_order, idx);
                 }
                 crate::backend3::vcode::LoweredBlock::Edge {
                     from,
@@ -105,7 +111,7 @@ impl<I: MachInst> Lower<I> {
                     // Emit phi moves for edge block
                     // Edge blocks use their position in lowered_order as their BlockIndex
                     let edge_block_idx = BlockIndex::new(idx as u32);
-                    self.lower_edge_block(backend, edge_block_idx, *from, *to);
+                    self.lower_edge_block(backend, edge_block_idx, *from, *to, block_order, idx);
                 }
             }
         }
@@ -181,6 +187,8 @@ impl<I: MachInst> Lower<I> {
         edge_block_idx: BlockIndex,
         from: Block,
         to: Block,
+        block_order: &BlockLoweringOrder,
+        lowered_idx: usize,
     ) {
         // Edge blocks have no parameters (they're just for moves)
         self.vcode.start_block(edge_block_idx, Vec::new());
@@ -216,18 +224,66 @@ impl<I: MachInst> Lower<I> {
             }
         }
 
+        // Edge blocks always jump to their target block
+        // Create an unconditional jump instruction
+        let jump_inst = backend.create_jump();
+        let srcloc = RelSourceLoc::default();
+        self.vcode.push(jump_inst, srcloc);
+
         // End block
         self.vcode.end_block();
+
+        // Record branch arguments for edge block
+        // Edge blocks have exactly one successor (the target block)
+        // Get successors from block_order
+        assert!(
+            lowered_idx < block_order.lowered_succs.len(),
+            "lowered_idx {} out of bounds for lowered_succs len {}",
+            lowered_idx,
+            block_order.lowered_succs.len()
+        );
+        let succs = block_order.lowered_succs[lowered_idx].clone();
+
+        // Edge blocks pass the source values (the values being moved from) as branch args
+        // The phi moves copy source->target, and then we pass the source values
+        // to the target block (which expects them as parameters)
+        let mut args_per_succ = Vec::new();
+        for _succ_block_idx in &succs {
+            let mut arg_vregs = Vec::new();
+            if let Some(target_block_data) = self.func.block_data(to) {
+                // For each parameter, find the source value from the predecessor block
+                for (param_idx, _param_value) in target_block_data.params.iter().enumerate() {
+                    let sources = self.func.block_param_sources(to, param_idx);
+                    // Find the source from the 'from' block
+                    for (pred_block, source_value) in sources {
+                        if pred_block == from {
+                            arg_vregs.push(self.value_to_vreg[&source_value]);
+                            break;
+                        }
+                    }
+                }
+            }
+            args_per_succ.push(arg_vregs);
+        }
+
+        if !succs.is_empty() {
+            self.vcode
+                .add_branch_args(edge_block_idx, &succs, &args_per_succ);
+        }
     }
 
     /// Lower a block
-    fn lower_block<B: LowerBackend<MInst = I>>(mut self: &mut Self, backend: &B, block: Block) {
+    fn lower_block<B: LowerBackend<MInst = I>>(
+        mut self: &mut Self,
+        backend: &B,
+        block: Block,
+        block_order: &BlockLoweringOrder,
+        lowered_idx: usize,
+    ) {
         // Get block index for VCode
-        let block_idx = self
-            .block_to_index
-            .get(&block)
-            .copied()
-            .expect("Block should be in block_to_index mapping (computed during block order computation)");
+        let block_idx = self.block_to_index.get(&block).copied().expect(
+            "Block should be in block_to_index mapping (computed during block order computation)",
+        );
 
         // Get block parameters
         let block_params: Vec<VReg> = if let Some(block_data) = self.func.block_data(block) {
@@ -285,25 +341,45 @@ impl<I: MachInst> Lower<I> {
                         self.vcode.push(br_inst, rel_srcloc);
                     }
 
-                    // Extract target blocks and their arguments
-                    if let Some(block_args) = &block_args_opt {
-                        let mut succs = Vec::new();
-                        let mut args_per_succ = Vec::new();
+                    // Get successors from block_order (this is the source of truth)
+                    // Use the lowered_idx passed to this function (position in lowered_order)
+                    let mut succs = Vec::new();
+                    let mut args_per_succ = Vec::new();
 
-                        let value_to_vreg = self.value_to_vreg();
+                    // Get successors from block_order - this should always work since
+                    // lowered_succs has one entry per lowered_order entry
+                    assert!(
+                        lowered_idx < block_order.lowered_succs.len(),
+                        "lowered_idx {} out of bounds for lowered_succs len {}",
+                        lowered_idx,
+                        block_order.lowered_succs.len()
+                    );
+                    succs = block_order.lowered_succs[lowered_idx].clone();
+
+                    // Extract arguments from block_args if available
+                    let value_to_vreg = self.value_to_vreg();
+                    if let Some(block_args) = &block_args_opt {
+                        // Map block_args targets to VCode BlockIndices and extract args
+                        let mut args_map = alloc::collections::BTreeMap::new();
                         for (target_block, args) in &block_args.targets {
-                            // Map IR block to VCode BlockIndex
                             if let Some(&target_idx) = self.block_to_index.get(target_block) {
-                                succs.push(target_idx);
-                                // Convert argument Values to VRegs
                                 let arg_vregs: Vec<VReg> = args
                                     .iter()
                                     .filter_map(|v| value_to_vreg.get(v).copied())
                                     .collect();
-                                args_per_succ.push(arg_vregs);
+                                args_map.insert(target_idx, arg_vregs);
                             }
                         }
+                        // Build args_per_succ in the same order as succs
+                        for &succ in &succs {
+                            args_per_succ.push(args_map.get(&succ).cloned().unwrap_or_default());
+                        }
+                    } else {
+                        // No block_args - use empty args for all successors
+                        args_per_succ = succs.iter().map(|_| Vec::new()).collect();
+                    }
 
+                    if !succs.is_empty() {
                         branch_info = Some((succs, args_per_succ));
                     }
                 }
@@ -312,25 +388,52 @@ impl<I: MachInst> Lower<I> {
                     let jump_inst = backend.create_jump();
                     self.vcode.push(jump_inst, rel_srcloc);
 
-                    // Extract target blocks and their arguments
-                    if let Some(block_args) = &block_args_opt {
-                        let mut succs = Vec::new();
-                        let mut args_per_succ = Vec::new();
+                    // Get successors from block_order (this is the source of truth)
+                    // Use the lowered_idx passed to this function (position in lowered_order)
+                    let mut succs = Vec::new();
+                    let mut args_per_succ = Vec::new();
 
+                    // Get successors from block_order - this should always work since
+                    // lowered_succs has one entry per lowered_order entry
+                    assert!(
+                        lowered_idx < block_order.lowered_succs.len(),
+                        "lowered_idx {} out of bounds for lowered_succs len {}",
+                        lowered_idx,
+                        block_order.lowered_succs.len()
+                    );
+                    succs = block_order.lowered_succs[lowered_idx].clone();
+
+                    // For Br/Jump instructions, we should always have successors
+                    // If succs is empty, that's a bug - but we'll handle it gracefully
+                    if succs.is_empty() {
+                        // This shouldn't happen for valid IR, but if it does, we'll skip recording branch args
+                        // The validation will catch this as an error
+                    } else {
+                        // Extract arguments from block_args if available
                         let value_to_vreg = self.value_to_vreg();
-                        for (target_block, args) in &block_args.targets {
-                            // Map IR block to VCode BlockIndex
-                            if let Some(&target_idx) = self.block_to_index.get(target_block) {
-                                succs.push(target_idx);
-                                // Convert argument Values to VRegs
-                                let arg_vregs: Vec<VReg> = args
-                                    .iter()
-                                    .filter_map(|v| value_to_vreg.get(v).copied())
-                                    .collect();
-                                args_per_succ.push(arg_vregs);
+                        if let Some(block_args) = &block_args_opt {
+                            // Map block_args targets to VCode BlockIndices and extract args
+                            let mut args_map = alloc::collections::BTreeMap::new();
+                            for (target_block, args) in &block_args.targets {
+                                if let Some(&target_idx) = self.block_to_index.get(target_block) {
+                                    let arg_vregs: Vec<VReg> = args
+                                        .iter()
+                                        .filter_map(|v| value_to_vreg.get(v).copied())
+                                        .collect();
+                                    args_map.insert(target_idx, arg_vregs);
+                                }
                             }
+                            // Build args_per_succ in the same order as succs
+                            for &succ in &succs {
+                                args_per_succ
+                                    .push(args_map.get(&succ).cloned().unwrap_or_default());
+                            }
+                        } else {
+                            // No block_args - use empty args for all successors
+                            args_per_succ = succs.iter().map(|_| Vec::new()).collect();
                         }
 
+                        // Record branch info since we have successors
                         branch_info = Some((succs, args_per_succ));
                     }
                 }
@@ -346,7 +449,8 @@ impl<I: MachInst> Lower<I> {
 
         // Record branch arguments if we have branch information
         if let Some((succs, args_per_succ)) = branch_info {
-            self.vcode.add_branch_args(&succs, &args_per_succ);
+            self.vcode
+                .add_branch_args(block_idx, &succs, &args_per_succ);
         }
     }
 
@@ -383,10 +487,13 @@ where
     // Compute block lowering order
     let block_order = compute_block_order(&func, &cfg, &domtree);
 
+    // Get emission info from backend
+    let emit_info = backend.emit_info();
+
     // Create lowering context
     let lower = Lower {
         func,
-        vcode: VCodeBuilder::new(),
+        vcode: VCodeBuilder::new(emit_info.clone()),
         value_to_vreg: BTreeMap::new(),
         block_to_index: BTreeMap::new(),
         abi,

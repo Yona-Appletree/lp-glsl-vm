@@ -27,7 +27,8 @@
 
 ### 1. Create VCode structure (ISA-agnostic)
 
-**Files**: 
+**Files**:
+
 - `backend3/vcode.rs`: Core VCode type (generic over MachInst)
 - `backend3/vcode_builder.rs`: Builder for constructing VCode
 
@@ -96,6 +97,7 @@ pub struct VCode<I: MachInst> {
 Comparing with Cranelift's VCode, here's what we include vs. defer:
 
 **Included (Required for Basic Functionality)**:
+
 - ✅ `insts`: Machine instructions
 - ✅ `operands`: Flat operand array for regalloc2
 - ✅ `operand_ranges`: Per-instruction operand ranges
@@ -112,6 +114,7 @@ Comparing with Cranelift's VCode, here's what we include vs. defer:
 - ✅ `block_order`: Block lowering order
 
 **Deferred (Optional for Initial Implementation)**:
+
 - ❌ `vreg_types`: VReg types (for type checking) - **Add if needed for validation**
 - ❌ `debug_tags`: Debug tags - **Deferred** (not needed initially)
 - ❌ `user_stack_maps`: Stack maps for safepoints - **Deferred** (GC not needed)
@@ -133,19 +136,23 @@ Comparing with Cranelift's VCode, here's what we include vs. defer:
 **Key Steps**:
 
 1. **Critical Edge Detection**: Identify edges where phi moves need to be inserted
+
    - An edge is critical if the source has multiple successors AND the target has multiple predecessors
    - These edges need intermediate blocks for phi value moves
 
 2. **Edge Block Creation**: Create intermediate blocks for critical edges
+
    - Each critical edge gets an intermediate block
    - These blocks will contain moves for phi values during lowering
 
 3. **Block Ordering**: Compute reverse postorder (RPO) traversal
+
    - Ensures defs come before uses (SSA property)
    - Optimizes for fallthrough branches
    - Handles both original blocks and edge blocks
 
 4. **Cold Block Identification**: Mark blocks that are unlikely to execute
+
    - Used later for block layout optimization
    - Cold blocks can be moved to end of function
 
@@ -178,6 +185,7 @@ enum LoweredBlock {
 ```
 
 **Key Features**:
+
 - Handles critical edge splitting automatically
 - Preserves SSA ordering (defs before uses)
 - Enables later block layout optimizations
@@ -188,11 +196,13 @@ enum LoweredBlock {
 **File**: `isa/riscv32/backend3/inst.rs`
 
 **Components**:
+
 - MachInst enum with VReg operands
 - Implement basic instructions (add, addi, lw, sw)
 - Implement MachInst trait for regalloc2 (operand visitor)
 
 **Components**:
+
 - MachInst enum with VReg operands
 - Implement basic instructions (add, addi, lw, sw)
 - Implement MachInst trait for regalloc2 (operand visitor)
@@ -239,15 +249,43 @@ impl backend3::MachInst for MachInst {
 ```
 
 **Key Features**:
+
 - Uses `VReg` (virtual register) instead of `Gpr` (physical register)
 - Implements `MachInst` trait for regalloc2
 - Operand visitor for regalloc2 integration
 
-### 4. Basic lowering (ISA-agnostic)
+### 4. Operand Constraint System
+
+**File**: `backend3/vcode.rs`
+
+**Purpose**: Specify register allocation requirements for operands.
+
+**Constraint Types**:
+
+- **`OperandConstraint::Any`**: Operand can be assigned to any register (default)
+- **`OperandConstraint::Fixed(u32)`**: Operand must be assigned to a specific physical register
+- **`OperandConstraint::RegClass(RegClass)`**: Operand must be in a specific register class (GPR, FPR)
+
+**Operand Kinds**:
+
+- **`OperandKind::Use`**: Operand is read (input)
+- **`OperandKind::Def`**: Operand is written (output)
+- **`OperandKind::Mod`**: Operand is both read and written (read-modify-write)
+
+**ISA-Specific Implementation**:
+
+ISA-specific backends implement `MachInst::get_operands()` to specify constraints for each instruction. Currently, RISC-V instructions use `OperandConstraint::Any` for all operands, but the system supports fixed registers and register classes when needed.
+
+**Interaction with regalloc2**:
+
+Constraints are collected into flat arrays (`operands` and `operand_ranges`) that regalloc2 can efficiently process. regalloc2 uses these constraints to assign physical registers that satisfy the requirements.
+
+### 5. Basic lowering (ISA-agnostic)
 
 **File**: `backend3/lower.rs`
 
 **Components**:
+
 - Lower simple instructions (iconst, iadd, isub)
 - Use block lowering order
 - Create virtual registers for values
@@ -265,11 +303,11 @@ impl Lower {
     fn lower_inst(&mut self, inst: InstEntity) {
         // Get source location from IR instruction
         let ir_srcloc = self.func.srcloc(inst);
-        
+
         // Convert to RelSourceLoc (relative to function's base source location)
         let base_srcloc = self.func.base_srcloc();
         let rel_srcloc = RelSourceLoc::from_base_offset(base_srcloc, ir_srcloc);
-        
+
         // Lower the instruction
         let mach_inst = match inst_data.opcode {
             Opcode::Iadd => {
@@ -277,7 +315,7 @@ impl Lower {
             }
             // ...
         };
-        
+
         // Push instruction with source location
         self.vcode.push(mach_inst, rel_srcloc);
     }
@@ -287,6 +325,7 @@ impl Lower {
 **Handling Synthetic Instructions**:
 
 For instructions created during lowering (e.g., constant materialization, phi moves):
+
 - If they correspond to an IR instruction: use that instruction's source location
 - If they're truly synthetic (no IR equivalent): use `RelSourceLoc::default()`
 
@@ -409,6 +448,7 @@ impl Lower {
 ```
 
 **Key Features**:
+
 - Creates virtual registers for all IR values upfront (immutable mapping)
 - Each Value maps to exactly one VReg (1:1 relationship in SSA form)
 - Maps IR instructions to machine instructions using the Value→VReg mapping
@@ -426,12 +466,14 @@ impl Lower {
 **Constant Materialization Strategies**:
 
 1. **Inline Constants**: Small immediates embedded directly in instructions
+
    - **RISC-V 32**: 12-bit signed immediates for `addi`, `lw`, `sw`, etc.
    - **Range**: -2048 to +2047 (fits in 12 bits)
    - **Decision**: Use inline if `value >= -2048 && value <= 2047`
    - **No extra instructions needed**: Constant is part of instruction encoding
 
 2. **LUI + ADDI Sequence**: Large constants that don't fit in 12 bits
+
    - **RISC-V 32**: Use `lui` (load upper 20 bits) + `addi` (add lower 12 bits)
    - **Range**: Full 32-bit signed range
    - **Decision**: Use if `value < -2048 || value > 2047`
@@ -450,7 +492,7 @@ impl Lower {
     fn fits_in_12_bits(&self, value: i32) -> bool {
         value >= -2048 && value <= 2047
     }
-    
+
     /// Materialize a constant, choosing the appropriate strategy
     fn materialize_constant(&mut self, value: i32) -> VReg {
         if self.fits_in_12_bits(value) {
@@ -465,7 +507,7 @@ impl Lower {
             self.materialize_large_constant(value)
         }
     }
-    
+
     /// Materialize inline constant (fits in 12 bits)
     /// Returns a VReg that will be used in instructions with immediate operands
     fn materialize_inline_constant(&mut self, value: i32) -> VReg {
@@ -478,16 +520,16 @@ impl Lower {
         self.vcode.record_constant(vreg, Constant::Inline(value));
         vreg
     }
-    
+
     /// Materialize large constant via LUI + ADDI
     fn materialize_large_constant(&mut self, value: i32) -> VReg {
         let vreg = self.vcode.alloc_vreg();
-        
+
         // Split value into upper 20 bits and lower 12 bits
         // Note: RISC-V sign-extends the lower 12 bits, so we need to handle sign correctly
         let lower_12 = value & 0xFFF;
         let upper_20 = (value >> 12) & 0xFFFFF;
-        
+
         // If lower 12 bits have sign bit set (bit 11), we need to adjust upper
         // because addi sign-extends the immediate
         let upper = if (lower_12 & 0x800) != 0 {
@@ -496,21 +538,21 @@ impl Lower {
         } else {
             upper_20
         };
-        
+
         // Emit LUI: load upper 20 bits
         let temp_vreg = self.vcode.alloc_vreg();
         self.vcode.push(MachInst::Lui {
             rd: temp_vreg,
             imm: (upper << 12) as u32,
         });
-        
+
         // Emit ADDI: add lower 12 bits (sign-extended)
         self.vcode.push(MachInst::Addi {
             rd: vreg,
             rs1: temp_vreg,
             imm: lower_12 as i32,
         });
-        
+
         vreg
     }
 }
@@ -606,10 +648,10 @@ fn test_lower_iadd() {
             ret %0
         }
     "#;
-    
+
     let func = parse_lpir_function(lpir_text);
     let vcode = Lower::new(func).lower(&block_order);
-    
+
     // Verify VCode structure...
 }
 
@@ -623,16 +665,16 @@ fn test_constant_materialization_large() {
             ret %0
         }
     "#;
-    
+
     let func = parse_lpir_function(lpir_text);
     let vcode = Lower::new(func).lower(&block_order);
-    
+
     // Expected: assembler format showing expected instructions
     let expected_asm = r#"
         lui  t0, 12        # Load upper 20 bits of 50000
         addi t0, t0, 2080  # Add lower 12 bits
     "#;
-    
+
     // Verify generated code matches expected...
 }
 ```
@@ -675,4 +717,3 @@ fn test_constant_materialization_large() {
 - ✅ Constant materialization uses standard RISC-V LUI+ADDI algorithm
 - ✅ Source location tracking matches Cranelift's approach
 - ✅ Block ranges computation accounts for all lowered blocks (original + edge)
-

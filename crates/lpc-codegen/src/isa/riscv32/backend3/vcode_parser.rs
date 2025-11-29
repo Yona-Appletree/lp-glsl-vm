@@ -445,7 +445,8 @@ fn build_vcode(
     entry: BlockIndex,
     blocks: Vec<ParsedBlock>,
 ) -> Result<VCode<Riscv32MachInst>, String> {
-    let mut builder = VCodeBuilder::new();
+    use crate::isa::riscv32::backend3::inst::Riscv32EmitInfo;
+    let mut builder = VCodeBuilder::new(Riscv32EmitInfo);
     let mut block_order = BlockLoweringOrder {
         lowered_order: Vec::new(),
         lowered_succs: Vec::new(),
@@ -482,7 +483,7 @@ fn build_vcode(
                 }
 
                 builder.end_block();
-                builder.add_branch_args(&succs, &args_per_succ);
+                builder.add_branch_args(block_idx, &succs, &args_per_succ);
 
                 // Add to block order
                 block_order.lowered_order.push(LoweredBlock::Orig {
@@ -514,7 +515,7 @@ fn build_vcode(
                 }
 
                 builder.end_block();
-                builder.add_branch_args(&succs, &args_per_succ);
+                builder.add_branch_args(edge_block_idx, &succs, &args_per_succ);
 
                 block_order.lowered_order.push(LoweredBlock::Edge {
                     from: lpc_lpir::BlockEntity::new(from.index()),

@@ -83,16 +83,21 @@ impl fmt::Display for Riscv32MachInst {
                         .join(", ")
                 )
             }
-            Riscv32MachInst::Ecall { number, args } => {
-                write!(
-                    f,
-                    "ecall {}({})",
-                    number,
-                    args.iter()
-                        .map(|v| format!("{}", v))
-                        .collect::<alloc::vec::Vec<_>>()
-                        .join(", ")
-                )
+            Riscv32MachInst::Ecall {
+                number,
+                args,
+                result,
+            } => {
+                let args_str = args
+                    .iter()
+                    .map(|v| format!("{}", v))
+                    .collect::<alloc::vec::Vec<_>>()
+                    .join(", ");
+                if let Some(result) = result {
+                    write!(f, "ecall {}, {}({})", result, number, args_str)
+                } else {
+                    write!(f, "ecall {}({})", number, args_str)
+                }
             }
             Riscv32MachInst::Ebreak => {
                 write!(f, "ebreak")
@@ -233,18 +238,12 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                     .unwrap_or_else(|| Range::new(0, 0));
 
                 // Check if this is an edge block (edge blocks always jump to their target)
-                let is_edge_block = matches!(
-                    lowered_block,
-                    LoweredBlock::Edge { .. }
-                );
+                let is_edge_block = matches!(lowered_block, LoweredBlock::Edge { .. });
 
                 // If last instruction was a branch, format successors on the same line
                 if last_inst_is_branch {
                     // Check if it's a jump (single successor) or brif (multiple successors)
-                    let is_jump = matches!(
-                        &self.insts[inst_range.end - 1],
-                        Riscv32MachInst::Jump
-                    );
+                    let is_jump = matches!(&self.insts[inst_range.end - 1], Riscv32MachInst::Jump);
 
                     for (succ_idx, succ) in succs.iter().enumerate() {
                         // Get branch arguments for this successor
