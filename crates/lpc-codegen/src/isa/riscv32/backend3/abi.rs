@@ -6,6 +6,8 @@
 use alloc::vec::Vec;
 use regalloc2::{MachineEnv, PReg, PRegSet, RegClass};
 
+use crate::isa::riscv32::regs::Gpr;
+
 /// RISC-V 32-bit ABI machine specification for regalloc2
 ///
 /// This struct holds ABI information needed for register allocation.
@@ -89,5 +91,57 @@ impl Riscv32ABI {
             fixed_stack_slots: vec![], // No fixed stack slots for now
         }
     }
+}
+
+/// Frame layout for a function
+///
+/// This structure describes the stack frame layout for a function, including
+/// areas for setup (FP/RA), callee-saved registers, spill slots, and ABI requirements.
+#[derive(Debug, Clone)]
+pub struct FrameLayout {
+    /// Setup area size (FP + RA): 8 bytes
+    pub setup_area_size: u32,
+    /// Clobber area size: space for callee-saved registers that are clobbered
+    pub clobber_area_size: u32,
+    /// Spill slots size: space for register spills from regalloc2
+    pub spill_slots_size: u32,
+    /// ABI size: space for ABI requirements (outgoing args, etc.)
+    pub abi_size: u32,
+    /// List of callee-saved registers that are clobbered
+    pub clobbered_regs: Vec<Gpr>,
+}
+
+impl FrameLayout {
+    /// Compute total frame size
+    pub fn total_size(&self) -> u32 {
+        self.setup_area_size
+            + self.clobber_area_size
+            + self.spill_slots_size
+            + self.abi_size
+    }
+
+    /// Compute spill slot offset from SP (after prologue)
+    ///
+    /// Spill slots are at negative offsets from SP (stack grows down).
+    /// The offset is computed as: -(setup_area + clobber_area + slot_index * slot_size)
+    pub fn spill_slot_offset(&self, slot_index: usize) -> i32 {
+        let base = self.setup_area_size + self.clobber_area_size;
+        -(base as i32 + (slot_index as i32 * 4))
+    }
+}
+
+/// Convert PReg to Gpr
+///
+/// This converts a regalloc2 PReg to a RISC-V 32 Gpr.
+/// Panics if the register is not an integer register or has an invalid encoding.
+pub fn preg_to_gpr(preg: PReg) -> Gpr {
+    assert_eq!(
+        preg.class(),
+        RegClass::Int,
+        "Only integer registers are supported"
+    );
+    let hw_enc = preg.hw_enc();
+    assert!(hw_enc < 32, "Invalid register encoding: {}", hw_enc);
+    Gpr::new(hw_enc as u8)
 }
 

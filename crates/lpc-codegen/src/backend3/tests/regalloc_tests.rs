@@ -140,6 +140,101 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
     }
 }
 
+/// Test register allocation with long live ranges (values that span many instructions)
+#[test]
+fn test_regalloc_pressure_long_live_ranges() {
+    // Create a function where values live across many instructions
+    // This should trigger spilling at optimal points
+    let test = LowerTest::from_lpir(
+        r#"
+function %test(i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32):
+    v6 = iadd v0, v1
+    v7 = iadd v2, v3
+    v8 = iadd v4, v5
+    v9 = iadd v6, v7
+    v10 = iadd v8, v9
+    v11 = iadd v0, v6
+    v12 = iadd v1, v7
+    v13 = iadd v2, v8
+    v14 = iadd v3, v9
+    v15 = iadd v4, v10
+    v16 = iadd v11, v12
+    v17 = iadd v13, v14
+    v18 = iadd v15, v16
+    v19 = iadd v17, v18
+    return v19
+}
+"#,
+    );
+
+    let vcode = test.vcode();
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed");
+
+    // Verify allocation succeeds (may or may not need spills depending on regalloc2's decisions)
+    assert!(
+        result.inst_alloc_offsets.len() >= vcode.num_insts(),
+        "should have allocations for all instructions"
+    );
+}
+
+/// Test register allocation with maximum pressure (all registers in use)
+#[test]
+fn test_regalloc_maximum_pressure() {
+    // Create a function that uses many values simultaneously
+    // This should definitely trigger spilling
+    let test = LowerTest::from_lpir(
+        r#"
+function %test(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32, v10: i32, v11: i32, v12: i32, v13: i32, v14: i32, v15: i32, v16: i32, v17: i32, v18: i32, v19: i32):
+    v20 = iadd v0, v1
+    v21 = iadd v2, v3
+    v22 = iadd v4, v5
+    v23 = iadd v6, v7
+    v24 = iadd v8, v9
+    v25 = iadd v10, v11
+    v26 = iadd v12, v13
+    v27 = iadd v14, v15
+    v28 = iadd v16, v17
+    v29 = iadd v18, v19
+    v30 = iadd v20, v21
+    v31 = iadd v22, v23
+    v32 = iadd v24, v25
+    v33 = iadd v26, v27
+    v34 = iadd v28, v29
+    v35 = iadd v30, v31
+    v36 = iadd v32, v33
+    v37 = iadd v34, v35
+    v38 = iadd v36, v37
+    return v38
+}
+"#,
+    );
+
+    let vcode = test.vcode();
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed even with maximum pressure");
+
+    // With this many values, we should definitely need spill slots
+    // Verify that allocation succeeded and edits are valid
+    assert!(
+        result.inst_alloc_offsets.len() >= vcode.num_insts(),
+        "should have allocations for all instructions"
+    );
+
+    // Verify edits are valid (may include spills/reloads)
+    for (prog_point, _edit) in &result.edits {
+        let inst = prog_point.inst();
+        assert!(
+            inst.index() < vcode.num_insts(),
+            "edit program point should reference valid instruction"
+        );
+    }
+}
+
 /// Test register allocation on function with control flow
 ///
 /// NOTE: This test currently fails because entry block parameters need to be

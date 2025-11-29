@@ -277,6 +277,28 @@ pub(crate) fn parse_const(input: &str) -> IResult<&str, InstData> {
     }
 }
 
+/// Parse a stack allocation instruction (stackalloc)
+pub(crate) fn parse_stackalloc(input: &str) -> IResult<&str, InstData> {
+    let (input, result) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(tag("="), blank)(input)?;
+    let (input, _) = terminated(tag("stackalloc"), blank)(input)?;
+    let (input, size) = terminated(integer, blank)(input)?;
+    
+    // Size must be non-negative and fit in u32
+    if size < 0 {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Verify,
+        )));
+    }
+    let size_u32 = size as u32;
+    
+    Ok((
+        input,
+        InstData::stackalloc(result, size_u32),
+    ))
+}
+
 /// Parse a jump instruction
 pub(crate) fn parse_jump(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("jump"), blank)(input)?;
@@ -452,8 +474,9 @@ pub(crate) fn parse_instruction(input: &str) -> IResult<&str, InstData> {
         parse_trapz,   // "trapz v0, int_divz" - doesn't start with value assignment
         parse_trapnz,  // "trapnz v0, int_ovf" - doesn't start with value assignment
         // Instructions that start with "v0 = " come after
-        // Try parse_const before parse_load since "iconst" is more specific than "load"
+        // Try parse_const before parse_stackalloc before parse_load since "iconst" and "stackalloc" are more specific than "load"
         parse_const,      // "v0 = iconst 42" or "v0 = fconst 3.14"
+        parse_stackalloc, // "v0 = stackalloc 4" - stack allocation
         parse_load,       // "v0 = load.i32 v1" - has type suffix
         parse_fcmp,       // "v0 = fcmp eq v1, v2" - must come before parse_comparison
         parse_comparison, // "v0 = icmp eq v1, v2" or "v0 = icmp_eq v1, v2"

@@ -253,6 +253,46 @@ fn verify_instruction_format(
             }
         }
 
+        // Stack allocation: 0 args, 1 result, no block_args, no ty, no imm (size in opcode)
+        Opcode::StackAlloc { .. } => {
+            if !inst_data.args.is_empty() {
+                errors.push(VerifierError::with_location(
+                    format!(
+                        "StackAlloc operation expects 0 arguments, got {}",
+                        inst_data.args.len()
+                    ),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.results.len() != 1 {
+                errors.push(VerifierError::with_location(
+                    format!(
+                        "StackAlloc operation expects 1 result, got {}",
+                        inst_data.results.len()
+                    ),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.block_args.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("StackAlloc operation should not have block_args"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.ty.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("StackAlloc operation should not have type"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.imm.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("StackAlloc operation should not have immediate"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+        }
+
         // Constants: 0 args, 1 result, imm present, no block_args, no ty
         Opcode::Iconst | Opcode::Fconst => {
             if !inst_data.args.is_empty() {

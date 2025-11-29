@@ -475,6 +475,19 @@ impl Function {
                     write!(f, "{:?}", inst_data.opcode)
                 }
             }
+            // Stack allocation
+            Opcode::StackAlloc { size } => {
+                if inst_data.results.len() == 1 {
+                    write!(
+                        f,
+                        "v{} = stackalloc {}",
+                        inst_data.results[0].index(),
+                        size
+                    )
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
             // Control flow
             Opcode::Jump => {
                 if let Some(block_args) = &inst_data.block_args {

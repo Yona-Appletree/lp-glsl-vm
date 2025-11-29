@@ -200,6 +200,7 @@ v1 = stackalloc 8
 **Tasks:**
 
 1. Add lowering case for `Opcode::StackAlloc`:
+
    ```rust
    Opcode::StackAlloc { size } => {
        // Round up to 4-byte alignment
@@ -209,6 +210,7 @@ v1 = stackalloc 8
        // Materialize address: mv result, sp
    }
    ```
+
 2. Track total stack allocation for frame layout
 3. Update frame layout computation to include stack allocations
 4. Add lowering tests

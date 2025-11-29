@@ -209,6 +209,11 @@ impl<'a> BlockBuilder<'a> {
 
     // Memory instructions
 
+    /// Stack allocation: result = address of allocated stack space
+    pub fn stackalloc(&mut self, result: Value, size: u32) {
+        self.push_inst_data(InstData::stackalloc(result, size));
+    }
+
     /// Load from memory: result = mem[address]
     pub fn load(&mut self, result: Value, address: Value, ty: Type) {
         self.push_inst_data(InstData::load(result, address, ty));

@@ -325,6 +325,18 @@ impl InstData {
             imm: Some(Immediate::TrapCode(code)),
         }
     }
+
+    /// Create a stack allocation instruction
+    pub fn stackalloc(result: Value, size: u32) -> Self {
+        Self {
+            opcode: crate::dfg::opcode::Opcode::StackAlloc { size },
+            args: Vec::new(),
+            results: Vec::from([result]),
+            block_args: None,
+            ty: None,
+            imm: None,
+        }
+    }
 }
 
 #[cfg(test)]

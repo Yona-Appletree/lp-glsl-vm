@@ -85,6 +85,11 @@ pub enum Opcode {
     Load,
     /// Store to memory: mem[address] = value
     Store,
+    /// Stack allocation: result = address of allocated stack space
+    StackAlloc {
+        /// Size in bytes to allocate
+        size: u32,
+    },
 
     // Traps
     /// Unconditional trap: terminate execution with trap code
@@ -134,6 +139,7 @@ impl Opcode {
         matches!(
             self,
             Opcode::Store
+                | Opcode::StackAlloc { .. }
                 | Opcode::Call { .. }
                 | Opcode::Syscall
                 | Opcode::Return

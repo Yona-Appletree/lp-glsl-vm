@@ -144,7 +144,8 @@ impl DFG {
             | Opcode::Ishl
             | Opcode::Ishr
             | Opcode::Iashr
-            | Opcode::Iconst => Some(Type::I32),
+            | Opcode::Iconst
+            | Opcode::StackAlloc { .. } => Some(Type::I32),
             Opcode::Icmp { .. } => Some(Type::I32), // Integer comparisons return i32 (0/1)
             Opcode::Fcmp { .. } => Some(Type::I32), // Floating point comparisons return i32 (0/1)
             Opcode::Fconst => Some(Type::F32),

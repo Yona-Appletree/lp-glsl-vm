@@ -173,6 +173,43 @@ impl LowerBackend for Riscv32LowerBackend {
                     }
                 }
             }
+            Opcode::StackAlloc { size } => {
+                // StackAlloc: allocate stack space and return address
+                // Lower to:
+                //   1. Adjust SP: addi sp, sp, -aligned_size
+                //   2. Materialize address: mv result, sp
+                if !results.is_empty() {
+                    if let Some(result_vreg) = rd_opt {
+                        use crate::isa::riscv32::backend3::regs::stack_pointer;
+                        
+                        // Round up to 4-byte alignment (RISC-V 32-bit requirement)
+                        let aligned_size = ((size + 3) & !3) as i32;
+                        
+                        // Get SP register
+                        let sp_reg = stack_pointer();
+                        
+                        // Adjust SP: addi sp, sp, -aligned_size
+                        let sp_writable = Writable::new(sp_reg);
+                        let adjust_inst = Riscv32MachInst::Addi {
+                            rd: sp_writable,
+                            rs1: sp_reg,
+                            imm: -aligned_size,
+                        };
+                        ctx.vcode.push(adjust_inst, srcloc);
+                        
+                        // Materialize address: mv result, sp
+                        // Use Move instruction (which is ADD with zero)
+                        let rd = Writable::new(Reg::from_virtual_reg(result_vreg));
+                        let move_inst = Riscv32MachInst::Move {
+                            rd,
+                            rs: sp_reg,
+                        };
+                        ctx.vcode.push(move_inst, srcloc);
+                        
+                        return true;
+                    }
+                }
+            }
             Opcode::Imul => {
                 if args.len() >= 2 && !results.is_empty() {
                     if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {

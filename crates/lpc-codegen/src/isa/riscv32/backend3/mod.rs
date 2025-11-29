@@ -4,6 +4,7 @@
 //! See docs/plans/17-backend3.md for the design.
 
 pub mod abi;
+pub mod emit;
 pub mod inst;
 pub mod lower;
 pub mod regs;

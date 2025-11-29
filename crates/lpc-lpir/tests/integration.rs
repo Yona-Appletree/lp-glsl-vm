@@ -238,7 +238,6 @@ block0(v0: i32, v1: i32):
             // Advance SSA counter to account for parameters
             let _ = builder.new_value();
             let _ = builder.new_value();
-            let shift2 = builder.new_value();
             let shift_amount2 = builder.new_value();
             let shifted = builder.new_value();
             let shift_amount1 = builder.new_value();

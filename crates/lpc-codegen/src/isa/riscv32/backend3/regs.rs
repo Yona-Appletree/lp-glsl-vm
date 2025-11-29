@@ -28,3 +28,10 @@ pub fn frame_pointer() -> Reg {
     Reg::from_real_reg(PReg::new(8, RegClass::Int))
 }
 
+/// Get the stack pointer register (x2/sp) as a Reg
+///
+/// The stack pointer is used for stack operations and frame management.
+pub fn stack_pointer() -> Reg {
+    Reg::from_real_reg(PReg::new(2, RegClass::Int))
+}
+
