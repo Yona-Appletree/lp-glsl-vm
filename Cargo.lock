@@ -1049,6 +1049,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-filetests"
+version = "0.1.0"
+dependencies = [
+ "lpc-lpir",
+]
+
+[[package]]
 name = "lpc-glsl"
 version = "0.1.0"
 dependencies = [

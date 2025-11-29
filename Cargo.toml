@@ -7,6 +7,7 @@ members = [
     "crates/lpc-codegen",
     "crates/lpc-glsl",
     "crates/lpc-lpir",
+    "crates/lpc-filetests",
     "crates/riscv-shared",
 ]
 default-members = [

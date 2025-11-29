@@ -58,6 +58,7 @@
 **Two-Dest Branch Representation**:
 
 During lowering, conditional branches are represented with two targets:
+
 - `Branch { kind, rs1, rs2, target_true, target_false }`
 
 This allows the emitter to decide which target should be fallthrough based on block layout.
@@ -285,183 +286,133 @@ See `17-backend3-deferred.md` for more details on island/veneer insertion.
 
 ## Testing
 
+**Test Infrastructure**: Tests use the filetest infrastructure in `crates/lpc-filetests/`. Tests are written as `.lpir` files that contain:
+
+- Test command header (e.g., `test compile` or `test vcode`)
+- Function definitions in textual LPIR format
+- Expected output in comments (starting with `;`)
+- Filecheck directives for flexible pattern matching (`check:`, `nextln:`, `sameln:`)
+
 **Test Format Guidelines**:
 
-- **Input**: Use textual LPIR format for clarity. Tests should define functions using the textual LPIR syntax to make the input code clear and readable, especially for control flow patterns.
-- **Expected Output**: Use assembler format to clearly show the expected RISC-V 32 machine code. This is especially important for branch instructions, call sequences, and multi-return handling.
+- **Input**: Use textual LPIR format in `.lpir` test files. Functions are defined using the textual LPIR syntax, making control flow patterns clear and readable.
+- **Expected Output**: Use assembler format in comments to clearly show the expected RISC-V 32 machine code. Use filecheck directives for flexible matching when exact formatting may vary.
+- **Filecheck Directives**:
+  - `check: <pattern>` - Starts a check block, matches pattern
+  - `nextln: <content>` - Expects content on next line (strict)
+  - `sameln: <content>` - Expects content on same or next line (flexible, searches up to 3 lines ahead)
+  - `}` - Ends a check block
 
 **Test Examples**:
 
-```rust
-#[test]
-fn test_branch_lowering() {
-    // Input: textual LPIR format for clarity
-    let lpir_text = r#"
-        function @test(i32 %a, i32 %b) -> i32 {
-        entry:
-            %cond = icmp eq %a, %b
-            br %cond, then, else
-        then:
-            ret %a
-        else:
-            ret %b
-        }
-    "#;
-    
-    let func = parse_lpir_function(lpir_text);
-    let vcode = Lower::new(func).lower(&block_order);
-    
-    // Verify branch lowering...
+**Branch Emission Test** (`filetests/backend3/branch-emission.lpir`):
+
+```lpir
+test compile
+
+function @test(i32 %a, i32 %b) -> i32 {
+block0(v0: i32, v1: i32):
+    %cond = icmp eq v0, v1
+    brif %cond, block1, block2
+block1:
+    return v0
+block2:
+    return v1
 }
 
-#[test]
-fn test_branch_emission() {
-    // Input: textual LPIR format
-    let lpir_text = r#"
-        function @test(i32 %a, i32 %b) -> i32 {
-        entry:
-            %cond = icmp eq %a, %b
-            br %cond, then, else
-        then:
-            ret %a
-        else:
-            ret %b
-        }
-    "#;
-    
-    let func = parse_lpir_function(lpir_text);
-    let vcode = Lower::new(func).lower(&block_order);
-    let regalloc = vcode.run_regalloc();
-    let buffer = vcode.emit(&regalloc);
-    
-    // Expected: assembler format showing branch instructions
-    let expected_asm = r#"
-        # Prologue...
-        
-        # Compare and branch
-        beq  a0, a1, .Lthen
-        j    .Lelse
-    .Lthen:
-        # Return %a
-        lw   fp, 0(sp)
-        lw   ra, 4(sp)
-        addi sp, sp, 8
-        jalr zero, ra, 0
-    .Lelse:
-        # Return %b
-        mv   a0, a1
-        lw   fp, 0(sp)
-        lw   ra, 4(sp)
-        addi sp, sp, 8
-        jalr zero, ra, 0
-    "#;
+; check: # Prologue
+; sameln: addi sp, sp, -8
+; sameln: sw   fp, 0(sp)
+; sameln: sw   ra, 4(sp)
+; sameln: mv   fp, sp
+; check: # Compare and branch
+; sameln: beq  a0, a1, .Lblock1
+; sameln: j    .Lblock2
+; check: .Lblock1:
+; sameln: # Return %a
+; sameln: mv   a0, a0
+; sameln: lw   fp, 0(sp)
+; sameln: lw   ra, 4(sp)
+; sameln: addi sp, sp, 8
+; sameln: jalr zero, ra, 0
+; check: .Lblock2:
+; sameln: # Return %b
+; sameln: mv   a0, a1
+; sameln: lw   fp, 0(sp)
+; sameln: lw   ra, 4(sp)
+; sameln: addi sp, sp, 8
+; sameln: jalr zero, ra, 0
+```
+
+**Call Emission Test** (`filetests/backend3/call-emission.lpir`):
+
+```lpir
+test compile
+
+function @callee(i32 %x) -> i32 {
+block0(v0: i32):
+    %0 = iadd v0, v0
+    return %0
 }
 
-#[test]
-fn test_call_lowering() {
-    // Input: textual LPIR format
-    let lpir_text = r#"
-        function @callee(i32 %x) -> i32 {
-        entry:
-            %0 = iadd %x, %x
-            ret %0
-        }
-        
-        function @caller(i32 %a) -> i32 {
-        entry:
-            %0 = call @callee(%a)
-            ret %0
-        }
-    "#;
-    
-    let func = parse_lpir_function(lpir_text);
-    let vcode = Lower::new(func).lower(&block_order);
-    
-    // Verify call lowering...
+function @caller(i32 %a) -> i32 {
+block0(v0: i32):
+    %0 = call @callee(v0)
+    return %0
 }
 
-#[test]
-fn test_call_emission() {
-    // Input: textual LPIR format
-    let lpir_text = r#"
-        function @callee(i32 %x) -> i32 {
-        entry:
-            %0 = iadd %x, %x
-            ret %0
-        }
-        
-        function @caller(i32 %a) -> i32 {
-        entry:
-            %0 = call @callee(%a)
-            ret %0
-        }
-    "#;
-    
-    let func = parse_lpir_function(lpir_text);
-    let vcode = Lower::new(func).lower(&block_order);
-    let regalloc = vcode.run_regalloc();
-    let buffer = vcode.emit(&regalloc);
-    
-    // Expected: assembler format showing call sequence
-    let expected_asm = r#"
-        # Prologue...
-        
-        # Call setup
-        mv   a0, a0        # Pass argument
-        jal  ra, callee    # Call function
-        
-        # Epilogue...
-    "#;
+; check: function @caller
+; check: # Prologue
+; sameln: addi sp, sp, -8
+; check: # Call setup
+; sameln: mv   a0, a0        # Pass argument
+; sameln: jal  ra, callee    # Call function
+; check: # Epilogue
+; sameln: lw   fp, 0(sp)
+; sameln: lw   ra, 4(sp)
+; sameln: addi sp, sp, 8
+; sameln: jalr zero, ra, 0
+```
+
+**Multi-Return Test** (`filetests/backend3/multi-return.lpir`):
+
+```lpir
+test compile
+
+function @test(i32 %a, i32 %b) -> (i32, i32, i32) {
+block0(v0: i32, v1: i32):
+    %0 = iadd v0, v1
+    %1 = isub v0, v1
+    %2 = imul v0, v1
+    return %0, %1, %2
 }
 
-#[test]
-fn test_multi_return() {
-    // Input: textual LPIR format
-    let lpir_text = r#"
-        function @test(i32 %a, i32 %b) -> (i32, i32, i32) {
-        entry:
-            %0 = iadd %a, %b
-            %1 = isub %a, %b
-            %2 = imul %a, %b
-            ret %0, %1, %2
-        }
-    "#;
-    
-    let func = parse_lpir_function(lpir_text);
-    let vcode = Lower::new(func).lower(&block_order);
-    let regalloc = vcode.run_regalloc();
-    let buffer = vcode.emit(&regalloc);
-    
-    // Expected: assembler format showing return area handling
-    let expected_asm = r#"
-        # Prologue...
-        # Allocate return area on stack
-        
-        # Compute return values
-        add  t0, a0, a1    # %0 = %a + %b
-        sub  t1, a0, a1    # %1 = %a - %b
-        mul  t2, a0, a1    # %2 = %a * %b
-        
-        # Store to return area
-        sw   t0, 0(sp)
-        sw   t1, 4(sp)
-        sw   t2, 8(sp)
-        
-        # Epilogue...
-    "#;
-}
+; check: # Prologue
+; sameln: addi sp, sp, -20    # Frame + return area
+; check: # Compute return values
+; sameln: add  t0, a0, a1     # %0 = %a + %b
+; sameln: sub  t1, a0, a1     # %1 = %a - %b
+; sameln: mul  t2, a0, a1     # %2 = %a * %b
+; check: # Store to return area
+; sameln: sw   t0, 12(sp)     # Return value 0
+; sameln: sw   t1, 16(sp)     # Return value 1
+; sameln: sw   t2, 20(sp)     # Return value 2
+; check: # Epilogue
+; sameln: lw   fp, 0(sp)
+; sameln: lw   ra, 4(sp)
+; sameln: addi sp, sp, 20
+; sameln: jalr zero, ra, 0
 ```
 
 **Test Categories**:
 
-- Unit tests for branch lowering
-- Unit tests for branch resolution
-- Unit tests for call lowering
-- Unit tests for multi-return
-- Unit tests for relocation fixup
-- Integration test: Compile function with branches
-- Integration test: Compile function with calls
-- Integration test: Compile function with multi-return
+- Filetests for branch lowering (`filetests/backend3/branch-lowering.lpir`)
+- Filetests for branch emission (`filetests/backend3/branch-emission.lpir`)
+- Filetests for call lowering (`filetests/backend3/call-lowering.lpir`)
+- Filetests for call emission (`filetests/backend3/call-emission.lpir`)
+- Filetests for multi-return (`filetests/backend3/multi-return.lpir`)
+- Filetests for relocation fixup (`filetests/backend3/reloc-fixup.lpir`)
+- Integration filetests: Complex control flow patterns (`filetests/backend3/complex-cfg.lpir`)
 
 ## Implementation Notes
 

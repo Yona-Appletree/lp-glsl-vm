@@ -1,29 +1,20 @@
-//! File-based tests for LPIR transformations.
-//!
-//! Similar to Cranelift's filetests, these tests read `.lpir` files that contain:
-//! - Test commands (e.g., `test transform fixed-point`)
-//! - Functions to transform
-//! - Expected output in comments after each function
-
-extern crate alloc;
+//! Test file parsing
 
 use alloc::{string::String, vec::Vec};
 
-use lpc_lpir::{convert_floats_to_fixed16x16, parse_function};
-
 /// A test case extracted from a test file
 #[derive(Debug, Clone)]
-struct TestCase {
-    /// The function text before transformation
-    function_text: String,
-    /// The expected output text (from comments)
-    expected_text: String,
+pub struct TestCase {
+    /// The function text
+    pub function_text: String,
+    /// The expected output text (from comments) or annotations
+    pub expected_text: String,
     /// The test command type
-    command: String,
+    pub command: String,
 }
 
 /// Parse a test file and extract functions with their expected outputs
-fn parse_test_file(content: &str) -> Vec<TestCase> {
+pub fn parse_test_file(content: &str) -> Vec<TestCase> {
     let lines: Vec<&str> = content.lines().collect();
     let mut test_cases = Vec::new();
     let mut i = 0;
@@ -33,7 +24,7 @@ fn parse_test_file(content: &str) -> Vec<TestCase> {
     while i < lines.len() {
         let line = lines[i].trim();
         if line.starts_with("test ") {
-            command = line.to_string();
+            command = String::from(line);
             i += 1;
             // Skip blank lines after command
             while i < lines.len() && lines[i].trim().is_empty() {
@@ -80,7 +71,7 @@ fn parse_test_file(content: &str) -> Vec<TestCase> {
             // Extract function text
             let function_text: String = lines[function_start..=function_end]
                 .iter()
-                .map(|l| l.to_string())
+                .map(|l| String::from(*l))
                 .collect::<Vec<_>>()
                 .join("\n");
 
@@ -126,11 +117,11 @@ fn parse_test_file(content: &str) -> Vec<TestCase> {
                     .map(|l| {
                         let trimmed = l.trim();
                         if trimmed.starts_with("; ") {
-                            trimmed[2..].to_string()
+                            String::from(&trimmed[2..])
                         } else if trimmed.starts_with(';') {
-                            trimmed[1..].to_string()
+                            String::from(&trimmed[1..])
                         } else {
-                            trimmed.to_string()
+                            String::from(trimmed)
                         }
                     })
                     .collect::<Vec<_>>()
@@ -144,7 +135,15 @@ fn parse_test_file(content: &str) -> Vec<TestCase> {
 
                 i = expected_end;
             } else {
-                // No expected output found, skip this function
+                // No expected output found - for some test types (verifier, domtree),
+                // expected output is embedded in annotations, so we still create a test case
+                if command == "test verifier" || command == "test domtree" {
+                    test_cases.push(TestCase {
+                        function_text,
+                        expected_text: String::new(),
+                        command: command.clone(),
+                    });
+                }
                 i = function_end + 1;
             }
         } else {
@@ -156,57 +155,10 @@ fn parse_test_file(content: &str) -> Vec<TestCase> {
 }
 
 /// Normalize IR text for comparison
-fn normalize_ir(ir: &str) -> Vec<String> {
+pub fn normalize_ir(ir: &str) -> Vec<String> {
     ir.lines()
-        .map(|l| l.trim().to_string())
+        .map(|l| String::from(l.trim()))
         .filter(|l| !l.is_empty())
         .collect()
 }
 
-/// Run a single transform test
-fn run_transform_test(function_text: &str, expected_text: &str) {
-    let mut func = parse_function(function_text.trim()).unwrap_or_else(|e| {
-        panic!(
-            "Failed to parse function: {:?}\n\nFunction text:\n{}",
-            e, function_text
-        )
-    });
-
-    convert_floats_to_fixed16x16(&mut func).unwrap_or_else(|e| {
-        panic!(
-            "Transformation failed: {:?}\n\nFunction text:\n{}",
-            e, function_text
-        )
-    });
-
-    let actual = format!("{}", func);
-    let actual_normalized = normalize_ir(&actual);
-    let expected_normalized = normalize_ir(expected_text);
-
-    if actual_normalized != expected_normalized {
-        panic!(
-            "Transform test failed!\n\nExpected:\n{}\n\nActual:\n{}\n\nOriginal function:\n{}",
-            expected_text, actual, function_text
-        );
-    }
-}
-
-#[test]
-fn test_fixed_point_transform() {
-    let content = include_str!("filetests/transform/fixed-point.lpir");
-    let test_cases = parse_test_file(content);
-
-    assert!(
-        !test_cases.is_empty(),
-        "No test cases found in fixed-point.lpir"
-    );
-
-    for case in test_cases {
-        assert_eq!(
-            case.command, "test transform fixed-point",
-            "Unexpected test command: {}",
-            case.command
-        );
-        run_transform_test(&case.function_text, &case.expected_text);
-    }
-}

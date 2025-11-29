@@ -1,0 +1,20 @@
+test print-cfg
+
+function %test(i32) {
+block0(v0: i32):
+    brif v0, block1, block2
+block1:
+    jump block2
+block2:
+    return
+}
+
+; cfg_postorder:
+;   block2
+;   block1
+;   block0
+; predecessors:
+;   block0: []
+;   block1: [0]
+;   block2: [0, 1]
+

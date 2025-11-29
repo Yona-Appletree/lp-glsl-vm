@@ -83,90 +83,125 @@
 
 ## Testing
 
+**Test Infrastructure**: Tests use the filetest infrastructure in `crates/lpc-filetests/`. Tests are written as `.lpir` files that contain:
+
+- Test command header (e.g., `test compile` or `test vcode`)
+- Function definitions in textual LPIR format
+- Expected output in comments (starting with `;`)
+- Filecheck directives for flexible pattern matching (`check:`, `nextln:`, `sameln:`)
+
 **Test Format Guidelines**:
 
-- **Input**: Use textual LPIR format for clarity. Tests should define functions using the textual LPIR syntax to make the input code clear and readable.
-- **Expected Output**: Use assembler format to clearly show the expected RISC-V 32 machine code. This is especially important for memory operations, block layout optimizations, and complex multi-function scenarios.
+- **Input**: Use textual LPIR format in `.lpir` test files. Functions are defined using the textual LPIR syntax, making the input code clear and readable.
+- **Expected Output**: Use assembler format in comments to clearly show the expected RISC-V 32 machine code. Use filecheck directives for flexible matching when exact formatting may vary, especially for memory operations, block layout optimizations, and complex multi-function scenarios.
+- **Filecheck Directives**:
+  - `check: <pattern>` - Starts a check block, matches pattern
+  - `nextln: <content>` - Expects content on next line (strict)
+  - `sameln: <content>` - Expects content on same or next line (flexible, searches up to 3 lines ahead)
+  - `}` - Ends a check block
 
 **Test Examples**:
 
-```rust
-#[test]
-fn test_memory_operations() {
-    // Input: textual LPIR format for clarity
-    let lpir_text = r#"
-        function @test(i32* %ptr, i32 %val) -> i32 {
-        entry:
-            store %val, %ptr
-            %0 = load %ptr
-            ret %0
-        }
-    "#;
+**Memory Operations Test** (`filetests/backend3/memory-operations.lpir`):
 
-    let func = parse_lpir_function(lpir_text);
-    let vcode = Lower::new(func).lower(&block_order);
-    let regalloc = vcode.run_regalloc();
-    let buffer = vcode.emit(&regalloc);
+```lpir
+test compile
 
-    // Expected: assembler format showing load/store instructions
-    let expected_asm = r#"
-        # Prologue...
-
-        # Store
-        sw   a1, 0(a0)
-
-        # Load
-        lw   a0, 0(a0)
-
-        # Epilogue...
-    "#;
+function @test(i32* %ptr, i32 %val) -> i32 {
+block0(v0: i32*, v1: i32):
+    store v1, v0
+    %0 = load v0
+    return %0
 }
 
-#[test]
-fn test_block_layout_optimization() {
-    // Input: textual LPIR format
-    let lpir_text = r#"
-        function @test(i32 %a) -> i32 {
-        entry:
-            %cond = icmp eq %a, 0
-            br %cond, hot, cold
-        hot:
-            %0 = iadd %a, 1
-            ret %0
-        cold:
-            %1 = imul %a, 100
-            ret %1
-        }
-    "#;
+; check: # Prologue
+; sameln: addi sp, sp, -8
+; check: # Store
+; sameln: sw   a1, 0(a0)
+; check: # Load
+; sameln: lw   a0, 0(a0)
+; check: # Epilogue
+; sameln: lw   fp, 0(sp)
+; sameln: lw   ra, 4(sp)
+; sameln: addi sp, sp, 8
+; sameln: jalr zero, ra, 0
+```
 
-    let func = parse_lpir_function(lpir_text);
-    let vcode = Lower::new(func).lower(&block_order);
-    let regalloc = vcode.run_regalloc();
-    let buffer = vcode.emit(&regalloc);
+**Block Layout Optimization Test** (`filetests/backend3/block-layout.lpir`):
 
-    // Expected: assembler format showing optimized block layout
-    // (hot path first, cold path at end)
-    let expected_asm = r#"
-        # Prologue...
+```lpir
+test compile
 
-        # Hot path (fallthrough)
-        beq  a0, zero, .Lcold
-        addi a0, a0, 1
-        # Epilogue...
-
-        # Cold path (at end)
-    .Lcold:
-        # ... cold path code ...
-    "#;
+function @test(i32 %a) -> i32 {
+block0(v0: i32):
+    %cond = icmp eq v0, 0
+    brif %cond, block1, block2
+block1:
+    %0 = iadd v0, 1
+    return %0
+block2:
+    %1 = imul v0, 100
+    return %1
 }
+
+; check: # Prologue
+; sameln: addi sp, sp, -8
+; check: # Hot path (fallthrough)
+; sameln: beq  a0, zero, .Lblock2
+; sameln: addi a0, a0, 1
+; check: # Epilogue (hot path)
+; sameln: lw   fp, 0(sp)
+; sameln: lw   ra, 4(sp)
+; sameln: addi sp, sp, 8
+; sameln: jalr zero, ra, 0
+; check: # Cold path (at end)
+; sameln: .Lblock2:
+; sameln: mul  a0, a0, 100
+; check: # Epilogue (cold path)
+; sameln: lw   fp, 0(sp)
+; sameln: lw   ra, 4(sp)
+; sameln: addi sp, sp, 8
+; sameln: jalr zero, ra, 0
+```
+
+**Multi-Function Compilation Test** (`filetests/backend3/multi-function.lpir`):
+
+```lpir
+test compile
+
+function @helper(i32 %x) -> i32 {
+block0(v0: i32):
+    %0 = iadd v0, 1
+    return %0
+}
+
+function @main(i32 %a) -> i32 {
+block0(v0: i32):
+    %0 = call @helper(v0)
+    %1 = call @helper(%0)
+    return %1
+}
+
+; check: function @helper
+; sameln: # Prologue
+; check: function @main
+; sameln: # Prologue
+; check: # Call @helper
+; sameln: mv   a0, a0
+; sameln: jal  ra, helper
+; check: # Call @helper again
+; sameln: mv   a0, a0
+; sameln: jal  ra, helper
+; check: # Epilogue
 ```
 
 **Test Categories**:
 
-- Unit tests for memory operations
-- Unit tests for block layout optimization
-- Integration test: Compile complex functions
-- Integration test: Compile multiple functions
+- Filetests for memory operations (`filetests/backend3/memory-operations.lpir`)
+- Filetests for block layout optimization (`filetests/backend3/block-layout.lpir`)
+- Filetests for constant pool handling (`filetests/backend3/constant-pool.lpir`)
+- Filetests for multi-function compilation (`filetests/backend3/multi-function.lpir`)
+- Integration filetests: Complex functions (`filetests/backend3/complex.lpir`)
 
 ## Success Criteria
 

@@ -1,0 +1,124 @@
+test domtree
+
+function %test(i32) {
+block0(v0: i32):
+    jump block1              ; dominates: block1
+block1:
+    brif v0, block2, block3  ; dominates: block2 block3
+block2:
+    jump block3
+block3:
+    return
+}
+; check: cfg_postorder:
+; sameln: block3
+; sameln: block2
+; sameln: block1
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1
+; nextln: block1: block2 block3
+; nextln: block2:
+; nextln: block3:
+; nextln: }
+
+function %linear(i32) {
+block0(v0: i32):
+    jump block1              ; dominates: block1 block2
+block1:
+    jump block2              ; dominates: block2
+block2:
+    return
+}
+; check: cfg_postorder:
+; sameln: block2
+; sameln: block1
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1
+; nextln: block1: block2
+; nextln: block2:
+; nextln: }
+
+function %diamond(i32) {
+block0(v0: i32):
+    brif v0, block1, block2  ; dominates: block1 block2 block3
+block1:
+    jump block3
+block2:
+    jump block3
+block3:
+    return
+}
+; check: cfg_postorder:
+; sameln: block3
+; sameln: block1
+; sameln: block2
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1 block2 block3
+; nextln: block1:
+; nextln: block2:
+; nextln: block3:
+; nextln: }
+
+function %wide_tree(i32) {
+block0(v0: i32):
+    brif v0, block1, block2  ; dominates: block1 block2 block3 block4 block5
+block1:
+    jump block3
+block2:
+    jump block4
+block3:
+    jump block5
+block4:
+    jump block5
+block5:
+    return
+}
+; check: cfg_postorder:
+; sameln: block5
+; sameln: block3
+; sameln: block1
+; sameln: block4
+; sameln: block2
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1 block2 block5
+; nextln: block1: block3
+; nextln: block3:
+; nextln: block2: block4
+; nextln: block4:
+; nextln: block5:
+; nextln: }
+
+function %tall_tree(i32) {
+block0(v0: i32):
+    jump block1              ; dominates: block1 block2 block3 block4
+block1:
+    jump block2              ; dominates: block2 block3 block4
+block2:
+    jump block3              ; dominates: block3 block4
+block3:
+    jump block4              ; dominates: block4
+block4:
+    return
+}
+; check: cfg_postorder:
+; sameln: block4
+; sameln: block3
+; sameln: block2
+; sameln: block1
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1
+; nextln: block1: block2
+; nextln: block2: block3
+; nextln: block3: block4
+; nextln: block4:
+; nextln: }

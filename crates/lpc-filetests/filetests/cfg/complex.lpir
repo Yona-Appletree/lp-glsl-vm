@@ -1,0 +1,24 @@
+test print-cfg
+
+function %diamond(i32) {
+block0(v0: i32):
+    brif v0, block1, block2
+block1:
+    jump block3
+block2:
+    jump block3
+block3:
+    return
+}
+
+; cfg_postorder:
+;   block3
+;   block1
+;   block2
+;   block0
+; predecessors:
+;   block0: []
+;   block1: [0]
+;   block2: [0]
+;   block3: [1, 2]
+

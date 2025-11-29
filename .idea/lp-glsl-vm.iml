@@ -21,6 +21,9 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/runtime-embive/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/lpc-codegen/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/lpc-codegen/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-filetests/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-glsl/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/lpc-glsl/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/lpc-lpir/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/apps/esp32c3-jit-test/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />

@@ -240,11 +240,16 @@ impl InstBuffer {
             ) => {
                 if offset_in_units < -2048 || offset_in_units > 2047 {
                     panic!(
-                        "Branch offset {} bytes ({} 2-byte units) out of range for conditional branch at offset {} (max ±4KB, ±2048 2-byte units). Branch distance: {} bytes",
-                        delta,
-                        offset_in_units,
+                        "Emission error: conditional branch offset out of range.\n\
+                         Branch at offset {} bytes targets offset {} bytes.\n\
+                         Distance: {} bytes ({} 2-byte units).\n\
+                         Maximum range: ±4KB (±2048 2-byte units).\n\
+                         This function is too large for conditional branches. \
+                         Consider splitting the function or using unconditional jumps.",
                         branch_offset,
-                        delta.abs()
+                        target_offset,
+                        delta.abs(),
+                        offset_in_units.abs()
                     );
                 }
                 *imm = offset_in_units as i32;
@@ -253,11 +258,16 @@ impl InstBuffer {
             (Inst::Jal { imm, .. }, BranchType::Unconditional) => {
                 if offset_in_units < -524288 || offset_in_units > 524287 {
                     panic!(
-                        "Jump offset {} bytes ({} 2-byte units) out of range for unconditional jump at offset {} (max ±1MB, ±524288 2-byte units). Jump distance: {} bytes",
-                        delta,
-                        offset_in_units,
+                        "Emission error: unconditional jump offset out of range.\n\
+                         Jump at offset {} bytes targets offset {} bytes.\n\
+                         Distance: {} bytes ({} 2-byte units).\n\
+                         Maximum range: ±1MB (±524288 2-byte units).\n\
+                         This function is too large for unconditional jumps. \
+                         Consider splitting the function or using indirect jumps.",
                         branch_offset,
-                        delta.abs()
+                        target_offset,
+                        delta.abs(),
+                        offset_in_units.abs()
                     );
                 }
                 *imm = offset_in_units as i32;

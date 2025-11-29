@@ -143,16 +143,29 @@ impl EmitState {
 
     /// Resolve all remaining pending fixups (should be none if emission order is correct)
     fn resolve_all_pending_fixups(&mut self, buffer: &mut InstBuffer) {
+        // Validate that all fixups can be resolved before attempting resolution
+        let mut unresolved = Vec::new();
         for fixup in &self.pending_fixups {
             let target_offset = self.get_label_offset(fixup.target_block);
-            if target_offset != UNKNOWN_LABEL_OFFSET {
-                buffer.patch_branch(fixup.branch_offset, target_offset, fixup.branch_type);
-            } else {
-                panic!(
-                    "Unresolved label fixup: block {:?} not bound",
-                    fixup.target_block
-                );
+            if target_offset == UNKNOWN_LABEL_OFFSET {
+                unresolved.push(fixup.target_block);
             }
+        }
+
+        if !unresolved.is_empty() {
+            panic!(
+                "Emission error: unresolved label fixups for blocks {:?}. These blocks were \
+                 referenced by branches but never bound to code offsets. This indicates an error \
+                 in emission order or missing block labels. Check that all blocks in the CFG are \
+                 emitted and labels are bound correctly.",
+                unresolved
+            );
+        }
+
+        // All fixups can be resolved, proceed with patching
+        for fixup in &self.pending_fixups {
+            let target_offset = self.get_label_offset(fixup.target_block);
+            buffer.patch_branch(fixup.branch_offset, target_offset, fixup.branch_type);
         }
         self.pending_fixups.clear();
     }
@@ -176,7 +189,7 @@ impl VCode<Riscv32MachInst> {
     pub fn emit(
         &self,
         regalloc: &regalloc2::Output,
-        symbol_table: Option<&mut SymbolTable>,
+        mut symbol_table: Option<&mut SymbolTable>,
         function_name: Option<&str>,
     ) -> InstBuffer {
         let mut buffer = InstBuffer::new();
@@ -191,113 +204,32 @@ impl VCode<Riscv32MachInst> {
 
         // Register function start offset in symbol table if provided
         let function_start_offset = buffer.cur_offset();
-        if let Some(symtab) = symbol_table {
+        if let Some(symtab) = symbol_table.as_mut() {
             if let Some(name) = function_name {
                 symtab.add_local(Symbol::local(name), function_start_offset);
             }
+        }
 
-            // Compute emission order (cold blocks at end)
-            let block_order = self.compute_emission_order();
-            let block_order_ref: &[BlockIndex] = &block_order;
+        // Compute emission order (cold blocks at end)
+        let block_order = self.compute_emission_order();
+        let block_order_ref: &[BlockIndex] = &block_order;
 
-            // Emit blocks in final order
-            for block_idx in &block_order {
-                // Is this the entry block? Emit prologue
-                if block_idx.index() == self.entry.index() {
-                    self.gen_prologue(&mut buffer, &mut state, &frame_layout);
-                }
+        // Emit blocks in final order
+        self.emit_blocks(
+            &mut buffer,
+            &mut state,
+            &block_order,
+            block_order_ref,
+            regalloc,
+            &frame_layout,
+        );
 
-                // Check alignment requirement for this block
-                if let Some(align) = self.block_metadata[block_idx.index()].alignment {
-                    let current_offset = buffer.cur_offset();
-                    let padding_needed = (align - (current_offset % align)) % align;
-                    // Emit NOP instructions for padding (ADDI x0, x0, 0)
-                    // Each instruction is 4 bytes
-                    let nop_count = (padding_needed / 4) as usize;
-                    for _ in 0..nop_count {
-                        buffer.emit(Inst::Addi {
-                            rd: Gpr::Zero,
-                            rs1: Gpr::Zero,
-                            imm: 0,
-                        });
-                    }
-                }
+        // Resolve any remaining forward references (should be none if order is correct)
+        state.resolve_all_pending_fixups(&mut buffer);
 
-                // Bind label for this block
-                let block_start_offset = buffer.cur_offset();
-                state.bind_label(*block_idx, block_start_offset);
-                buffer.bind_label(block_idx.index() as u32);
-
-                // Emit block instructions and edits
-                self.emit_block(
-                    &mut buffer,
-                    &mut state,
-                    *block_idx,
-                    regalloc,
-                    &frame_layout,
-                    block_order_ref,
-                );
-
-                // Resolve any pending fixups that targeted this label
-                state.resolve_pending_fixups(&mut buffer, *block_idx, block_start_offset);
-            }
-
-            // Resolve any remaining forward references (should be none if order is correct)
-            state.resolve_all_pending_fixups(&mut buffer);
-
-            // Fix external relocations (function calls, etc.)
+        // Fix external relocations (function calls, etc.) if symbol table provided
+        if let Some(symtab) = symbol_table.as_mut() {
             self.fix_external_relocations(&mut buffer, &state, symtab);
-        } else {
-            // No symbol table - emit without relocation resolution
-            // Compute emission order (cold blocks at end)
-            let block_order = self.compute_emission_order();
-            let block_order_ref: &[BlockIndex] = &block_order;
-
-            // Emit blocks in final order
-            for block_idx in &block_order {
-                // Is this the entry block? Emit prologue
-                if block_idx.index() == self.entry.index() {
-                    self.gen_prologue(&mut buffer, &mut state, &frame_layout);
-                }
-
-                // Check alignment requirement for this block
-                if let Some(align) = self.block_metadata[block_idx.index()].alignment {
-                    let current_offset = buffer.cur_offset();
-                    let padding_needed = (align - (current_offset % align)) % align;
-                    // Emit NOP instructions for padding (ADDI x0, x0, 0)
-                    // Each instruction is 4 bytes
-                    let nop_count = (padding_needed / 4) as usize;
-                    for _ in 0..nop_count {
-                        buffer.emit(Inst::Addi {
-                            rd: Gpr::Zero,
-                            rs1: Gpr::Zero,
-                            imm: 0,
-                        });
-                    }
-                }
-
-                // Bind label for this block
-                let block_start_offset = buffer.cur_offset();
-                state.bind_label(*block_idx, block_start_offset);
-                buffer.bind_label(block_idx.index() as u32);
-
-                // Emit block instructions and edits
-                self.emit_block(
-                    &mut buffer,
-                    &mut state,
-                    *block_idx,
-                    regalloc,
-                    &frame_layout,
-                    block_order_ref,
-                );
-
-                // Resolve any pending fixups that targeted this label
-                state.resolve_pending_fixups(&mut buffer, *block_idx, block_start_offset);
-            }
-
-            // Resolve any remaining forward references (should be none if order is correct)
-            state.resolve_all_pending_fixups(&mut buffer);
-            // No relocation resolution - this is OK for single-function compilation without calls
         }
 
         // End any remaining source location range
@@ -432,6 +364,62 @@ impl VCode<Riscv32MachInst> {
         }
     }
 
+    /// Emit all blocks in the given order
+    ///
+    /// This is a helper method that extracts the common emission loop logic
+    /// to avoid duplication between symbol table and non-symbol table paths.
+    fn emit_blocks(
+        &self,
+        buffer: &mut InstBuffer,
+        state: &mut EmitState,
+        block_order: &[BlockIndex],
+        block_order_ref: &[BlockIndex],
+        regalloc: &regalloc2::Output,
+        frame_layout: &FrameLayout,
+    ) {
+        // Emit blocks in final order
+        for block_idx in block_order {
+            // Is this the entry block? Emit prologue
+            if block_idx.index() == self.entry.index() {
+                self.gen_prologue(buffer, state, frame_layout);
+            }
+
+            // Check alignment requirement for this block
+            if let Some(align) = self.block_metadata[block_idx.index()].alignment {
+                let current_offset = buffer.cur_offset();
+                let padding_needed = (align - (current_offset % align)) % align;
+                // Emit NOP instructions for padding (ADDI x0, x0, 0)
+                // Each instruction is 4 bytes
+                let nop_count = (padding_needed / 4) as usize;
+                for _ in 0..nop_count {
+                    buffer.emit(Inst::Addi {
+                        rd: Gpr::Zero,
+                        rs1: Gpr::Zero,
+                        imm: 0,
+                    });
+                }
+            }
+
+            // Bind label for this block
+            let block_start_offset = buffer.cur_offset();
+            state.bind_label(*block_idx, block_start_offset);
+            buffer.bind_label(block_idx.index() as u32);
+
+            // Emit block instructions and edits
+            self.emit_block(
+                buffer,
+                state,
+                *block_idx,
+                regalloc,
+                frame_layout,
+                block_order_ref,
+            );
+
+            // Resolve any pending fixups that targeted this label
+            state.resolve_pending_fixups(buffer, *block_idx, block_start_offset);
+        }
+    }
+
     /// Compute emission order (cold blocks at end)
     fn compute_emission_order(&self) -> Vec<BlockIndex> {
         // Start with original order
@@ -468,10 +456,9 @@ impl VCode<Riscv32MachInst> {
 
         // Add registers that are targets of moves (from edits)
         for (_prog_point, edit) in &regalloc.edits {
-            if let Edit::Move { to, .. } = edit {
-                if let Some(preg) = to.as_reg() {
-                    clobbered_pregs.add(preg);
-                }
+            let Edit::Move { to, .. } = edit;
+            if let Some(preg) = to.as_reg() {
+                clobbered_pregs.add(preg);
             }
         }
 
@@ -529,13 +516,24 @@ impl VCode<Riscv32MachInst> {
             }
         }
 
-        FrameLayout {
+        let mut frame = FrameLayout {
             setup_area_size: 8, // FP + RA (8 bytes)
             clobber_area_size: (clobbered_callee_saved.len() * 4) as u32,
             spill_slots_size: spill_slots_size as u32,
             abi_size: max_stack_args,
             clobbered_regs: clobbered_callee_saved,
+        };
+
+        // Ensure frame size is 16-byte aligned per RISC-V ABI
+        // The RISC-V ABI requires the stack pointer to be 16-byte aligned at function entry
+        let total_size = frame.total_size();
+        let aligned_size = (total_size + 15) & !15; // Round up to 16-byte boundary
+        if aligned_size != total_size {
+            // Add padding to align the frame
+            frame.abi_size += aligned_size - total_size;
         }
+
+        frame
     }
 
     /// Generate prologue

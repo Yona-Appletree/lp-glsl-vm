@@ -441,10 +441,9 @@ impl MachInst for Riscv32MachInst {
         match self {
             Riscv32MachInst::Return { .. } => MachTerminator::Ret,
             Riscv32MachInst::Br { .. } | Riscv32MachInst::Jump => MachTerminator::Branch,
-            Riscv32MachInst::Trap { .. }
-            | Riscv32MachInst::Trapz { .. }
-            | Riscv32MachInst::Trapnz { .. }
-            | Riscv32MachInst::Ebreak => MachTerminator::Ret, // Traps terminate execution
+            Riscv32MachInst::Trap { .. } | Riscv32MachInst::Ebreak => MachTerminator::Ret, // Unconditional traps terminate execution
+            // Trapz and Trapnz are conditional - they only trap if condition is met, otherwise fall through
+            Riscv32MachInst::Trapz { .. } | Riscv32MachInst::Trapnz { .. } => MachTerminator::None,
             Riscv32MachInst::Args { .. } => MachTerminator::None, // Args is not a terminator
             _ => MachTerminator::None,
         }

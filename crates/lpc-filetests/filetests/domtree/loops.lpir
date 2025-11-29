@@ -1,0 +1,200 @@
+test domtree
+
+; Test 1: Simple loop with back edge
+function %simple_loop(i32) {
+block0(v0: i32):
+    jump block1              ; dominates: block1 block2
+block1:
+    brif v0, block1, block2  ; dominates: block2
+block2:
+    return
+}
+; check: cfg_postorder:
+; sameln: block2
+; sameln: block1
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1
+; nextln: block1: block2
+; nextln: block2:
+; nextln: }
+
+; Test 2: Nested loops
+function %nested_loops(i32) {
+block0(v0: i32):
+    jump block1              ; dominates: block1 block2 block3 block4
+block1:
+    brif v0, block2, block3  ; dominates: block2 block3 block4
+block2:
+    jump block1
+block3:
+    brif v0, block1, block4  ; dominates: block4
+block4:
+    return
+}
+; check: cfg_postorder:
+; sameln: block2
+; sameln: block4
+; sameln: block3
+; sameln: block1
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1
+; nextln: block1: block2 block3 block4
+; nextln: block2:
+; nextln: block3:
+; nextln: block4:
+; nextln: }
+
+; Test 3: Complex loop with multiple back edges
+function %complex_loop(i32) {
+block0(v0: i32):
+    brif v0, block2, block1   ; dominates: block1 block2 block3 block4 block5
+block1:
+    jump block3
+block2:
+    brif v0, block5, block4
+block3:
+    jump block4
+block4:
+    brif v0, block5, block3
+block5:
+    brif v0, block6, block4   ; dominates: block6
+block6:
+    return
+}
+; check: cfg_postorder:
+; sameln: block6
+; sameln: block5
+; sameln: block4
+; sameln: block3
+; sameln: block1
+; sameln: block2
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1 block2 block5 block4 block3
+; nextln: block1:
+; nextln: block2:
+; nextln: block5: block6
+; nextln: block6:
+; nextln: block4:
+; nextln: block3:
+; nextln: }
+
+; Test 4: Loop with multiple exits
+function %loop_multiple_exits(i32) {
+block0(v0: i32):
+    jump block1              ; dominates: block1 block2 block3 block4
+block1:
+    brif v0, block2, block3  ; dominates: block2 block3 block4
+block2:
+    brif v0, block1, block4  ; dominates: block4
+block3:
+    jump block4
+block4:
+    return
+}
+; check: cfg_postorder:
+; sameln: block4
+; sameln: block2
+; sameln: block3
+; sameln: block1
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1
+; nextln: block1: block2 block3 block4
+; nextln: block2:
+; nextln: block3:
+; nextln: block4:
+; nextln: }
+
+; Test 5: Loop with phi nodes (merge block)
+function %loop_with_phi(i32) {
+block0(v0: i32):
+    v1 = iconst 0
+    jump block1(v1)          ; dominates: block1 block2 block3
+block1(v2: i32):
+    v3 = icmp eq v2, v0
+    brif v3, block2, block3  ; dominates: block2 block3
+block2:
+    v4 = iadd v2, v1
+    jump block1(v4)
+block3:
+    return
+}
+; check: cfg_postorder:
+; sameln: block2
+; sameln: block3
+; sameln: block1
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1
+; nextln: block1: block2 block3
+; nextln: block2:
+; nextln: block3:
+; nextln: }
+
+; Test 6: Irreducible control flow (loop with multiple headers)
+function %irreducible_loop(i32) {
+block0(v0: i32):
+    brif v0, block1, block2   ; dominates: block1 block2 block3
+block1:
+    brif v0, block3, block2
+block2:
+    brif v0, block1, block3
+block3:
+    return
+}
+; check: cfg_postorder:
+; sameln: block3
+; sameln: block2
+; sameln: block1
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1 block2 block3
+; nextln: block1:
+; nextln: block2:
+; nextln: block3:
+; nextln: }
+
+; Test 7: Deeply nested loops
+function %deeply_nested_loops(i32) {
+block0(v0: i32):
+    jump block1               ; dominates: block1 block2 block3 block4 block5 block6
+block1:
+    brif v0, block2, block3   ; dominates: block2 block3 block4 block5 block6
+block2:
+    jump block1
+block3:
+    brif v0, block4, block5   ; dominates: block4 block5 block6
+block4:
+    jump block3
+block5:
+    brif v0, block6, block3    ; dominates: block6
+block6:
+    return
+}
+; check: cfg_postorder:
+; sameln: block2
+; sameln: block4
+; sameln: block6
+; sameln: block5
+; sameln: block3
+; sameln: block1
+; sameln: block0
+
+; check: domtree_preorder {
+; nextln: block0: block1
+; nextln: block1: block2 block3
+; nextln: block2:
+; nextln: block3: block4 block5 block6
+; nextln: block4:
+; nextln: block5:
+; nextln: block6:
+; nextln: }
