@@ -366,9 +366,9 @@ pub(crate) fn parse_branch(input: &str) -> IResult<&str, InstData> {
     ))
 }
 
-/// Parse a call instruction with assignment: v1 = call %callee(v0)
+/// Parse a call instruction with assignment: v1 = call %callee(v0) or v1, v2, v3 = call %callee(v0)
 pub(crate) fn parse_call_with_assignment(input: &str) -> IResult<&str, InstData> {
-    let (input, result) = terminated(parse_value, blank)(input)?;
+    let (input, results) = separated_list0(terminated(char(','), blank), terminated(parse_value, blank))(input)?;
     let (input, _) = terminated(tag("="), blank)(input)?;
     let (input, _) = terminated(tag("call"), blank)(input)?;
     let (input, callee) = terminated(parse_function_name, blank)(input)?;
@@ -378,33 +378,9 @@ pub(crate) fn parse_call_with_assignment(input: &str) -> IResult<&str, InstData>
         terminated(char(')'), blank),
     )(input)?;
 
-    Ok((input, InstData::call(callee, args, alloc::vec![result])))
+    Ok((input, InstData::call(callee, args, results)))
 }
 
-/// Parse a call instruction
-pub(crate) fn parse_call(input: &str) -> IResult<&str, InstData> {
-    let (input, _) = terminated(tag("call"), blank)(input)?;
-    let (input, callee) = terminated(parse_function_name, blank)(input)?;
-    let (input, args) = delimited(
-        terminated(char('('), blank),
-        separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
-        terminated(char(')'), blank),
-    )(input)?;
-
-    // Parse results list: comma-separated values (same format as args)
-    let (input, results) = opt(map(
-        tuple((
-            terminated(tag("->"), blank),
-            separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
-        )),
-        |(_, values)| values,
-    ))(input)?;
-
-    Ok((
-        input,
-        InstData::call(callee, args, results.unwrap_or_default()),
-    ))
-}
 
 /// Parse a syscall instruction
 pub(crate) fn parse_syscall(input: &str) -> IResult<&str, InstData> {
@@ -498,7 +474,6 @@ pub(crate) fn parse_instruction(input: &str) -> IResult<&str, InstData> {
     // Instructions that don't start with "v0 = " come first
     alt((
         parse_store,   // "store.i32 v0, v1" - doesn't start with value assignment
-        parse_call,    // "call %func(v0)" - doesn't start with value assignment
         parse_syscall, // "syscall 1(v0)" - doesn't start with value assignment
         parse_branch,  // "brif v0, block1, block2" - doesn't start with value assignment
         parse_jump,    // "jump block1" - doesn't start with value assignment
@@ -803,9 +778,9 @@ mod tests {
 
     #[test]
     fn test_parse_call() {
-        let input = "call %func(v0, v1) -> v2";
-        let result = parse_call(input);
-        assert!(result.is_ok(), "parse_call failed: {:?}", result);
+        let input = "v2 = call %func(v0, v1) ";
+        let result = parse_call_with_assignment(input);
+        assert!(result.is_ok(), "parse_call_with_assignment failed: {:?}", result);
         let (remaining, inst_data) = result.unwrap();
         assert_eq!(
             remaining, "",
@@ -829,11 +804,12 @@ mod tests {
 
     #[test]
     fn test_parse_call_no_results() {
-        let input = "call %func(v0)";
-        let result = parse_call(input);
-        assert!(result.is_ok(), "parse_call failed: {:?}", result);
+        // Call with assignment always has at least one result
+        let input = "v1 = call %func(v0)";
+        let result = parse_call_with_assignment(input);
+        assert!(result.is_ok(), "parse_call_with_assignment failed: {:?}", result);
         let (_, inst_data) = result.unwrap();
-        assert_eq!(inst_data.results.len(), 0);
+        assert_eq!(inst_data.results.len(), 1);
     }
 
     #[test]
@@ -944,9 +920,9 @@ mod tests {
     #[test]
     fn test_parse_call_with_whitespace_after() {
         // Test that call instruction consumes trailing whitespace correctly
-        let input = "call %helper(v10) -> v11\n        v12 = iconst 100";
-        let result = parse_call(input);
-        assert!(result.is_ok(), "parse_call failed: {:?}", result);
+        let input = "v11 = call %helper(v10) \n        v12 = iconst 100";
+        let result = parse_call_with_assignment(input);
+        assert!(result.is_ok(), "parse_call_with_assignment failed: {:?}", result);
         let (remaining, inst_data) = result.unwrap();
         // Should consume the call and whitespace, leaving the next instruction
         assert!(
@@ -967,7 +943,7 @@ mod tests {
     #[test]
     fn test_parse_call_followed_by_instruction() {
         // Test parsing call followed by another instruction
-        let input = "call %helper(v10) -> v11\n        v12 = iconst 100";
+        let input = "v11 = call %helper(v10) \n        v12 = iconst 100";
         let result = parse_instruction(input);
         assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
         let (remaining, inst_data) = result.unwrap();
@@ -985,9 +961,9 @@ mod tests {
     #[test]
     fn test_parse_call_multiple_returns() {
         // Test call with multiple return values
-        let input = "call %func(v0, v1) -> v2, v3, v4";
-        let result = parse_call(input);
-        assert!(result.is_ok(), "parse_call failed: {:?}", result);
+        let input = "v2, v3, v4 = call %func(v0, v1) ";
+        let result = parse_call_with_assignment(input);
+        assert!(result.is_ok(), "parse_call_with_assignment failed: {:?}", result);
         let (remaining, inst_data) = result.unwrap();
         assert_eq!(
             remaining, "",
@@ -1012,7 +988,7 @@ mod tests {
     #[test]
     fn test_parse_call_multiple_returns_via_instruction() {
         // Test parsing call with multiple returns via parse_instruction
-        let input = "call %helper(v10) -> v11, v12, v13";
+        let input = "v11, v12, v13 = call %helper(v10) ";
         let result = parse_instruction(input);
         assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
         let (remaining, inst_data) = result.unwrap();

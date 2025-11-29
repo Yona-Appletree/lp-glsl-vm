@@ -179,7 +179,7 @@ fn test_instruction_with_many_operands() {
         r#"
 function %test(i32, i32, i32) -> i32 {
 block0(v0: i32, v1: i32, v2: i32):
-    call %other_func(v0, v1, v2) -> v3
+    v3 = call %other_func(v0, v1, v2)
     return v3
 }
 "#,

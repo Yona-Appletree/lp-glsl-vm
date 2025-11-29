@@ -1,6 +1,6 @@
 //! VCode builder for constructing VCode incrementally
 
-use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use lpc_lpir::RelSourceLoc;
 use regalloc2::{Operand, OperandKind, OperandPos, PRegSet, RegClass};

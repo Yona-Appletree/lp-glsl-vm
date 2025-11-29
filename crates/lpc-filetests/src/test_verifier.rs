@@ -7,6 +7,7 @@ use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
 use lpc_lpir::{parse_function, verify};
 
 /// Run tests from verifier test files
+#[allow(dead_code)]
 pub fn run_tests_from_file(content: &str) {
     let test_cases = parse_test_file(content);
 
@@ -24,6 +25,7 @@ pub fn run_tests_from_file(content: &str) {
 
 /// Extract error annotations from function text
 /// Returns a map from instruction line number to expected error message
+#[allow(dead_code)]
 fn extract_error_annotations(function_text: &str) -> BTreeMap<usize, String> {
     let mut errors = BTreeMap::new();
     let lines: Vec<&str> = function_text.lines().collect();
@@ -39,6 +41,7 @@ fn extract_error_annotations(function_text: &str) -> BTreeMap<usize, String> {
 }
 
 /// Run a single verifier test
+#[allow(dead_code)]
 fn run_verifier_test(function_text: &str, _expected_text: &str) {
     let func = parse_function(function_text.trim()).unwrap_or_else(|e| {
         panic!(

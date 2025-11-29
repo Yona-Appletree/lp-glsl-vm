@@ -343,7 +343,7 @@ fn test_function_call() {
     let expected = r#"function %main() -> i32 {
 block0:
     v0 = iconst 42
-    call %helper(v0) -> v1
+    v1 = call %helper(v0)
     return v1
 }
 "#;

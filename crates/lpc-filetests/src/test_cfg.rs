@@ -8,6 +8,7 @@ use alloc::{format, string::String, vec::Vec};
 use lpc_lpir::{parse_function, ControlFlowGraph};
 
 /// Run tests from cfg test files
+#[allow(dead_code)]
 pub fn run_tests_from_file(content: &str) {
     let test_cases = parse_test_file(content);
 
@@ -25,6 +26,7 @@ pub fn run_tests_from_file(content: &str) {
 
 /// Format CFG in post-order
 /// Uses the same algorithm as ControlFlowGraph::reverse_post_order but reverses it
+#[allow(dead_code)]
 fn format_cfg_postorder(cfg: &ControlFlowGraph) -> Vec<String> {
     // Use the CFG's built-in reverse_post_order and reverse it to get post-order
     let rpo = cfg.reverse_post_order();
@@ -35,6 +37,7 @@ fn format_cfg_postorder(cfg: &ControlFlowGraph) -> Vec<String> {
 }
 
 /// Run a single print-cfg test
+#[allow(dead_code)]
 fn run_print_cfg_test(function_text: &str, expected_text: &str) {
     let func = parse_function(function_text.trim()).unwrap_or_else(|e| {
         panic!(

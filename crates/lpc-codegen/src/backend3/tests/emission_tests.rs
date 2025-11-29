@@ -22,6 +22,7 @@ fn build_and_emit(lpir_text: &str) -> InstBuffer {
 }
 
 /// Helper to build VCode, run regalloc, and emit with symbol table
+#[allow(dead_code)]
 fn build_and_emit_with_symtab(
     lpir_text: &str,
     function_name: Option<&str>,
@@ -884,7 +885,7 @@ fn test_emit_function_call() {
         r#"
 function %test(i32, i32) -> i32 {
 block0(v0: i32, v1: i32):
-    call %other(v0, v1) -> v2
+    v2 = call %other(v0, v1)
     return v2
 }
 "#,
@@ -935,7 +936,7 @@ fn test_emit_function_call_with_register_args() {
         r#"
 function %test(i32, i32) -> i32 {
 block0(v0: i32, v1: i32):
-    call %other(v0, v1) -> v2
+    v2 = call %other(v0, v1)
     return v2
 }
 "#,
@@ -980,7 +981,7 @@ fn test_emit_function_call_with_stack_args() {
         r#"
 function %test(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
 block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32):
-    call %other(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9) -> v10
+    v10 = call %other(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9)
     return v10
 }
 "#,
@@ -1028,7 +1029,7 @@ fn test_emit_function_call_with_return_value() {
         r#"
 function %test(i32) -> i32 {
 block0(v0: i32):
-    call %other(v0) -> v1
+    v1 = call %other(v0)
     return v1
 }
 "#,
@@ -1070,7 +1071,7 @@ fn test_emit_function_call_relocation() {
         r#"
 function %test(i32) -> i32 {
 block0(v0: i32):
-    call %other(v0) -> v1
+    v1 = call %other(v0)
     return v1
 }
 "#,
@@ -1121,8 +1122,8 @@ fn test_emit_multiple_function_calls() {
         r#"
 function %test(i32) -> i32 {
 block0(v0: i32):
-    call %func1(v0) -> v1
-    call %func2(v1) -> v2
+    v1 = call %func1(v0)
+    v2 = call %func2(v1)
     return v2
 }
 "#,
@@ -1253,7 +1254,7 @@ block2():
 
     // Verify forward branches work correctly
     // Check for branch instructions (BEQ, BNE, etc.)
-    let mut found_branch = false;
+    let mut _found_branch = false;
     for inst in insts.iter() {
         if matches!(
             inst,
@@ -1262,7 +1263,7 @@ block2():
                 | crate::isa::riscv32::inst::Inst::Blt { .. }
                 | crate::isa::riscv32::inst::Inst::Bge { .. }
         ) {
-            found_branch = true;
+            _found_branch = true;
             break;
         }
     }
@@ -1401,7 +1402,7 @@ fn test_frame_layout_large_outgoing_args() {
         r#"
 function %test(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 {
 block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32, v10: i32, v11: i32):
-    call %other(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11) -> v12
+    v12 = call %other(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11)
     return v12
 }
 "#,

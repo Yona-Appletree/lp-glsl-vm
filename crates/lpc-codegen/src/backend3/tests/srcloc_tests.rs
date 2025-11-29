@@ -2,8 +2,6 @@
 
 extern crate alloc;
 
-use lpc_lpir::RelSourceLoc;
-
 use crate::backend3::tests::vcode_test_helpers::LowerTest;
 
 /// Test that source locations are tracked for all instructions

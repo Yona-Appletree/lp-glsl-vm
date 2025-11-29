@@ -83,6 +83,7 @@ impl<'f, I: InstInserterBase<'f>> InstBuilderBase<'f> for InsertBuilder<'f, I> {
 ///
 /// This is a simple implementation of `InstInserterBase` that appends
 /// instructions to the end of a block.
+#[allow(dead_code)]
 pub struct BlockAppendInserter<'f> {
     function: &'f mut Function,
     block: Block,
@@ -90,6 +91,7 @@ pub struct BlockAppendInserter<'f> {
 
 impl<'f> BlockAppendInserter<'f> {
     /// Create a new inserter that appends to the given block.
+    #[allow(dead_code)]
     pub fn new(function: &'f mut Function, block: Block) -> Self {
         Self { function, block }
     }

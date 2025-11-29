@@ -228,7 +228,7 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                         write!(f, "):\n")?;
                     }
                 }
-                LoweredBlock::Edge { from, to, .. } => {
+                LoweredBlock::Edge { from: _, to: _, .. } => {
                     // For edge blocks, format with descriptive name
                     write!(f, "  {}:\n", self.format_block_index(block_index))?;
                 }

@@ -13,7 +13,7 @@ entry: %bootstrap
 function %bootstrap() -> i32 {
 block0:
     v0 = iconst 10
-    call %fib(v0) -> v1
+    v1 = call %fib(v0)
     return v1
 }
 
@@ -30,8 +30,8 @@ block2:
     v3 = iconst 2
     v4 = isub v0, v1
     v5 = isub v0, v3
-    call %fib(v4) -> v6
-    call %fib(v5) -> v7
+    v6 = call %fib(v4)
+    v7 = call %fib(v5)
     v8 = iadd v6, v7
     return v8
 }

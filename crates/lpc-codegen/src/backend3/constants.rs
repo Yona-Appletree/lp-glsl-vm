@@ -5,7 +5,7 @@ use regalloc2::RegClass;
 
 use crate::backend3::{
     types::{Reg, VReg, Writable},
-    vcode::{Constant, MachInst},
+    vcode::MachInst,
     vcode_builder::VCodeBuilder,
 };
 

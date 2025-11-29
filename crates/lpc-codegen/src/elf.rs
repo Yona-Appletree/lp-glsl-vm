@@ -12,6 +12,7 @@ use crate::disassemble_code;
 /// - Section headers (null + .text)
 /// - String table
 /// - Code section with the provided instructions
+#[allow(dead_code)]
 pub fn generate_elf(code: &[u8]) -> Vec<u8> {
     // ELF constants
     const ELF_MAGIC: [u8; 4] = [0x7f, b'E', b'L', b'F'];
@@ -116,6 +117,7 @@ pub fn generate_elf(code: &[u8]) -> Vec<u8> {
 /// - Program headers
 /// - Section headers
 /// - Disassembled code from .text section
+#[allow(dead_code)]
 pub fn debug_elf(elf_data: &[u8]) -> String {
     if elf_data.len() < 52 {
         return format!("Invalid ELF: too small ({} bytes)", elf_data.len());

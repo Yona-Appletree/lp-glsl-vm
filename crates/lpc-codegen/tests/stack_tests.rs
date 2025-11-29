@@ -16,7 +16,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %main() -> v0
+    v0 = call %main()
     syscall 0(v0)
     halt
 }
@@ -61,7 +61,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %main() -> v0
+    v0 = call %main()
     syscall 0(v0)
     halt
 }
@@ -82,7 +82,7 @@ block0:
     v3 = iconst 40
     v4 = iconst 50
     ; Call helper - values above should be spilled
-    call %helper(v4) -> v5
+    v5 = call %helper(v4)
     ; Read back spilled values and use them
     v6 = iadd v0, v1
     v7 = iadd v2, v3
@@ -108,7 +108,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %main() -> v0
+    v0 = call %main()
     syscall 0(v0)
     halt
 }
@@ -142,7 +142,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %main() -> v0
+    v0 = call %main()
     syscall 0(v0)
     halt
 }
@@ -164,7 +164,7 @@ block0:
     v4 = iadd v2, v3
     v5 = iconst 4
     v6 = iadd v4, v5
-    call %helper(v6) -> v7
+    v7 = call %helper(v6)
     v8 = iconst 100
     v9 = iadd v7, v8
     return v9
@@ -186,7 +186,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %outer() -> v0
+    v0 = call %outer()
     syscall 0(v0)
     halt
 }
@@ -203,7 +203,7 @@ block0(v0: i32):
     ; Create local values that need frame
     v1 = iconst 10
     v2 = iadd v0, v1
-    call %inner(v2) -> v3
+    v3 = call %inner(v2)
     v4 = iconst 5
     v5 = iadd v3, v4
     return v5
@@ -212,7 +212,7 @@ block0(v0: i32):
 function %outer() -> i32 {
 block0:
     v0 = iconst 100
-    call %middle(v0) -> v1
+    v1 = call %middle(v0)
     v2 = iconst 50
     v3 = iadd v1, v2
     return v3
@@ -232,7 +232,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %level1() -> v0
+    v0 = call %level1()
     syscall 0(v0)
     halt
 }
@@ -248,7 +248,7 @@ function %level2(i32) -> i32 {
 block0(v0: i32):
     v1 = iconst 10
     v2 = iadd v0, v1
-    call %level3(v2) -> v3
+    v3 = call %level3(v2)
     v4 = iconst 5
     v5 = iadd v3, v4
     return v5
@@ -257,7 +257,7 @@ block0(v0: i32):
 function %level1() -> i32 {
 block0:
     v0 = iconst 100
-    call %level2(v0) -> v1
+    v1 = call %level2(v0)
     v2 = iconst 20
     v3 = iadd v1, v2
     return v3
@@ -278,7 +278,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %main() -> v0
+    v0 = call %main()
     syscall 0(v0)
     halt
 }
@@ -298,7 +298,7 @@ block0:
     v2 = iconst 30
     v3 = iconst 40
     ; Call helper - v0, v1, v2, v3 should be spilled
-    call %helper(v3) -> v4
+    v4 = call %helper(v3)
     ; Use spilled values after call
     v5 = iadd v0, v1
     v6 = iadd v2, v3
@@ -324,7 +324,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %main() -> v0
+    v0 = call %main()
     syscall 0(v0)
     halt
 }
@@ -352,7 +352,7 @@ block0:
     v10 = iadd v8, v9
     v11 = iconst 7
     v12 = iadd v10, v11
-    call %helper(v12) -> v13
+    v13 = call %helper(v12)
     ; Use values after call - callee-saved should be restored
     v14 = iconst 100
     v15 = iadd v13, v14
@@ -384,7 +384,7 @@ block0:
     v7 = iconst 8
     v8 = iconst 9
     v9 = iconst 10
-    call %test(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9) -> v10
+    v10 = call %test(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9)
     syscall 0(v10)
     halt
 }
@@ -418,7 +418,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %main() -> v0
+    v0 = call %main()
     syscall 0(v0)
     halt
 }
@@ -483,7 +483,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %main() -> v0
+    v0 = call %main()
     syscall 0(v0)
     halt
 }
@@ -528,7 +528,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %outer() -> v0
+    v0 = call %outer()
     syscall 0(v0)
     halt
 }
@@ -547,7 +547,7 @@ block0(v0: i32):
     v2 = iadd v0, v1
     v3 = iconst 20
     v4 = iadd v2, v3
-    call %inner(v4) -> v5
+    v5 = call %inner(v4)
     v6 = iconst 5
     v7 = iadd v5, v6
     return v7
@@ -558,7 +558,7 @@ block0:
     v0 = iconst 100
     v1 = iconst 200
     v2 = iadd v0, v1
-    call %middle(v2) -> v3
+    v3 = call %middle(v2)
     v4 = iconst 50
     v5 = iadd v3, v4
     return v5
@@ -580,7 +580,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %main() -> v0
+    v0 = call %main()
     syscall 0(v0)
     halt
 }
@@ -606,7 +606,7 @@ block0:
     v8 = iconst 9
     v9 = iconst 10
     ; Call helper - many values will be spilled
-    call %helper(v9) -> v10
+    v10 = call %helper(v9)
     ; Use all spilled values
     v11 = iadd v0, v1
     v12 = iadd v2, v3
@@ -638,7 +638,7 @@ entry: %bootstrap
 
 function %bootstrap() -> i32 {
 block0:
-    call %main() -> v0
+    v0 = call %main()
     syscall 0(v0)
     halt
 }

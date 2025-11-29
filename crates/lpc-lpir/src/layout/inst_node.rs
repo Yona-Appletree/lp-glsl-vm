@@ -32,6 +32,7 @@ impl InstNode {
     }
 
     /// Check if this instruction is inserted in a block
+    #[allow(dead_code)]
     pub fn is_inserted(&self) -> bool {
         self.block.is_some()
     }

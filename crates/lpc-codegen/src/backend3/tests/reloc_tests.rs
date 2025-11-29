@@ -11,7 +11,7 @@ fn test_relocations_for_function_calls() {
         r#"
 function %test(i32) -> i32 {
 block0(v0: i32):
-    call %other(v0) -> v1
+    v1 = call %other(v0)
     return v1
 }
 "#,
@@ -56,7 +56,7 @@ fn test_relocation_structure() {
     use crate::{
         backend3::{
             types::{BlockIndex, InsnIndex},
-            vcode::{BlockLoweringOrder, Callee, RelocKind, VCodeReloc},
+            vcode::{BlockLoweringOrder, Callee, RelocKind},
             vcode_builder::VCodeBuilder,
         },
         isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32EmitInfo, Riscv32MachInst},

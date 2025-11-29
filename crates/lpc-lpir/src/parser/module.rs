@@ -197,7 +197,7 @@ mod tests {
         v8 = iadd v6, v7
         v9 = iconst 5
         v10 = iadd v8, v9
-        call %helper(v10) -> v11
+        v11 = call %helper(v10)
         v12 = iconst 100
         v13 = iadd v11, v12
         return v13

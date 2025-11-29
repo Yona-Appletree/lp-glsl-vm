@@ -229,7 +229,7 @@ block0(v0: i32):
 function %caller() -> i32, f32, i32 {
 block0:
     v0 = iconst 42
-    call %callee(v0) -> v1, v2, v3
+    v1, v2, v3 = call %callee(v0)
     return v1, v2, v3
 }
 }
@@ -265,7 +265,7 @@ block0(v0: i32):
 function %caller() -> i32, f32 {
 block0:
     v0 = iconst 42
-    call %callee(v0) -> v1, v2
+    v1, v2 = call %callee(v0)
     return v1, v2
 }
 }
@@ -310,7 +310,7 @@ block0(v0: i32, v1: i32):
 function %caller() -> i32, f32, i32 {
 block0:
     v0 = iconst 42
-    call %callee(v0) -> v1, v2, v3
+    v1, v2, v3 = call %callee(v0)
     return v1, v2, v3
 }
 }
@@ -362,7 +362,7 @@ block0:
 
 function %caller() -> i32, f32, i32 {
 block0:
-    call %func1() -> v1, v2, v3
+    v1, v2, v3 = call %func1()
     return v1, v2, v3
 }
 }
@@ -397,13 +397,13 @@ block0:
 
 function %middle() -> i32, f32, i32 {
 block0:
-    call %inner() -> v1, v2, v3
+    v1, v2, v3 = call %inner()
     return v1, v2, v3
 }
 
 function %outer() -> i32, f32, i32 {
 block0:
-    call %middle() -> v1, v2, v3
+    v1, v2, v3 = call %middle()
     return v1, v2, v3
 }
 }

@@ -8,7 +8,7 @@ use crate::{
     backend3::{
         constants::materialize_constant,
         types::BlockIndex,
-        vcode::{BlockLoweringOrder, Callee, Constant, LoweredBlock},
+        vcode::{BlockLoweringOrder, Callee, LoweredBlock},
         vcode_builder::VCodeBuilder,
     },
     isa::riscv32::backend3::{
@@ -39,8 +39,6 @@ fn build_vcode_with_single_block(
 
 #[test]
 fn test_materialize_inline_constant() {
-    use crate::backend3::vcode::LoweredBlock;
-
     let mut vcode = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
     let block_idx = crate::backend3::types::BlockIndex::new(0);
     vcode.start_block(block_idx, alloc::vec![]);
@@ -48,7 +46,7 @@ fn test_materialize_inline_constant() {
     let srcloc = RelSourceLoc::default();
 
     // Small constant that fits in 12 bits - now emits Addi instruction
-    let vreg = materialize_constant(
+    let _vreg = materialize_constant(
         &mut vcode,
         42,
         srcloc,
@@ -120,7 +118,7 @@ fn test_materialize_negative_constant() {
     let srcloc = RelSourceLoc::default();
 
     // Negative constant that fits in 12 bits - now emits Addi instruction
-    let vreg = materialize_constant(
+    let _vreg = materialize_constant(
         &mut vcode,
         -100,
         srcloc,
@@ -233,7 +231,7 @@ fn test_materialize_boundary_constants() {
     let srcloc = RelSourceLoc::default();
 
     // Test at the boundary: 2047 (fits in 12 bits, emits Addi)
-    let vreg1 = materialize_constant(
+    let _vreg1 = materialize_constant(
         &mut vcode,
         2047,
         srcloc,
@@ -243,7 +241,7 @@ fn test_materialize_boundary_constants() {
     );
 
     // Test just above boundary: 2048 (doesn't fit, needs LUI+ADDI)
-    let vreg2 = materialize_constant(
+    let _vreg2 = materialize_constant(
         &mut vcode,
         2048,
         srcloc,
@@ -253,7 +251,7 @@ fn test_materialize_boundary_constants() {
     );
 
     // Test at negative boundary: -2048 (fits in 12 bits, emits Addi)
-    let vreg3 = materialize_constant(
+    let _vreg3 = materialize_constant(
         &mut vcode,
         -2048,
         srcloc,
@@ -263,7 +261,7 @@ fn test_materialize_boundary_constants() {
     );
 
     // Test just below boundary: -2049 (doesn't fit, needs LUI+ADDI)
-    let vreg4 = materialize_constant(
+    let _vreg4 = materialize_constant(
         &mut vcode,
         -2049,
         srcloc,
@@ -297,7 +295,7 @@ fn test_zero_constant() {
     let srcloc = RelSourceLoc::default();
 
     // Zero constant fits in 12 bits, now emits Addi instruction
-    let vreg = materialize_constant(
+    let _vreg = materialize_constant(
         &mut vcode,
         0,
         srcloc,

@@ -15,6 +15,7 @@ use crate::{
 };
 
 /// Run tests from compile test files
+#[allow(dead_code)]
 pub fn run_tests_from_file(content: &str) {
     let test_cases = parse_test_file(content);
 
@@ -31,6 +32,7 @@ pub fn run_tests_from_file(content: &str) {
 }
 
 /// Run a single compile test
+#[allow(dead_code)]
 fn run_compile_test(function_text: &str, expected_text: &str) {
     // Parse function(s) from text
     // Support multiple functions in one test (for call tests)
@@ -99,6 +101,7 @@ fn run_compile_test(function_text: &str, expected_text: &str) {
 
 /// Parse one or more functions from text
 /// Returns a vector of (function_name, function) pairs
+#[allow(dead_code)]
 fn parse_functions(text: &str) -> Vec<(String, lpc_lpir::Function)> {
     let lines: Vec<&str> = text.lines().collect();
     let mut functions = Vec::new();
@@ -178,6 +181,7 @@ fn parse_functions(text: &str) -> Vec<(String, lpc_lpir::Function)> {
 
 /// Build a label map for disassembly
 /// Maps code offsets to label names (e.g., ".Lblock0")
+#[allow(dead_code)]
 fn build_label_map(
     _buffer: &lpc_codegen::isa::riscv32::inst_buffer::InstBuffer,
     _func_name: &str,
@@ -189,6 +193,7 @@ fn build_label_map(
 }
 
 /// Normalize assembly text for comparison
+#[allow(dead_code)]
 fn normalize_assembly(asm: &str) -> Vec<String> {
     asm.lines()
         .map(|l| l.trim())

@@ -7,6 +7,7 @@ use alloc::format;
 use lpc_lpir::parse_function;
 
 /// Run tests from cat test files
+#[allow(dead_code)]
 pub fn run_tests_from_file(content: &str) {
     let test_cases = parse_test_file(content);
 
@@ -23,6 +24,7 @@ pub fn run_tests_from_file(content: &str) {
 }
 
 /// Run a single cat test (roundtrip parse/print)
+#[allow(dead_code)]
 fn run_cat_test(function_text: &str, expected_text: &str) {
     let func = parse_function(function_text.trim()).unwrap_or_else(|e| {
         panic!(

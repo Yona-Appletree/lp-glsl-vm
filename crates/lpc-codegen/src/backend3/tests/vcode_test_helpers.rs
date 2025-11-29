@@ -50,6 +50,7 @@ pub fn assert_vcode_eq(actual: &VCode<Riscv32MachInst>, expected: &str) {
 }
 
 /// Parse VCode from text format (for constructing test cases programmatically)
+#[allow(dead_code)]
 pub fn parse_vcode(text: &str) -> Result<VCode<Riscv32MachInst>, String> {
     vcode_parser::parse_vcode(text)
 }

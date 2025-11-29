@@ -7,4 +7,3 @@ pub mod traits;
 
 pub use insert::InsertBuilder;
 pub use replace::ReplaceBuilder;
-pub use traits::{InstBuilder, InstBuilderBase, InstInserterBase};

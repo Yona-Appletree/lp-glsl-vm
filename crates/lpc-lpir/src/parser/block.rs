@@ -266,7 +266,7 @@ mod tests {
         let input = r#"block0(v0: i32):
         v1 = iconst 1
         v2 = iadd v0, v1
-        call %helper(v2) -> v3
+        v3 = call %helper(v2)
         v4 = iconst 100
         v5 = iadd v3, v4
         return v5"#;
@@ -302,7 +302,7 @@ mod tests {
         v8 = iadd v6, v7
         v9 = iconst 5
         v10 = iadd v8, v9
-        call %helper(v10) -> v11
+        v11 = call %helper(v10)
         v12 = iconst 100
         v13 = iadd v11, v12
         return v13"#;

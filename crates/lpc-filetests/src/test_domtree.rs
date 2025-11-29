@@ -8,6 +8,7 @@ use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
 use lpc_lpir::{parse_function, ControlFlowGraph, DominatorTree};
 
 /// Run tests from domtree test files
+#[allow(dead_code)]
 pub fn run_tests_from_file(content: &str) {
     let test_cases = parse_test_file(content);
 
@@ -24,6 +25,7 @@ pub fn run_tests_from_file(content: &str) {
 }
 
 /// Format dominator tree in preorder traversal
+#[allow(dead_code)]
 fn format_domtree_preorder(
     func: &lpc_lpir::Function,
     cfg: &ControlFlowGraph,
@@ -76,6 +78,7 @@ fn format_domtree_preorder(
 
 /// Format CFG in post-order
 /// Uses the same algorithm as ControlFlowGraph::reverse_post_order but reverses it
+#[allow(dead_code)]
 fn format_cfg_postorder(cfg: &ControlFlowGraph) -> Vec<String> {
     // Use the CFG's built-in reverse_post_order and reverse it to get post-order
     let rpo = cfg.reverse_post_order();
@@ -87,6 +90,7 @@ fn format_cfg_postorder(cfg: &ControlFlowGraph) -> Vec<String> {
 
 /// Extract dominance annotations from function text
 /// Returns a map from block name to set of blocks it should dominate
+#[allow(dead_code)]
 fn extract_dominance_annotations(function_text: &str) -> BTreeMap<String, Vec<String>> {
     let mut annotations = BTreeMap::new();
     let lines: Vec<&str> = function_text.lines().collect();
@@ -115,6 +119,7 @@ fn extract_dominance_annotations(function_text: &str) -> BTreeMap<String, Vec<St
 }
 
 /// Run a single domtree test
+#[allow(dead_code)]
 fn run_domtree_test(function_text: &str, expected_text: &str) {
     let func = parse_function(function_text.trim()).unwrap_or_else(|e| {
         panic!(

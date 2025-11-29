@@ -249,7 +249,7 @@ block0(v0: i32):
 function %main() -> i32 {
 block0:
     v0 = stackalloc 4
-    call %helper(v0) -> v1
+    v1 = call %helper(v0)
     v2 = load.i32 v0
     return v2
 }

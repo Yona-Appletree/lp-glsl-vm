@@ -620,6 +620,16 @@ impl Function {
                 }
             }
             Opcode::Call { callee } => {
+                // Format as: v1 = call %callee(v0) or v1, v2 = call %callee(v0)
+                if !inst_data.results.is_empty() {
+                    for (i, res) in inst_data.results.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "v{}", res.index())?;
+                    }
+                    write!(f, " = ")?;
+                }
                 write!(f, "call %{}(", callee)?;
                 for (i, arg) in inst_data.args.iter().enumerate() {
                     if i > 0 {
@@ -628,15 +638,6 @@ impl Function {
                     write!(f, "v{}", arg.index())?;
                 }
                 write!(f, ")")?;
-                if !inst_data.results.is_empty() {
-                    write!(f, " -> ")?;
-                    for (i, res) in inst_data.results.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "v{}", res.index())?;
-                    }
-                }
                 Ok(())
             }
             Opcode::Syscall => {

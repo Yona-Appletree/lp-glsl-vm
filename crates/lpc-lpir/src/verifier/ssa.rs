@@ -1,7 +1,7 @@
 //! SSA (Static Single Assignment) verification.
 
 use alloc::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     format,
     string::String,
     vec::Vec,

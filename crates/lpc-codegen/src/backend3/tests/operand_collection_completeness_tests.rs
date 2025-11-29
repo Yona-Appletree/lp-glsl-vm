@@ -128,7 +128,7 @@ block1:
         r#"
 function %test(i32) -> i32 {
 block0(v0: i32):
-    call %other(v0) -> v1
+    v1 = call %other(v0)
     return v1
 }
 "#,
