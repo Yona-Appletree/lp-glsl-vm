@@ -108,6 +108,26 @@ impl<I: MachInst> VCodeBuilder<I> {
         self.current_block = None;
     }
 
+    /// Add branch arguments for a block's successors
+    ///
+    /// This should be called after end_block() to record the branch arguments
+    /// for each successor of the block that was just ended.
+    pub fn add_branch_args(&mut self, succs: &[BlockIndex], args_per_succ: &[Vec<VReg>]) {
+        assert_eq!(succs.len(), args_per_succ.len());
+
+        let succ_start = self.branch_block_arg_succ_range.len();
+        for args in args_per_succ {
+            let arg_start = self.branch_block_args.len();
+            self.branch_block_args.extend(args.iter().copied());
+            let arg_end = self.branch_block_args.len();
+            self.branch_block_arg_range
+                .push(Range::new(arg_start, arg_end));
+        }
+        let succ_end = self.branch_block_arg_succ_range.len();
+        self.branch_block_arg_succ_range
+            .push(Range::new(succ_start, succ_end));
+    }
+
     /// Add block metadata
     pub fn add_block_metadata(&mut self, metadata: BlockMetadata) {
         self.block_metadata.push(metadata);

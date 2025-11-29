@@ -952,6 +952,103 @@ This is simpler than Cranelift's byte-patching approach and sufficient for our n
 
 ## Testing
 
+**Test Format Guidelines**:
+
+- **Input**: Use textual LPIR format for clarity. Tests should define functions using the textual LPIR syntax to make the input code clear and readable.
+- **Expected Output**: Use assembler format to clearly show the expected RISC-V 32 machine code. This makes it easy to verify that the correct instructions are generated, including prologue/epilogue, instruction emission, and edit handling.
+
+**Test Examples**:
+
+```rust
+#[test]
+fn test_emit_simple_function() {
+    // Input: textual LPIR format for clarity
+    let lpir_text = r#"
+        function @test(i32 %a, i32 %b) -> i32 {
+        entry:
+            %0 = iadd %a, %b
+            ret %0
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    let regalloc = vcode.run_regalloc();
+    let buffer = vcode.emit(&regalloc);
+    
+    // Expected: assembler format showing expected machine code
+    let expected_asm = r#"
+        # Prologue
+        addi sp, sp, -8
+        sw   ra, 4(sp)
+        sw   fp, 0(sp)
+        
+        # Function body
+        add  a0, a0, a1
+        
+        # Epilogue
+        lw   fp, 0(sp)
+        lw   ra, 4(sp)
+        addi sp, sp, 8
+        jalr zero, ra, 0
+    "#;
+    
+    // Verify generated code matches expected...
+}
+
+#[test]
+fn test_emit_with_spills() {
+    // Input: textual LPIR format - function requiring spilling
+    let lpir_text = r#"
+        function @test(i32 %a, i32 %b, i32 %c, i32 %d, i32 %e, i32 %f, i32 %g, i32 %h) -> i32 {
+        entry:
+            %0 = iadd %a, %b
+            %1 = iadd %c, %d
+            %2 = iadd %e, %f
+            %3 = iadd %g, %h
+            %4 = iadd %0, %1
+            %5 = iadd %2, %3
+            %6 = iadd %4, %5
+            ret %6
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    let regalloc = vcode.run_regalloc();
+    let buffer = vcode.emit(&regalloc);
+    
+    // Expected: assembler format showing spills, reloads, and computation
+    let expected_asm = r#"
+        # Prologue
+        addi sp, sp, -40
+        sw   ra, 4(sp)
+        sw   fp, 0(sp)
+        sw   s0, 8(sp)    # Save callee-saved
+        
+        # Spill arguments
+        sw   a0, 12(sp)
+        sw   a1, 16(sp)
+        # ... more spills ...
+        
+        # Reload and compute
+        lw   t0, 12(sp)
+        lw   t1, 16(sp)
+        add  t2, t0, t1
+        # ... more computation ...
+        
+        # Epilogue
+        lw   s0, 8(sp)
+        lw   fp, 0(sp)
+        lw   ra, 4(sp)
+        addi sp, sp, 40
+        jalr zero, ra, 0
+    "#;
+}
+```
+
+**Test Categories**:
+
 - Unit tests for emission state tracking
 - Unit tests for frame layout computation
 - Unit tests for prologue/epilogue generation

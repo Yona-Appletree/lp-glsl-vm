@@ -292,6 +292,11 @@ crates/lpc-codegen/src/isa/riscv32/backend3/
 
 ## Testing Strategy
 
+**Test Format Guidelines**:
+
+- **Input**: Use textual LPIR format for clarity. All tests should define functions using the textual LPIR syntax to make the input code clear and readable.
+- **Expected Output**: For tests that verify native RISC-V 32 code generation, use assembler format to clearly show the expected machine code. This makes it easy to see what instructions are expected and verify correctness.
+
 ### Unit Tests
 
 1. **Lowering tests**
@@ -299,17 +304,20 @@ crates/lpc-codegen/src/isa/riscv32/backend3/
    - Test each IR opcode → machine instruction
    - Test virtual register creation
    - Test block parameter handling
+   - **Format**: Input in textual LPIR, verify VCode structure
 
 2. **Regalloc tests**
 
    - Test regalloc2 integration
    - Test allocation decisions
    - Test edit generation
+   - **Format**: Input in textual LPIR, verify allocations and edits
 
 3. **Emission tests**
    - Test instruction emission
    - Test edit emission (moves, spills, reloads)
    - Test prologue/epilogue
+   - **Format**: Input in textual LPIR, expected output in assembler format
 
 ### Integration Tests
 
@@ -318,17 +326,60 @@ crates/lpc-codegen/src/isa/riscv32/backend3/
    - Compile simple functions
    - Execute and verify results
    - Compare with current backend
+   - **Format**: Input in textual LPIR, expected output in assembler format
 
 2. **Multi-return tests**
 
    - Test functions with 3+ returns
    - Test call/return with multi-return
    - Verify return area mechanism
+   - **Format**: Input in textual LPIR, expected output in assembler format showing return area handling
 
 3. **Complex function tests**
    - Test functions with branches
    - Test functions with calls
    - Test register pressure
+   - **Format**: Input in textual LPIR, expected output in assembler format
+
+### Example Test Structure
+
+```rust
+#[test]
+fn test_example() {
+    // Input: textual LPIR format for clarity
+    let lpir_text = r#"
+        function @test(i32 %a, i32 %b) -> i32 {
+        entry:
+            %0 = iadd %a, %b
+            ret %0
+        }
+    "#;
+
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    let regalloc = vcode.run_regalloc();
+    let buffer = vcode.emit(&regalloc);
+
+    // Expected: assembler format showing expected machine code
+    let expected_asm = r#"
+        # Prologue
+        addi sp, sp, -8
+        sw   ra, 4(sp)
+        sw   fp, 0(sp)
+
+        # Function body
+        add  a0, a0, a1
+
+        # Epilogue
+        lw   fp, 0(sp)
+        lw   ra, 4(sp)
+        addi sp, sp, 8
+        jalr zero, ra, 0
+    "#;
+
+    // Verify generated code matches expected...
+}
+```
 
 ## Migration Path
 

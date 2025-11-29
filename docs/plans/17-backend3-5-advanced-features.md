@@ -83,6 +83,86 @@
 
 ## Testing
 
+**Test Format Guidelines**:
+
+- **Input**: Use textual LPIR format for clarity. Tests should define functions using the textual LPIR syntax to make the input code clear and readable.
+- **Expected Output**: Use assembler format to clearly show the expected RISC-V 32 machine code. This is especially important for memory operations, block layout optimizations, and complex multi-function scenarios.
+
+**Test Examples**:
+
+```rust
+#[test]
+fn test_memory_operations() {
+    // Input: textual LPIR format for clarity
+    let lpir_text = r#"
+        function @test(i32* %ptr, i32 %val) -> i32 {
+        entry:
+            store %val, %ptr
+            %0 = load %ptr
+            ret %0
+        }
+    "#;
+
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    let regalloc = vcode.run_regalloc();
+    let buffer = vcode.emit(&regalloc);
+
+    // Expected: assembler format showing load/store instructions
+    let expected_asm = r#"
+        # Prologue...
+
+        # Store
+        sw   a1, 0(a0)
+
+        # Load
+        lw   a0, 0(a0)
+
+        # Epilogue...
+    "#;
+}
+
+#[test]
+fn test_block_layout_optimization() {
+    // Input: textual LPIR format
+    let lpir_text = r#"
+        function @test(i32 %a) -> i32 {
+        entry:
+            %cond = icmp eq %a, 0
+            br %cond, hot, cold
+        hot:
+            %0 = iadd %a, 1
+            ret %0
+        cold:
+            %1 = imul %a, 100
+            ret %1
+        }
+    "#;
+
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    let regalloc = vcode.run_regalloc();
+    let buffer = vcode.emit(&regalloc);
+
+    // Expected: assembler format showing optimized block layout
+    // (hot path first, cold path at end)
+    let expected_asm = r#"
+        # Prologue...
+
+        # Hot path (fallthrough)
+        beq  a0, zero, .Lcold
+        addi a0, a0, 1
+        # Epilogue...
+
+        # Cold path (at end)
+    .Lcold:
+        # ... cold path code ...
+    "#;
+}
+```
+
+**Test Categories**:
+
 - Unit tests for memory operations
 - Unit tests for block layout optimization
 - Integration test: Compile complex functions

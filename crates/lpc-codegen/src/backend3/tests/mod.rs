@@ -6,3 +6,6 @@ pub mod lower_tests;
 pub mod constants_tests;
 pub mod integration_tests;
 
+#[cfg(test)]
+mod vcode_test_helpers;
+

@@ -588,6 +588,57 @@ impl VCode {
 
 ## Testing
 
+**Test Format Guidelines**:
+
+- **Input**: Use textual LPIR format for clarity. Tests should define functions using the textual LPIR syntax to make the input code clear and readable.
+- **Expected Output**: For tests that verify native RISC-V 32 code generation, use the assembler format to clearly show the expected machine code. This makes it easy to see what instructions are expected.
+
+**Test Examples**:
+
+```rust
+#[test]
+fn test_lower_iadd() {
+    // Input: textual LPIR format for clarity
+    let lpir_text = r#"
+        function @test(i32 %a, i32 %b) -> i32 {
+        entry:
+            %0 = iadd %a, %b
+            ret %0
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    
+    // Verify VCode structure...
+}
+
+#[test]
+fn test_constant_materialization_large() {
+    // Input: textual LPIR format
+    let lpir_text = r#"
+        function @test() -> i32 {
+        entry:
+            %0 = iconst 50000
+            ret %0
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    
+    // Expected: assembler format showing expected instructions
+    let expected_asm = r#"
+        lui  t0, 12        # Load upper 20 bits of 50000
+        addi t0, t0, 2080  # Add lower 12 bits
+    "#;
+    
+    // Verify generated code matches expected...
+}
+```
+
+**Test Categories**:
+
 - Unit tests for VCode structure
 - Unit tests for block ordering
 - Unit tests for lowering simple instructions

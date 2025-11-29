@@ -5,6 +5,8 @@
 
 pub mod inst;
 pub mod lower;
+pub mod vcode_format;
+pub mod vcode_parser;
 
 /// Type alias for RISC-V 32-bit machine instructions
 pub type MachInst = inst::Riscv32MachInst;

@@ -266,6 +266,71 @@ impl ABIMachineSpec for Riscv32ABI {
 
 ## Testing
 
+**Test Format Guidelines**:
+
+- **Input**: Use textual LPIR format for clarity. Tests should define functions using the textual LPIR syntax to make the input code clear and readable.
+- **Expected Output**: For tests that verify register allocation results, document expected allocations and edits clearly. For tests that verify final machine code, use assembler format to show expected instructions.
+
+**Test Examples**:
+
+```rust
+#[test]
+fn test_regalloc_simple() {
+    // Input: textual LPIR format for clarity
+    let lpir_text = r#"
+        function @test(i32 %a, i32 %b) -> i32 {
+        entry:
+            %0 = iadd %a, %b
+            ret %0
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    let regalloc = vcode.run_regalloc();
+    
+    // Verify allocations...
+}
+
+#[test]
+fn test_regalloc_with_spilling() {
+    // Input: textual LPIR format - function with register pressure
+    let lpir_text = r#"
+        function @test(i32 %a, i32 %b, i32 %c, i32 %d, i32 %e, i32 %f, i32 %g, i32 %h, i32 %i, i32 %j) -> i32 {
+        entry:
+            %0 = iadd %a, %b
+            %1 = iadd %c, %d
+            %2 = iadd %e, %f
+            %3 = iadd %g, %h
+            %4 = iadd %i, %j
+            %5 = iadd %0, %1
+            %6 = iadd %2, %3
+            %7 = iadd %4, %5
+            %8 = iadd %6, %7
+            ret %8
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    let regalloc = vcode.run_regalloc();
+    
+    // Verify spilling occurred and edits are correct...
+    // Expected: assembler format showing spill/reload instructions
+    let expected_asm = r#"
+        # Prologue...
+        sw   a0, 0(sp)     # Spill %a
+        sw   a1, 4(sp)     # Spill %b
+        # ... more spills ...
+        lw   t0, 0(sp)     # Reload %a
+        lw   t1, 4(sp)     # Reload %b
+        # ... computation ...
+    "#;
+}
+```
+
+**Test Categories**:
+
 - Unit tests for regalloc2::Function trait implementation
 - Unit tests for ABI machine spec
 - Integration test: Run regalloc2 on simple VCode, verify allocations

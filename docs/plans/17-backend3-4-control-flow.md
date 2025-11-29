@@ -285,6 +285,175 @@ See `17-backend3-deferred.md` for more details on island/veneer insertion.
 
 ## Testing
 
+**Test Format Guidelines**:
+
+- **Input**: Use textual LPIR format for clarity. Tests should define functions using the textual LPIR syntax to make the input code clear and readable, especially for control flow patterns.
+- **Expected Output**: Use assembler format to clearly show the expected RISC-V 32 machine code. This is especially important for branch instructions, call sequences, and multi-return handling.
+
+**Test Examples**:
+
+```rust
+#[test]
+fn test_branch_lowering() {
+    // Input: textual LPIR format for clarity
+    let lpir_text = r#"
+        function @test(i32 %a, i32 %b) -> i32 {
+        entry:
+            %cond = icmp eq %a, %b
+            br %cond, then, else
+        then:
+            ret %a
+        else:
+            ret %b
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    
+    // Verify branch lowering...
+}
+
+#[test]
+fn test_branch_emission() {
+    // Input: textual LPIR format
+    let lpir_text = r#"
+        function @test(i32 %a, i32 %b) -> i32 {
+        entry:
+            %cond = icmp eq %a, %b
+            br %cond, then, else
+        then:
+            ret %a
+        else:
+            ret %b
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    let regalloc = vcode.run_regalloc();
+    let buffer = vcode.emit(&regalloc);
+    
+    // Expected: assembler format showing branch instructions
+    let expected_asm = r#"
+        # Prologue...
+        
+        # Compare and branch
+        beq  a0, a1, .Lthen
+        j    .Lelse
+    .Lthen:
+        # Return %a
+        lw   fp, 0(sp)
+        lw   ra, 4(sp)
+        addi sp, sp, 8
+        jalr zero, ra, 0
+    .Lelse:
+        # Return %b
+        mv   a0, a1
+        lw   fp, 0(sp)
+        lw   ra, 4(sp)
+        addi sp, sp, 8
+        jalr zero, ra, 0
+    "#;
+}
+
+#[test]
+fn test_call_lowering() {
+    // Input: textual LPIR format
+    let lpir_text = r#"
+        function @callee(i32 %x) -> i32 {
+        entry:
+            %0 = iadd %x, %x
+            ret %0
+        }
+        
+        function @caller(i32 %a) -> i32 {
+        entry:
+            %0 = call @callee(%a)
+            ret %0
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    
+    // Verify call lowering...
+}
+
+#[test]
+fn test_call_emission() {
+    // Input: textual LPIR format
+    let lpir_text = r#"
+        function @callee(i32 %x) -> i32 {
+        entry:
+            %0 = iadd %x, %x
+            ret %0
+        }
+        
+        function @caller(i32 %a) -> i32 {
+        entry:
+            %0 = call @callee(%a)
+            ret %0
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    let regalloc = vcode.run_regalloc();
+    let buffer = vcode.emit(&regalloc);
+    
+    // Expected: assembler format showing call sequence
+    let expected_asm = r#"
+        # Prologue...
+        
+        # Call setup
+        mv   a0, a0        # Pass argument
+        jal  ra, callee    # Call function
+        
+        # Epilogue...
+    "#;
+}
+
+#[test]
+fn test_multi_return() {
+    // Input: textual LPIR format
+    let lpir_text = r#"
+        function @test(i32 %a, i32 %b) -> (i32, i32, i32) {
+        entry:
+            %0 = iadd %a, %b
+            %1 = isub %a, %b
+            %2 = imul %a, %b
+            ret %0, %1, %2
+        }
+    "#;
+    
+    let func = parse_lpir_function(lpir_text);
+    let vcode = Lower::new(func).lower(&block_order);
+    let regalloc = vcode.run_regalloc();
+    let buffer = vcode.emit(&regalloc);
+    
+    // Expected: assembler format showing return area handling
+    let expected_asm = r#"
+        # Prologue...
+        # Allocate return area on stack
+        
+        # Compute return values
+        add  t0, a0, a1    # %0 = %a + %b
+        sub  t1, a0, a1    # %1 = %a - %b
+        mul  t2, a0, a1    # %2 = %a * %b
+        
+        # Store to return area
+        sw   t0, 0(sp)
+        sw   t1, 4(sp)
+        sw   t2, 8(sp)
+        
+        # Epilogue...
+    "#;
+}
+```
+
+**Test Categories**:
+
 - Unit tests for branch lowering
 - Unit tests for branch resolution
 - Unit tests for call lowering
