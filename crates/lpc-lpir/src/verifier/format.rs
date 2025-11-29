@@ -71,6 +71,86 @@ fn verify_instruction_format(
             }
         }
 
+        // Bitwise ops (binary): 2 args, 1 result, no block_args, no ty, no imm
+        Opcode::Iand | Opcode::Ior | Opcode::Ixor | Opcode::Ishl | Opcode::Ishr | Opcode::Iashr => {
+            if inst_data.args.len() != 2 {
+                errors.push(VerifierError::with_location(
+                    format!(
+                        "Bitwise/shift operation expects 2 arguments, got {}",
+                        inst_data.args.len()
+                    ),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.results.len() != 1 {
+                errors.push(VerifierError::with_location(
+                    format!(
+                        "Bitwise/shift operation expects 1 result, got {}",
+                        inst_data.results.len()
+                    ),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.block_args.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Bitwise/shift operation should not have block_args"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.ty.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Bitwise/shift operation should not have type"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.imm.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Bitwise/shift operation should not have immediate"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+        }
+
+        // Bitwise NOT (unary): 1 arg, 1 result, no block_args, no ty, no imm
+        Opcode::Inot => {
+            if inst_data.args.len() != 1 {
+                errors.push(VerifierError::with_location(
+                    format!(
+                        "Bitwise NOT operation expects 1 argument, got {}",
+                        inst_data.args.len()
+                    ),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.results.len() != 1 {
+                errors.push(VerifierError::with_location(
+                    format!(
+                        "Bitwise NOT operation expects 1 result, got {}",
+                        inst_data.results.len()
+                    ),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.block_args.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Bitwise NOT operation should not have block_args"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.ty.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Bitwise NOT operation should not have type"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+            if inst_data.imm.is_some() {
+                errors.push(VerifierError::with_location(
+                    String::from("Bitwise NOT operation should not have immediate"),
+                    format!("inst{}", inst.index()),
+                ));
+            }
+        }
+
         // Integer comparison with condition code: 2 args, 1 result, IntCondCode immediate
         Opcode::Icmp { .. } => {
             if inst_data.args.len() != 2 {

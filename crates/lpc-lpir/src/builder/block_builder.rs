@@ -66,6 +66,45 @@ impl<'a> BlockBuilder<'a> {
         self.push_inst_data(InstData::arithmetic(Opcode::Irem, result, arg1, arg2));
     }
 
+    // Bitwise instructions
+
+    /// Bitwise AND: result = arg1 & arg2
+    pub fn iand(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::bitwise(Opcode::Iand, result, arg1, arg2));
+    }
+
+    /// Bitwise OR: result = arg1 | arg2
+    pub fn ior(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::bitwise(Opcode::Ior, result, arg1, arg2));
+    }
+
+    /// Bitwise XOR: result = arg1 ^ arg2
+    pub fn ixor(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::bitwise(Opcode::Ixor, result, arg1, arg2));
+    }
+
+    /// Bitwise NOT: result = ~arg
+    pub fn inot(&mut self, result: Value, arg: Value) {
+        self.push_inst_data(InstData::bitwise_unary(Opcode::Inot, result, arg));
+    }
+
+    // Shift instructions
+
+    /// Left shift: result = arg1 << arg2
+    pub fn ishl(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::shift(Opcode::Ishl, result, arg1, arg2));
+    }
+
+    /// Logical right shift: result = arg1 >>> arg2 (unsigned)
+    pub fn ishr(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::shift(Opcode::Ishr, result, arg1, arg2));
+    }
+
+    /// Arithmetic right shift: result = arg1 >> arg2 (signed)
+    pub fn iashr(&mut self, result: Value, arg1: Value, arg2: Value) {
+        self.push_inst_data(InstData::shift(Opcode::Iashr, result, arg1, arg2));
+    }
+
     // Comparison instructions
 
     /// Integer comparison: result = (arg1 cond arg2)

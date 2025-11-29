@@ -113,6 +113,52 @@ impl InstData {
         }
     }
 
+    /// Create a bitwise instruction (binary: Iand, Ior, Ixor)
+    pub fn bitwise(
+        opcode: crate::dfg::opcode::Opcode,
+        result: Value,
+        arg1: Value,
+        arg2: Value,
+    ) -> Self {
+        Self {
+            opcode,
+            args: Vec::from([arg1, arg2]),
+            results: Vec::from([result]),
+            block_args: None,
+            ty: None,
+            imm: None,
+        }
+    }
+
+    /// Create a bitwise unary instruction (Inot)
+    pub fn bitwise_unary(opcode: crate::dfg::opcode::Opcode, result: Value, arg: Value) -> Self {
+        Self {
+            opcode,
+            args: Vec::from([arg]),
+            results: Vec::from([result]),
+            block_args: None,
+            ty: None,
+            imm: None,
+        }
+    }
+
+    /// Create a shift instruction (Ishl, Ishr, Iashr)
+    pub fn shift(
+        opcode: crate::dfg::opcode::Opcode,
+        result: Value,
+        arg1: Value,
+        arg2: Value,
+    ) -> Self {
+        Self {
+            opcode,
+            args: Vec::from([arg1, arg2]),
+            results: Vec::from([result]),
+            block_args: None,
+            ty: None,
+            imm: None,
+        }
+    }
+
     /// Create a constant instruction
     pub fn constant(result: Value, imm: Immediate) -> Self {
         let opcode = match imm {

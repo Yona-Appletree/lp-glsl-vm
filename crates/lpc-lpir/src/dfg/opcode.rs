@@ -26,6 +26,24 @@ pub enum Opcode {
     /// Integer remainder: result = arg1 % arg2
     Irem,
 
+    // Bitwise operations
+    /// Bitwise AND: result = arg1 & arg2
+    Iand,
+    /// Bitwise OR: result = arg1 | arg2
+    Ior,
+    /// Bitwise XOR: result = arg1 ^ arg2
+    Ixor,
+    /// Bitwise NOT: result = ~arg1 (unary)
+    Inot,
+
+    // Shift operations
+    /// Left shift: result = arg1 << arg2
+    Ishl,
+    /// Logical right shift: result = arg1 >>> arg2 (unsigned)
+    Ishr,
+    /// Arithmetic right shift: result = arg1 >> arg2 (signed)
+    Iashr,
+
     // Comparisons
     /// Integer comparison with condition code: result = (arg1 cond arg2)
     Icmp {

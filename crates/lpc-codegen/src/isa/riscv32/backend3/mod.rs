@@ -19,32 +19,50 @@ pub use lower::Riscv32LowerBackend;
 /// Helper functions for creating RISC-V 32 instructions during lowering
 pub mod lower_helpers {
     use crate::{
-        backend3::types::{VReg, Writable},
+        backend3::types::{Reg, VReg, Writable},
         isa::riscv32::backend3::inst::Riscv32MachInst,
     };
 
     /// Create an ADD instruction
     pub fn create_add(rd: Writable<VReg>, rs1: VReg, rs2: VReg) -> Riscv32MachInst {
-        Riscv32MachInst::Add { rd, rs1, rs2 }
+        Riscv32MachInst::Add {
+            rd: Writable::new(Reg::from_virtual_reg(rd.to_reg())),
+            rs1: Reg::from_virtual_reg(rs1),
+            rs2: Reg::from_virtual_reg(rs2),
+        }
     }
 
     /// Create a SUB instruction
     pub fn create_sub(rd: Writable<VReg>, rs1: VReg, rs2: VReg) -> Riscv32MachInst {
-        Riscv32MachInst::Sub { rd, rs1, rs2 }
+        Riscv32MachInst::Sub {
+            rd: Writable::new(Reg::from_virtual_reg(rd.to_reg())),
+            rs1: Reg::from_virtual_reg(rs1),
+            rs2: Reg::from_virtual_reg(rs2),
+        }
     }
 
     /// Create an ADDI instruction
     pub fn create_addi(rd: Writable<VReg>, rs1: VReg, imm: i32) -> Riscv32MachInst {
-        Riscv32MachInst::Addi { rd, rs1, imm }
+        Riscv32MachInst::Addi {
+            rd: Writable::new(Reg::from_virtual_reg(rd.to_reg())),
+            rs1: Reg::from_virtual_reg(rs1),
+            imm,
+        }
     }
 
     /// Create a LUI instruction
     pub fn create_lui(rd: Writable<VReg>, imm: u32) -> Riscv32MachInst {
-        Riscv32MachInst::Lui { rd, imm }
+        Riscv32MachInst::Lui {
+            rd: Writable::new(Reg::from_virtual_reg(rd.to_reg())),
+            imm,
+        }
     }
 
     /// Create a Move instruction (register copy)
     pub fn create_move(rd: Writable<VReg>, rs: VReg) -> Riscv32MachInst {
-        Riscv32MachInst::Move { rd, rs }
+        Riscv32MachInst::Move {
+            rd: Writable::new(Reg::from_virtual_reg(rd.to_reg())),
+            rs: Reg::from_virtual_reg(rs),
+        }
     }
 }

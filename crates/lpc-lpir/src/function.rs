@@ -358,6 +358,61 @@ impl Function {
                     write!(f, "{:?}", inst_data.opcode)
                 }
             }
+            // Bitwise operations (binary)
+            Opcode::Iand | Opcode::Ior | Opcode::Ixor => {
+                if inst_data.results.len() == 1 && inst_data.args.len() == 2 {
+                    let opname = match inst_data.opcode {
+                        Opcode::Iand => "iand",
+                        Opcode::Ior => "ior",
+                        Opcode::Ixor => "ixor",
+                        _ => unreachable!(),
+                    };
+                    write!(
+                        f,
+                        "v{} = {} v{}, v{}",
+                        inst_data.results[0].index(),
+                        opname,
+                        inst_data.args[0].index(),
+                        inst_data.args[1].index()
+                    )
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            // Bitwise NOT (unary)
+            Opcode::Inot => {
+                if inst_data.results.len() == 1 && inst_data.args.len() == 1 {
+                    write!(
+                        f,
+                        "v{} = inot v{}",
+                        inst_data.results[0].index(),
+                        inst_data.args[0].index()
+                    )
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
+            // Shift operations
+            Opcode::Ishl | Opcode::Ishr | Opcode::Iashr => {
+                if inst_data.results.len() == 1 && inst_data.args.len() == 2 {
+                    let opname = match inst_data.opcode {
+                        Opcode::Ishl => "ishl",
+                        Opcode::Ishr => "ishr",
+                        Opcode::Iashr => "iashr",
+                        _ => unreachable!(),
+                    };
+                    write!(
+                        f,
+                        "v{} = {} v{}, v{}",
+                        inst_data.results[0].index(),
+                        opname,
+                        inst_data.args[0].index(),
+                        inst_data.args[1].index()
+                    )
+                } else {
+                    write!(f, "{:?}", inst_data.opcode)
+                }
+            }
             // Integer comparison with condition code
             Opcode::Icmp { cond } => {
                 if inst_data.results.len() == 1 && inst_data.args.len() == 2 {

@@ -137,6 +137,13 @@ impl DFG {
             | Opcode::Imul
             | Opcode::Idiv
             | Opcode::Irem
+            | Opcode::Iand
+            | Opcode::Ior
+            | Opcode::Ixor
+            | Opcode::Inot
+            | Opcode::Ishl
+            | Opcode::Ishr
+            | Opcode::Iashr
             | Opcode::Iconst => Some(Type::I32),
             Opcode::Icmp { .. } => Some(Type::I32), // Integer comparisons return i32 (0/1)
             Opcode::Fcmp { .. } => Some(Type::I32), // Floating point comparisons return i32 (0/1)

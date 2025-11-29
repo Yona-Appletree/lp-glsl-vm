@@ -17,7 +17,7 @@ use regalloc2::RegClass;
 
 use crate::{
     backend3::{
-        types::{BlockIndex, VReg, Writable},
+        types::{BlockIndex, Reg, VReg, Writable},
         vcode::{BlockLoweringOrder, Callee, LoweredBlock, VCode},
         vcode_builder::VCodeBuilder,
     },
@@ -100,9 +100,9 @@ fn parse_add(input: &str) -> IResult<&str, Riscv32MachInst> {
     Ok((
         input,
         Riscv32MachInst::Add {
-            rd: Writable::new(rd),
-            rs1,
-            rs2,
+            rd: Writable::new(Reg::from_virtual_reg(rd)),
+            rs1: Reg::from_virtual_reg(rs1),
+            rs2: Reg::from_virtual_reg(rs2),
         },
     ))
 }
@@ -119,8 +119,8 @@ fn parse_addi(input: &str) -> IResult<&str, Riscv32MachInst> {
     Ok((
         input,
         Riscv32MachInst::Addi {
-            rd: Writable::new(rd),
-            rs1,
+            rd: Writable::new(Reg::from_virtual_reg(rd)),
+            rs1: Reg::from_virtual_reg(rs1),
             imm,
         },
     ))
@@ -138,9 +138,9 @@ fn parse_sub(input: &str) -> IResult<&str, Riscv32MachInst> {
     Ok((
         input,
         Riscv32MachInst::Sub {
-            rd: Writable::new(rd),
-            rs1,
-            rs2,
+            rd: Writable::new(Reg::from_virtual_reg(rd)),
+            rs1: Reg::from_virtual_reg(rs1),
+            rs2: Reg::from_virtual_reg(rs2),
         },
     ))
 }
@@ -155,7 +155,7 @@ fn parse_lui(input: &str) -> IResult<&str, Riscv32MachInst> {
     Ok((
         input,
         Riscv32MachInst::Lui {
-            rd: Writable::new(rd),
+            rd: Writable::new(Reg::from_virtual_reg(rd)),
             imm: imm as u32, // Cast i32 to u32 (bitwise cast)
         },
     ))
@@ -175,8 +175,8 @@ fn parse_lw(input: &str) -> IResult<&str, Riscv32MachInst> {
     Ok((
         input,
         Riscv32MachInst::Lw {
-            rd: Writable::new(rd),
-            rs1,
+            rd: Writable::new(Reg::from_virtual_reg(rd)),
+            rs1: Reg::from_virtual_reg(rs1),
             imm,
         },
     ))
@@ -193,7 +193,14 @@ fn parse_sw(input: &str) -> IResult<&str, Riscv32MachInst> {
         char(')'),
     )(input)?;
 
-    Ok((input, Riscv32MachInst::Sw { rs1, rs2, imm }))
+    Ok((
+        input,
+        Riscv32MachInst::Sw {
+            rs1: Reg::from_virtual_reg(rs1),
+            rs2: Reg::from_virtual_reg(rs2),
+            imm,
+        },
+    ))
 }
 
 /// Parse a Move instruction: move v0, v1
@@ -206,8 +213,8 @@ fn parse_move(input: &str) -> IResult<&str, Riscv32MachInst> {
     Ok((
         input,
         Riscv32MachInst::Move {
-            rd: Writable::new(rd),
-            rs,
+            rd: Writable::new(Reg::from_virtual_reg(rd)),
+            rs: Reg::from_virtual_reg(rs),
         },
     ))
 }
@@ -223,7 +230,11 @@ fn parse_return(input: &str) -> IResult<&str, Riscv32MachInst> {
     Ok((
         input,
         Riscv32MachInst::Return {
-            ret_vals: ret_vals.unwrap_or_default(),
+            ret_vals: ret_vals
+                .unwrap_or_default()
+                .into_iter()
+                .map(Reg::from_virtual_reg)
+                .collect(),
         },
     ))
 }
@@ -233,7 +244,12 @@ fn parse_br(input: &str) -> IResult<&str, Riscv32MachInst> {
     let (input, _) = terminated(tag("brif"), multispace1)(input)?;
     let (input, condition) = parse_vreg(input)?;
 
-    Ok((input, Riscv32MachInst::Br { condition }))
+    Ok((
+        input,
+        Riscv32MachInst::Br {
+            condition: Reg::from_virtual_reg(condition),
+        },
+    ))
 }
 
 /// Parse a jump instruction: jump
@@ -254,9 +270,9 @@ fn parse_mul(input: &str) -> IResult<&str, Riscv32MachInst> {
     Ok((
         input,
         Riscv32MachInst::Mul {
-            rd: Writable::new(rd),
-            rs1,
-            rs2,
+            rd: Writable::new(Reg::from_virtual_reg(rd)),
+            rs1: Reg::from_virtual_reg(rs1),
+            rs2: Reg::from_virtual_reg(rs2),
         },
     ))
 }
@@ -272,9 +288,9 @@ fn parse_div(input: &str) -> IResult<&str, Riscv32MachInst> {
     Ok((
         input,
         Riscv32MachInst::Div {
-            rd: Writable::new(rd),
-            rs1,
-            rs2,
+            rd: Writable::new(Reg::from_virtual_reg(rd)),
+            rs1: Reg::from_virtual_reg(rs1),
+            rs2: Reg::from_virtual_reg(rs2),
         },
     ))
 }
@@ -290,9 +306,9 @@ fn parse_rem(input: &str) -> IResult<&str, Riscv32MachInst> {
     Ok((
         input,
         Riscv32MachInst::Rem {
-            rd: Writable::new(rd),
-            rs1,
-            rs2,
+            rd: Writable::new(Reg::from_virtual_reg(rd)),
+            rs1: Reg::from_virtual_reg(rs1),
+            rs2: Reg::from_virtual_reg(rs2),
         },
     ))
 }

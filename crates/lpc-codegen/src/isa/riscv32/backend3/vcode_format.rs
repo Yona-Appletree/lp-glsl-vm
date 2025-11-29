@@ -71,6 +71,39 @@ impl fmt::Display for Riscv32MachInst {
             Riscv32MachInst::Xori { rd, rs1, imm } => {
                 write!(f, "xori {}, {}, {}", rd, rs1, imm)
             }
+            Riscv32MachInst::And { rd, rs1, rs2 } => {
+                write!(f, "and {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Andi { rd, rs1, imm } => {
+                write!(f, "andi {}, {}, {}", rd, rs1, imm)
+            }
+            Riscv32MachInst::Or { rd, rs1, rs2 } => {
+                write!(f, "or {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Ori { rd, rs1, imm } => {
+                write!(f, "ori {}, {}, {}", rd, rs1, imm)
+            }
+            Riscv32MachInst::Xor { rd, rs1, rs2 } => {
+                write!(f, "xor {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Sll { rd, rs1, rs2 } => {
+                write!(f, "sll {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Slli { rd, rs1, imm } => {
+                write!(f, "slli {}, {}, {}", rd, rs1, imm)
+            }
+            Riscv32MachInst::Srl { rd, rs1, rs2 } => {
+                write!(f, "srl {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Srli { rd, rs1, imm } => {
+                write!(f, "srli {}, {}, {}", rd, rs1, imm)
+            }
+            Riscv32MachInst::Sra { rd, rs1, rs2 } => {
+                write!(f, "sra {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Srai { rd, rs1, imm } => {
+                write!(f, "srai {}, {}, {}", rd, rs1, imm)
+            }
             Riscv32MachInst::Jal { rd, callee, args } => {
                 write!(
                     f,
@@ -116,6 +149,16 @@ impl fmt::Display for Riscv32MachInst {
             }
             Riscv32MachInst::Jump => {
                 write!(f, "jump")
+            }
+            Riscv32MachInst::Args { args } => {
+                write!(
+                    f,
+                    "args {}",
+                    args.iter()
+                        .map(|ap| format!("{}->preg{}", ap.vreg, ap.preg.hw_enc()))
+                        .collect::<alloc::vec::Vec<_>>()
+                        .join(", ")
+                )
             }
         }
     }

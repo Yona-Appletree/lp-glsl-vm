@@ -231,21 +231,23 @@ impl LowerBackend for Riscv32LowerBackend {
                                 IntCC::NotEqual => {
                                     // ne: same as eq, then invert
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let diff = Writable::new(temp_vreg);
-                                    let sub_inst = Riscv32MachInst::Sub { rd: diff, rs1, rs2 };
+                                    let diff = Writable::new(Reg::from_virtual_reg(temp_vreg));
+                                    let sub_inst = Riscv32MachInst::Sub { rd: diff, rs1: rs1_reg, rs2: rs2_reg };
                                     ctx.vcode.push(sub_inst, srcloc);
                                     let temp_result = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let temp_result_writable = Writable::new(temp_result);
+                                    let temp_result_writable = Writable::new(Reg::from_virtual_reg(temp_result));
+                                    let temp_reg = Reg::from_virtual_reg(temp_vreg);
                                     let sltiu_inst = Riscv32MachInst::Sltiu {
                                         rd: temp_result_writable,
-                                        rs1: temp_vreg,
+                                        rs1: temp_reg,
                                         imm: 1,
                                     };
                                     ctx.vcode.push(sltiu_inst, srcloc);
                                     // Invert: xori with 1
+                                    let temp_result_reg = Reg::from_virtual_reg(temp_result);
                                     let xori_inst = Riscv32MachInst::Xori {
                                         rd,
-                                        rs1: temp_result,
+                                        rs1: temp_result_reg,
                                         imm: 1,
                                     };
                                     ctx.vcode.push(xori_inst, srcloc);
@@ -253,23 +255,24 @@ impl LowerBackend for Riscv32LowerBackend {
                                 }
                                 IntCC::SignedLessThan => {
                                     // lt: slt directly
-                                    let slt_inst = Riscv32MachInst::Slt { rd, rs1, rs2 };
+                                    let slt_inst = Riscv32MachInst::Slt { rd, rs1: rs1_reg, rs2: rs2_reg };
                                     ctx.vcode.push(slt_inst, srcloc);
                                     return true;
                                 }
                                 IntCC::SignedLessThanOrEqual => {
                                     // le: slt with swapped operands, then invert
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let temp_writable = Writable::new(temp_vreg);
+                                    let temp_writable = Writable::new(Reg::from_virtual_reg(temp_vreg));
                                     let slt_inst = Riscv32MachInst::Slt {
                                         rd: temp_writable,
-                                        rs1: rs2,
-                                        rs2: rs1,
+                                        rs1: rs2_reg,
+                                        rs2: rs1_reg,
                                     };
                                     ctx.vcode.push(slt_inst, srcloc);
+                                    let temp_reg = Reg::from_virtual_reg(temp_vreg);
                                     let xori_inst = Riscv32MachInst::Xori {
                                         rd,
-                                        rs1: temp_vreg,
+                                        rs1: temp_reg,
                                         imm: 1,
                                     };
                                     ctx.vcode.push(xori_inst, srcloc);
@@ -279,8 +282,8 @@ impl LowerBackend for Riscv32LowerBackend {
                                     // gt: slt with swapped operands
                                     let slt_inst = Riscv32MachInst::Slt {
                                         rd,
-                                        rs1: rs2,
-                                        rs2: rs1,
+                                        rs1: rs2_reg,
+                                        rs2: rs1_reg,
                                     };
                                     ctx.vcode.push(slt_inst, srcloc);
                                     return true;
@@ -288,16 +291,17 @@ impl LowerBackend for Riscv32LowerBackend {
                                 IntCC::SignedGreaterThanOrEqual => {
                                     // ge: slt, then invert
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let temp_writable = Writable::new(temp_vreg);
+                                    let temp_writable = Writable::new(Reg::from_virtual_reg(temp_vreg));
                                     let slt_inst = Riscv32MachInst::Slt {
                                         rd: temp_writable,
-                                        rs1,
-                                        rs2,
+                                        rs1: rs1_reg,
+                                        rs2: rs2_reg,
                                     };
                                     ctx.vcode.push(slt_inst, srcloc);
+                                    let temp_reg = Reg::from_virtual_reg(temp_vreg);
                                     let xori_inst = Riscv32MachInst::Xori {
                                         rd,
-                                        rs1: temp_vreg,
+                                        rs1: temp_reg,
                                         imm: 1,
                                     };
                                     ctx.vcode.push(xori_inst, srcloc);
@@ -305,23 +309,24 @@ impl LowerBackend for Riscv32LowerBackend {
                                 }
                                 IntCC::UnsignedLessThan => {
                                     // ult: sltu directly
-                                    let sltu_inst = Riscv32MachInst::Sltu { rd, rs1, rs2 };
+                                    let sltu_inst = Riscv32MachInst::Sltu { rd, rs1: rs1_reg, rs2: rs2_reg };
                                     ctx.vcode.push(sltu_inst, srcloc);
                                     return true;
                                 }
                                 IntCC::UnsignedLessThanOrEqual => {
                                     // ule: sltu with swapped operands, then invert
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let temp_writable = Writable::new(temp_vreg);
+                                    let temp_writable = Writable::new(Reg::from_virtual_reg(temp_vreg));
                                     let sltu_inst = Riscv32MachInst::Sltu {
                                         rd: temp_writable,
-                                        rs1: rs2,
-                                        rs2: rs1,
+                                        rs1: rs2_reg,
+                                        rs2: rs1_reg,
                                     };
                                     ctx.vcode.push(sltu_inst, srcloc);
+                                    let temp_reg = Reg::from_virtual_reg(temp_vreg);
                                     let xori_inst = Riscv32MachInst::Xori {
                                         rd,
-                                        rs1: temp_vreg,
+                                        rs1: temp_reg,
                                         imm: 1,
                                     };
                                     ctx.vcode.push(xori_inst, srcloc);
@@ -331,8 +336,8 @@ impl LowerBackend for Riscv32LowerBackend {
                                     // ugt: sltu with swapped operands
                                     let sltu_inst = Riscv32MachInst::Sltu {
                                         rd,
-                                        rs1: rs2,
-                                        rs2: rs1,
+                                        rs1: rs2_reg,
+                                        rs2: rs1_reg,
                                     };
                                     ctx.vcode.push(sltu_inst, srcloc);
                                     return true;
@@ -340,16 +345,17 @@ impl LowerBackend for Riscv32LowerBackend {
                                 IntCC::UnsignedGreaterThanOrEqual => {
                                     // uge: sltu, then invert
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let temp_writable = Writable::new(temp_vreg);
+                                    let temp_writable = Writable::new(Reg::from_virtual_reg(temp_vreg));
                                     let sltu_inst = Riscv32MachInst::Sltu {
                                         rd: temp_writable,
-                                        rs1,
-                                        rs2,
+                                        rs1: rs1_reg,
+                                        rs2: rs2_reg,
                                     };
                                     ctx.vcode.push(sltu_inst, srcloc);
+                                    let temp_reg = Reg::from_virtual_reg(temp_vreg);
                                     let xori_inst = Riscv32MachInst::Xori {
                                         rd,
-                                        rs1: temp_vreg,
+                                        rs1: temp_reg,
                                         imm: 1,
                                     };
                                     ctx.vcode.push(xori_inst, srcloc);
@@ -362,10 +368,10 @@ impl LowerBackend for Riscv32LowerBackend {
             }
             Opcode::Call { callee } => {
                 // Extract argument VRegs
-                let arg_vregs: alloc::vec::Vec<_> = {
+                let arg_vregs: alloc::vec::Vec<Reg> = {
                     let value_to_vreg = ctx.value_to_vreg();
                     args.iter()
-                        .filter_map(|v| value_to_vreg.get(v).copied())
+                        .filter_map(|v| value_to_vreg.get(v).copied().map(Reg::from_virtual_reg))
                         .collect()
                 };
 
@@ -382,11 +388,11 @@ impl LowerBackend for Riscv32LowerBackend {
                 // Create JAL instruction
                 // If no result, use x0 (zero register) as rd
                 let rd = if let Some(result_vreg) = result_vreg {
-                    Writable::new(result_vreg)
+                    Writable::new(Reg::from_virtual_reg(result_vreg))
                 } else {
-                    // Use v0 as placeholder for x0 - will be handled during emission
-                    let zero_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                    Writable::new(zero_vreg)
+                    // Use zero_reg() for x0
+                    use crate::isa::riscv32::backend3::regs::zero_reg;
+                    Writable::new(zero_reg())
                 };
 
                 let mach_inst = Riscv32MachInst::Jal {
@@ -408,10 +414,10 @@ impl LowerBackend for Riscv32LowerBackend {
                     .unwrap_or(0);
 
                 // Extract argument VRegs
-                let arg_vregs: alloc::vec::Vec<_> = {
+                let arg_vregs: alloc::vec::Vec<Reg> = {
                     let value_to_vreg = ctx.value_to_vreg();
                     args.iter()
-                        .filter_map(|v| value_to_vreg.get(v).copied())
+                        .filter_map(|v| value_to_vreg.get(v).copied().map(Reg::from_virtual_reg))
                         .collect()
                 };
 
@@ -428,7 +434,7 @@ impl LowerBackend for Riscv32LowerBackend {
                 let mach_inst = Riscv32MachInst::Ecall {
                     number: syscall_number,
                     args: arg_vregs,
-                    result: result_vreg.map(Writable::new),
+                    result: result_vreg.map(|v| Writable::new(Reg::from_virtual_reg(v))),
                 };
                 ctx.vcode.push(mach_inst, srcloc);
                 return true;
@@ -446,8 +452,9 @@ impl LowerBackend for Riscv32LowerBackend {
             Opcode::Trapz { code } => {
                 // Extract condition VReg
                 if let Some(condition_vreg) = rs1_opt {
+                    let condition_reg = Reg::from_virtual_reg(condition_vreg);
                     let mach_inst = Riscv32MachInst::Trapz {
-                        condition: condition_vreg,
+                        condition: condition_reg,
                         code,
                     };
                     ctx.vcode.push(mach_inst, srcloc);
@@ -457,12 +464,108 @@ impl LowerBackend for Riscv32LowerBackend {
             Opcode::Trapnz { code } => {
                 // Extract condition VReg
                 if let Some(condition_vreg) = rs1_opt {
+                    let condition_reg = Reg::from_virtual_reg(condition_vreg);
                     let mach_inst = Riscv32MachInst::Trapnz {
-                        condition: condition_vreg,
+                        condition: condition_reg,
                         code,
                     };
                     ctx.vcode.push(mach_inst, srcloc);
                     return true;
+                }
+            }
+            Opcode::Iand => {
+                if args.len() >= 2 && !results.is_empty() {
+                    if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        // TODO: Check if rs2 is a constant and use Andi if it fits in 12 bits
+                        let mach_inst = Riscv32MachInst::And { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        ctx.vcode.push(mach_inst, srcloc);
+                        return true;
+                    }
+                }
+            }
+            Opcode::Ior => {
+                if args.len() >= 2 && !results.is_empty() {
+                    if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        // TODO: Check if rs2 is a constant and use Ori if it fits in 12 bits
+                        let mach_inst = Riscv32MachInst::Or { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        ctx.vcode.push(mach_inst, srcloc);
+                        return true;
+                    }
+                }
+            }
+            Opcode::Ixor => {
+                if args.len() >= 2 && !results.is_empty() {
+                    if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        // TODO: Check if rs2 is a constant and use Xori if it fits in 12 bits
+                        let mach_inst = Riscv32MachInst::Xor { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        ctx.vcode.push(mach_inst, srcloc);
+                        return true;
+                    }
+                }
+            }
+            Opcode::Inot => {
+                if args.len() >= 1 && !results.is_empty() {
+                    if let (Some(rs1), Some(rd_vreg)) = (rs1_opt, rd_opt) {
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        // NOT is implemented as XOR with -1 (all bits set)
+                        // Use Xori with -1 immediate (fits in 12 bits: -2048 to 2047)
+                        let mach_inst = Riscv32MachInst::Xori {
+                            rd,
+                            rs1: rs1_reg,
+                            imm: -1,
+                        };
+                        ctx.vcode.push(mach_inst, srcloc);
+                        return true;
+                    }
+                }
+            }
+            Opcode::Ishl => {
+                if args.len() >= 2 && !results.is_empty() {
+                    if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        // TODO: Check if rs2 is a constant (0-31) and use Slli if it fits in 5 bits
+                        let mach_inst = Riscv32MachInst::Sll { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        ctx.vcode.push(mach_inst, srcloc);
+                        return true;
+                    }
+                }
+            }
+            Opcode::Ishr => {
+                if args.len() >= 2 && !results.is_empty() {
+                    if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        // TODO: Check if rs2 is a constant (0-31) and use Srli if it fits in 5 bits
+                        let mach_inst = Riscv32MachInst::Srl { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        ctx.vcode.push(mach_inst, srcloc);
+                        return true;
+                    }
+                }
+            }
+            Opcode::Iashr => {
+                if args.len() >= 2 && !results.is_empty() {
+                    if let (Some(rs1), Some(rs2), Some(rd_vreg)) = (rs1_opt, rs2_opt, rd_opt) {
+                        let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
+                        let rs1_reg = Reg::from_virtual_reg(rs1);
+                        let rs2_reg = Reg::from_virtual_reg(rs2);
+                        // TODO: Check if rs2 is a constant (0-31) and use Srai if it fits in 5 bits
+                        let mach_inst = Riscv32MachInst::Sra { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        ctx.vcode.push(mach_inst, srcloc);
+                        return true;
+                    }
                 }
             }
             _ => {
@@ -478,12 +581,19 @@ impl LowerBackend for Riscv32LowerBackend {
         dst: crate::backend3::types::Writable<crate::backend3::types::VReg>,
         src: crate::backend3::types::VReg,
     ) -> Self::MInst {
-        use crate::isa::riscv32::backend3::lower_helpers;
-        lower_helpers::create_move(dst, src)
+        use crate::backend3::types::Reg;
+        let dst_reg = Reg::from_virtual_reg(dst.to_reg());
+        let src_reg = Reg::from_virtual_reg(src);
+        Riscv32MachInst::Move {
+            rd: Writable::new(dst_reg),
+            rs: src_reg,
+        }
     }
 
     fn create_branch(&self, condition: crate::backend3::types::VReg) -> Self::MInst {
-        Riscv32MachInst::Br { condition }
+        use crate::backend3::types::Reg;
+        let condition_reg = Reg::from_virtual_reg(condition);
+        Riscv32MachInst::Br { condition: condition_reg }
     }
 
     fn create_jump(&self) -> Self::MInst {
@@ -507,13 +617,13 @@ impl LowerBackend for Riscv32LowerBackend {
                 let arg_regs = Riscv32ABI::arg_regs();
 
                 // Create ArgPairs: map each parameter Value to its VReg and ABI register
-                let mut arg_pairs = Vec::new();
+                let mut arg_pairs = alloc::vec::Vec::new();
                 for (idx, param_value) in params.iter().enumerate() {
                     if let Some(&vreg) = ctx.value_to_vreg().get(param_value) {
                         if let Some(&preg) = arg_regs.get(idx) {
                             arg_pairs.push(ArgPair {
                                 vreg: Reg::from_virtual_reg(vreg),
-                                preg: *preg,
+                                preg,
                             });
                         }
                     }

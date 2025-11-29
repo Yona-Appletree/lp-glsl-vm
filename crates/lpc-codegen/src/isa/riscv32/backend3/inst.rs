@@ -114,6 +114,83 @@ pub enum Riscv32MachInst {
         imm: i32,
     },
 
+    /// AND: rd = rs1 & rs2
+    And {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        rs2: Reg,
+    },
+
+    /// ANDI: rd = rs1 & imm
+    Andi {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        imm: i32,
+    },
+
+    /// OR: rd = rs1 | rs2
+    Or {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        rs2: Reg,
+    },
+
+    /// ORI: rd = rs1 | imm
+    Ori {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        imm: i32,
+    },
+
+    /// XOR: rd = rs1 ^ rs2
+    Xor {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        rs2: Reg,
+    },
+
+    /// SLL: Shift left logical (rd = rs1 << rs2)
+    Sll {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        rs2: Reg,
+    },
+
+    /// SLLI: Shift left logical immediate (rd = rs1 << imm)
+    Slli {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        imm: i32,
+    },
+
+    /// SRL: Shift right logical (rd = rs1 >>> rs2, unsigned)
+    Srl {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        rs2: Reg,
+    },
+
+    /// SRLI: Shift right logical immediate (rd = rs1 >>> imm, unsigned)
+    Srli {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        imm: i32,
+    },
+
+    /// SRA: Shift right arithmetic (rd = rs1 >> rs2, signed)
+    Sra {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        rs2: Reg,
+    },
+
+    /// SRAI: Shift right arithmetic immediate (rd = rs1 >> imm, signed)
+    Srai {
+        rd: Writable<Reg>,
+        rs1: Reg,
+        imm: i32,
+    },
+
     /// JAL: rd = pc + 4; pc = pc + imm (function call)
     Jal {
         rd: Writable<Reg>,
@@ -246,6 +323,56 @@ impl MachInst for Riscv32MachInst {
                 collector.visit_use(VReg::from(*rs2), OperandConstraint::Any);
             }
             Riscv32MachInst::Xori { rd, rs1, imm: _ } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+            }
+            Riscv32MachInst::And { rd, rs1, rs2 } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs2), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Andi { rd, rs1, imm: _ } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Or { rd, rs1, rs2 } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs2), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Ori { rd, rs1, imm: _ } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Xor { rd, rs1, rs2 } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs2), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Sll { rd, rs1, rs2 } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs2), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Slli { rd, rs1, imm: _ } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Srl { rd, rs1, rs2 } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs2), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Srli { rd, rs1, imm: _ } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Sra { rd, rs1, rs2 } => {
+                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                collector.visit_use(VReg::from(*rs2), OperandConstraint::Any);
+            }
+            Riscv32MachInst::Srai { rd, rs1, imm: _ } => {
                 collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
                 collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
             }

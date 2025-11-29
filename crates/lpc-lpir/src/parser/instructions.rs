@@ -51,6 +51,60 @@ pub(crate) fn parse_arithmetic(input: &str) -> IResult<&str, InstData> {
     Ok((input, InstData::arithmetic(opcode, result, arg1, arg2)))
 }
 
+/// Parse a bitwise instruction (iand, ior, ixor)
+pub(crate) fn parse_bitwise(input: &str) -> IResult<&str, InstData> {
+    let (input, result) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(tag("="), blank)(input)?;
+    let (input, op) = terminated(
+        alt((tag("iand"), tag("ior"), tag("ixor"))),
+        blank,
+    )(input)?;
+    let (input, arg1) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(char(','), blank)(input)?;
+    let (input, arg2) = terminated(parse_value, blank)(input)?;
+
+    let opcode = match op {
+        "iand" => Opcode::Iand,
+        "ior" => Opcode::Ior,
+        "ixor" => Opcode::Ixor,
+        _ => unreachable!(),
+    };
+
+    Ok((input, InstData::bitwise(opcode, result, arg1, arg2)))
+}
+
+/// Parse a bitwise unary instruction (inot)
+pub(crate) fn parse_bitwise_unary(input: &str) -> IResult<&str, InstData> {
+    let (input, result) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(tag("="), blank)(input)?;
+    let (input, _) = terminated(tag("inot"), blank)(input)?;
+    let (input, arg) = terminated(parse_value, blank)(input)?;
+
+    Ok((input, InstData::bitwise_unary(Opcode::Inot, result, arg)))
+}
+
+/// Parse a shift instruction (ishl, ishr, iashr)
+pub(crate) fn parse_shift(input: &str) -> IResult<&str, InstData> {
+    let (input, result) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(tag("="), blank)(input)?;
+    let (input, op) = terminated(
+        alt((tag("ishl"), tag("ishr"), tag("iashr"))),
+        blank,
+    )(input)?;
+    let (input, arg1) = terminated(parse_value, blank)(input)?;
+    let (input, _) = terminated(char(','), blank)(input)?;
+    let (input, arg2) = terminated(parse_value, blank)(input)?;
+
+    let opcode = match op {
+        "ishl" => Opcode::Ishl,
+        "ishr" => Opcode::Ishr,
+        "iashr" => Opcode::Iashr,
+        _ => unreachable!(),
+    };
+
+    Ok((input, InstData::shift(opcode, result, arg1, arg2)))
+}
+
 /// Parse an integer condition code
 fn parse_int_cond_code(input: &str) -> IResult<&str, IntCC> {
     let (input, cond_str) = terminated(
@@ -403,6 +457,9 @@ pub(crate) fn parse_instruction(input: &str) -> IResult<&str, InstData> {
         parse_load,       // "v0 = load.i32 v1" - has type suffix
         parse_fcmp,       // "v0 = fcmp eq v1, v2" - must come before parse_comparison
         parse_comparison, // "v0 = icmp eq v1, v2" or "v0 = icmp_eq v1, v2"
+        parse_bitwise_unary, // "v0 = inot v1" - unary, must come before binary bitwise
+        parse_bitwise,    // "v0 = iand v1, v2" or "v0 = ior v1, v2" or "v0 = ixor v1, v2"
+        parse_shift,      // "v0 = ishl v1, v2" or "v0 = ishr v1, v2" or "v0 = iashr v1, v2"
         parse_arithmetic, // "v0 = iadd v1, v2"
     ))(input)
 }
@@ -464,6 +521,78 @@ mod tests {
         assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
         let (_, inst_data) = result.unwrap();
         assert_eq!(inst_data.opcode, Opcode::Iadd);
+    }
+
+    #[test]
+    fn test_parse_bitwise() {
+        let input = "v0 = iand v1, v2";
+        let result = parse_bitwise(input);
+        assert!(result.is_ok(), "parse_bitwise failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Iand);
+
+        let input = "v0 = ior v1, v2";
+        let result = parse_bitwise(input);
+        assert!(result.is_ok(), "parse_bitwise failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Ior);
+
+        let input = "v0 = ixor v1, v2";
+        let result = parse_bitwise(input);
+        assert!(result.is_ok(), "parse_bitwise failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Ixor);
+    }
+
+    #[test]
+    fn test_parse_bitwise_unary() {
+        let input = "v0 = inot v1";
+        let result = parse_bitwise_unary(input);
+        assert!(result.is_ok(), "parse_bitwise_unary failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Inot);
+    }
+
+    #[test]
+    fn test_parse_shift() {
+        let input = "v0 = ishl v1, v2";
+        let result = parse_shift(input);
+        assert!(result.is_ok(), "parse_shift failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Ishl);
+
+        let input = "v0 = ishr v1, v2";
+        let result = parse_shift(input);
+        assert!(result.is_ok(), "parse_shift failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Ishr);
+
+        let input = "v0 = iashr v1, v2";
+        let result = parse_shift(input);
+        assert!(result.is_ok(), "parse_shift failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Iashr);
+    }
+
+    #[test]
+    fn test_parse_instruction_bitwise() {
+        let input = "v0 = iand v1, v2";
+        let result = parse_instruction(input);
+        assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Iand);
+
+        let input = "v0 = inot v1";
+        let result = parse_instruction(input);
+        assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Inot);
+
+        let input = "v0 = ishl v1, v2";
+        let result = parse_instruction(input);
+        assert!(result.is_ok(), "parse_instruction failed: {:?}", result);
+        let (_, inst_data) = result.unwrap();
+        assert_eq!(inst_data.opcode, Opcode::Ishl);
     }
 
     #[test]

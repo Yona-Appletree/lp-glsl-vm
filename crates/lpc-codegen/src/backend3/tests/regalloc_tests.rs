@@ -31,7 +31,6 @@ use crate::backend3::tests::vcode_test_helpers::LowerTest;
 /// but never defined, which violates regalloc2's SSA requirements.
 /// Once Args instruction support is added, this test should pass.
 #[test]
-#[ignore = "Entry block params need Args instruction support"]
 fn test_regalloc_simple() {
     // Input: function that adds two arguments
     let test = LowerTest::from_lpir(
@@ -69,7 +68,6 @@ block0(v0: i32, v1: i32):
 /// NOTE: This test currently fails because entry block parameters need to be
 /// defined by an Args instruction. See test_regalloc_simple for details.
 #[test]
-#[ignore = "Entry block params need Args instruction support"]
 fn test_regalloc_multiple_instructions() {
     let test = LowerTest::from_lpir(
         r#"
@@ -110,7 +108,6 @@ block0(v0: i32, v1: i32, v2: i32):
 /// NOTE: This test currently fails because entry block parameters need to be
 /// defined by an Args instruction. See test_regalloc_simple for details.
 #[test]
-#[ignore = "Entry block params need Args instruction support"]
 fn test_regalloc_with_register_pressure() {
     // Create a function with many live values to force spilling
     // RISC-V 32 has ~15 allocatable integer registers, so we need more than that
@@ -158,7 +155,6 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
 /// NOTE: This test currently fails because entry block parameters need to be
 /// defined by an Args instruction. See test_regalloc_simple for details.
 #[test]
-#[ignore = "Entry block params need Args instruction support"]
 fn test_regalloc_with_branches() {
     let test = LowerTest::from_lpir(
         r#"
@@ -200,7 +196,6 @@ block2:
 /// NOTE: This test currently fails because entry block parameters need to be
 /// defined by an Args instruction. See test_regalloc_simple for details.
 #[test]
-#[ignore = "Entry block params need Args instruction support"]
 fn test_regalloc_allocations_valid() {
     let test = LowerTest::from_lpir(
         r#"
@@ -252,7 +247,6 @@ block0(v0: i32, v1: i32, v2: i32):
 /// NOTE: This test currently fails because entry block parameters need to be
 /// defined by an Args instruction. See test_regalloc_simple for details.
 #[test]
-#[ignore = "Entry block params need Args instruction support"]
 fn test_regalloc_empty_function() {
     let test = LowerTest::from_lpir(
         r#"
@@ -276,7 +270,6 @@ block0:
 /// NOTE: This test currently fails because entry block parameters need to be
 /// defined by an Args instruction. See test_regalloc_simple for details.
 #[test]
-#[ignore = "Entry block params need Args instruction support"]
 fn test_regalloc_edits_sorted() {
     let test = LowerTest::from_lpir(
         r#"
@@ -324,7 +317,6 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32):
 /// NOTE: This test currently fails because entry block parameters need to be
 /// defined by an Args instruction. See test_regalloc_simple for details.
 #[test]
-#[ignore = "Entry block params need Args instruction support"]
 fn test_regalloc_invalid_ssa_validation() {
     // This test verifies that regalloc2 properly validates SSA form
     // Note: We can't easily create invalid SSA with our current infrastructure,
@@ -420,7 +412,6 @@ fn test_machine_env_creation() {
 /// NOTE: This test currently fails because entry block parameters need to be
 /// defined by an Args instruction. See test_regalloc_simple for details.
 #[test]
-#[ignore = "Entry block params need Args instruction support"]
 fn test_regalloc_multiple_blocks() {
     let test = LowerTest::from_lpir(
         r#"

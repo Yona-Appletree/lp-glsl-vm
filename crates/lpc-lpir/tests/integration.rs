@@ -146,6 +146,118 @@ block0(v0: i32, v1: i32):
 }
 
 #[test]
+fn test_bitwise_operations() {
+    // Build: fn bitwise_ops(a: i32, b: i32) -> i32 { (a & b) | (a ^ b) }
+    let sig = Signature::new(vec![Type::I32, Type::I32], vec![Type::I32]);
+    let expected = r#"function %bitwise_ops(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = iand v0, v1
+    v3 = ixor v0, v1
+    v4 = ior v2, v3
+    return v4
+}
+"#;
+    build_parse_roundtrip(
+        "bitwise_ops",
+        sig,
+        |builder| {
+            let entry_params: Vec<Value> = (0..2).map(|i| Value::new(i)).collect();
+            let entry_block = builder.block_with_params(entry_params.clone());
+            let a = entry_params[0];
+            let b = entry_params[1];
+            // Advance SSA counter to account for parameters
+            let _ = builder.new_value();
+            let _ = builder.new_value();
+            let and_result = builder.new_value();
+            let xor_result = builder.new_value();
+            let result = builder.new_value();
+
+            {
+                let mut block_builder = builder.block_builder(entry_block);
+                block_builder.iand(and_result, a, b);
+                block_builder.ixor(xor_result, a, b);
+                block_builder.ior(result, and_result, xor_result);
+                block_builder.return_(&vec![result]);
+            }
+        },
+        Some(expected),
+    );
+}
+
+#[test]
+fn test_bitwise_not() {
+    // Build: fn not_op(a: i32) -> i32 { ~a }
+    let sig = Signature::new(vec![Type::I32], vec![Type::I32]);
+    let expected = r#"function %not_op(i32) -> i32 {
+block0(v0: i32):
+    v1 = inot v0
+    return v1
+}
+"#;
+    build_parse_roundtrip(
+        "not_op",
+        sig,
+        |builder| {
+            let entry_params: Vec<Value> = vec![Value::new(0)];
+            let entry_block = builder.block_with_params(entry_params.clone());
+            let a = entry_params[0];
+            // Advance SSA counter to account for parameter
+            let _ = builder.new_value();
+            let result = builder.new_value();
+
+            {
+                let mut block_builder = builder.block_builder(entry_block);
+                block_builder.inot(result, a);
+                block_builder.return_(&vec![result]);
+            }
+        },
+        Some(expected),
+    );
+}
+
+#[test]
+fn test_shift_operations() {
+    // Build: fn shift_ops(a: i32, b: i32) -> i32 { (a << 2) >> 1 }
+    let sig = Signature::new(vec![Type::I32, Type::I32], vec![Type::I32]);
+    let expected = r#"function %shift_ops(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = iconst 2
+    v3 = ishl v0, v2
+    v4 = iconst 1
+    v5 = ishr v3, v4
+    return v5
+}
+"#;
+    build_parse_roundtrip(
+        "shift_ops",
+        sig,
+        |builder| {
+            let entry_params: Vec<Value> = (0..2).map(|i| Value::new(i)).collect();
+            let entry_block = builder.block_with_params(entry_params.clone());
+            let a = entry_params[0];
+            // Advance SSA counter to account for parameters
+            let _ = builder.new_value();
+            let _ = builder.new_value();
+            let shift2 = builder.new_value();
+            let shift_amount2 = builder.new_value();
+            let shifted = builder.new_value();
+            let shift_amount1 = builder.new_value();
+            let result = builder.new_value();
+
+            {
+                let mut block_builder = builder.block_builder(entry_block);
+                block_builder.iconst(shift_amount2, 2);
+                block_builder.ishl(shifted, a, shift_amount2);
+                block_builder.iconst(shift_amount1, 1);
+                block_builder.ishr(result, shifted, shift_amount1);
+                block_builder.return_(&vec![result]);
+            }
+        },
+        Some(expected),
+    );
+}
+
+#[test]
 fn test_conditional_branch() {
     // Build: fn abs(x: i32) -> i32 { if x < 0 { -x } else { x } }
     let sig = Signature::new(vec![Type::I32], vec![Type::I32]);

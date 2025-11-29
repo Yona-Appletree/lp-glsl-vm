@@ -98,6 +98,87 @@ pub trait InstBuilder<'f>: InstBuilderBase<'f> {
         result
     }
 
+    // Bitwise instructions - return Value
+
+    /// Bitwise AND: result = arg1 & arg2
+    fn iand(self, arg1: Value, arg2: Value) -> Value
+    where
+        Self: Sized,
+    {
+        let next_idx = self.data_flow_graph().next_value_index();
+        let result = Value::new(next_idx);
+        let _ = self.build(InstData::bitwise(Opcode::Iand, result, arg1, arg2));
+        result
+    }
+
+    /// Bitwise OR: result = arg1 | arg2
+    fn ior(self, arg1: Value, arg2: Value) -> Value
+    where
+        Self: Sized,
+    {
+        let next_idx = self.data_flow_graph().next_value_index();
+        let result = Value::new(next_idx);
+        let _ = self.build(InstData::bitwise(Opcode::Ior, result, arg1, arg2));
+        result
+    }
+
+    /// Bitwise XOR: result = arg1 ^ arg2
+    fn ixor(self, arg1: Value, arg2: Value) -> Value
+    where
+        Self: Sized,
+    {
+        let next_idx = self.data_flow_graph().next_value_index();
+        let result = Value::new(next_idx);
+        let _ = self.build(InstData::bitwise(Opcode::Ixor, result, arg1, arg2));
+        result
+    }
+
+    /// Bitwise NOT: result = ~arg
+    fn inot(self, arg: Value) -> Value
+    where
+        Self: Sized,
+    {
+        let next_idx = self.data_flow_graph().next_value_index();
+        let result = Value::new(next_idx);
+        let _ = self.build(InstData::bitwise_unary(Opcode::Inot, result, arg));
+        result
+    }
+
+    // Shift instructions - return Value
+
+    /// Left shift: result = arg1 << arg2
+    fn ishl(self, arg1: Value, arg2: Value) -> Value
+    where
+        Self: Sized,
+    {
+        let next_idx = self.data_flow_graph().next_value_index();
+        let result = Value::new(next_idx);
+        let _ = self.build(InstData::shift(Opcode::Ishl, result, arg1, arg2));
+        result
+    }
+
+    /// Logical right shift: result = arg1 >>> arg2 (unsigned)
+    fn ishr(self, arg1: Value, arg2: Value) -> Value
+    where
+        Self: Sized,
+    {
+        let next_idx = self.data_flow_graph().next_value_index();
+        let result = Value::new(next_idx);
+        let _ = self.build(InstData::shift(Opcode::Ishr, result, arg1, arg2));
+        result
+    }
+
+    /// Arithmetic right shift: result = arg1 >> arg2 (signed)
+    fn iashr(self, arg1: Value, arg2: Value) -> Value
+    where
+        Self: Sized,
+    {
+        let next_idx = self.data_flow_graph().next_value_index();
+        let result = Value::new(next_idx);
+        let _ = self.build(InstData::shift(Opcode::Iashr, result, arg1, arg2));
+        result
+    }
+
     // Comparison instructions - return Value
 
     /// Integer comparison: result = (arg1 cond arg2)
