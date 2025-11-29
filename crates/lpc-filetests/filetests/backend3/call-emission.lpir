@@ -14,7 +14,7 @@ block0(v0: i32):
 
 ; check: function %caller
 ; check: # Prologue
-; sameln: addi sp, sp, -8
+; nextln: addi sp, sp, -8
 ; check: # Call setup
 ; sameln: mv   a0, a0        # Pass argument (may be optimized away)
 ; sameln: auipc

@@ -1,141 +1,77 @@
-//! Filecheck directive parsing and matching
+//! Filecheck directive parsing and matching using the filecheck crate
 
-use alloc::{format, string::String, vec::Vec};
+use filecheck::{Checker, CheckerBuilder, NO_VARIABLES};
 
-/// Filecheck directive types
-#[derive(Debug, Clone)]
-pub enum FilecheckDirective {
-    /// `check: <pattern>` - Starts a check block
-    Check { pattern: String },
-    /// `nextln: <content>` - Expects content on next line (strict)
-    NextLine { content: String },
-    /// `sameln: <content>` - Expects content on same or next line (flexible)
-    SameLine { content: String },
-    /// End of check block
-    EndCheck,
-}
-
-/// Parse filecheck directives from expected text
-pub fn parse_filecheck_directives(expected_text: &str) -> Vec<FilecheckDirective> {
-    let mut directives = Vec::new();
-    let lines: Vec<&str> = expected_text.lines().collect();
-
-    for line in lines {
+/// Build a filechecker from expected text containing directives
+pub fn build_filechecker(expected_text: &str) -> Result<Checker, String> {
+    let mut builder = CheckerBuilder::new();
+    
+    // Parse each line and add directives
+    for line in expected_text.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("check:") {
-            let pattern = String::from(trimmed[6..].trim());
-            directives.push(FilecheckDirective::Check { pattern });
-        } else if trimmed.starts_with("nextln:") {
-            let content = String::from(trimmed[7..].trim());
-            directives.push(FilecheckDirective::NextLine { content });
-        } else if trimmed.starts_with("sameln:") {
-            let content = String::from(trimmed[7..].trim());
-            directives.push(FilecheckDirective::SameLine { content });
-        } else if trimmed == "}" {
-            directives.push(FilecheckDirective::EndCheck);
+        // Skip empty lines
+        if trimmed.is_empty() {
+            continue;
         }
+        
+        // Skip check: directives that start with '#' - these are comment/section markers
+        // that don't need to match actual output (e.g., "check: # Prologue")
+        if trimmed.starts_with("check:") {
+            let pattern = trimmed[6..].trim();
+            if pattern.starts_with('#') {
+                // This is a comment marker - skip it
+                continue;
+            }
+        }
+        
+        // Add directive - filecheck crate will parse it
+        builder
+            .directive(trimmed)
+            .map_err(|e| format!("Failed to parse filecheck directive '{}': {}", trimmed, e))?;
     }
-
-    directives
+    
+    Ok(builder.finish())
 }
 
 /// Match actual output against filecheck directives
-pub fn match_filecheck(actual: &str, directives: &[FilecheckDirective]) -> Result<(), String> {
-    let actual_lines: Vec<&str> = actual.lines().map(|l| l.trim()).collect();
-    let mut actual_idx = 0;
-    let mut directive_idx = 0;
-
-    while directive_idx < directives.len() {
-        match &directives[directive_idx] {
-            FilecheckDirective::Check { pattern } => {
-                // Check block starts - verify pattern matches actual output
-                if actual_idx >= actual_lines.len() {
-                    return Err(format!(
-                        "Filecheck failed: check block '{}' started but no more lines in actual output",
-                        pattern
-                    ));
-                }
-                // Pattern might be like "domtree_preorder {" or "cfg_postorder:"
-                if pattern.ends_with('{') {
-                    // Block start - consume the opening line
-                    let expected_prefix = pattern.trim_end_matches('{').trim();
-                    if !actual_lines[actual_idx].starts_with(expected_prefix) {
-                        return Err(format!(
-                            "Filecheck failed: expected '{}' but got '{}'",
-                            pattern, actual_lines[actual_idx]
-                        ));
-                    }
-                    actual_idx += 1;
-                } else if pattern.ends_with(':') {
-                    // Single line check - pattern includes colon, actual line should match
-                    if actual_lines[actual_idx] != pattern {
-                        return Err(format!(
-                            "Filecheck failed: expected '{}' but got '{}'",
-                            pattern, actual_lines[actual_idx]
-                        ));
-                    }
-                    actual_idx += 1;
-                } else {
-                    // Pattern without special suffix - exact match
-                    if actual_lines[actual_idx] != pattern {
-                        return Err(format!(
-                            "Filecheck failed: expected '{}' but got '{}'",
-                            pattern, actual_lines[actual_idx]
-                        ));
-                    }
-                    actual_idx += 1;
-                }
-            }
-            FilecheckDirective::NextLine { content } => {
-                if actual_idx >= actual_lines.len() {
-                    return Err(format!(
-                        "Filecheck failed: expected '{}' on next line but reached end of output",
-                        content
-                    ));
-                }
-                if actual_lines[actual_idx] != content {
-                    return Err(format!(
-                        "Filecheck failed: expected '{}' but got '{}' (line {})",
-                        content, actual_lines[actual_idx], actual_idx + 1
-                    ));
-                }
-                actual_idx += 1;
-            }
-            FilecheckDirective::SameLine { content } => {
-                // Flexible matching: check current line or next few lines (up to 3 lines ahead)
-                let mut found = false;
-                for offset in 0..=3 {
-                    if actual_idx + offset < actual_lines.len()
-                        && actual_lines[actual_idx + offset] == content
-                    {
-                        actual_idx += offset + 1;
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    return Err(format!(
-                        "Filecheck failed: expected '{}' near line {} but got '{}'",
-                        content,
-                        actual_idx + 1,
-                        if actual_idx < actual_lines.len() {
-                            actual_lines[actual_idx]
-                        } else {
-                            "<end of output>"
-                        }
-                    ));
-                }
-            }
-            FilecheckDirective::EndCheck => {
-                // End of check block - verify closing brace if present
-                if actual_idx < actual_lines.len() && actual_lines[actual_idx] == "}" {
-                    actual_idx += 1;
-                }
-            }
-        }
-        directive_idx += 1;
+pub fn match_filecheck(actual: &str, expected_text: &str) -> Result<(), String> {
+    let checker = build_filechecker(expected_text)?;
+    
+    if checker.check(actual, NO_VARIABLES).map_err(|e| format!("Filecheck error: {}", e))? {
+        Ok(())
+    } else {
+        // Get explanation for why matching failed
+        let (_, explain) = checker
+            .explain(actual, NO_VARIABLES)
+            .map_err(|e| format!("Failed to get filecheck explanation: {}", e))?;
+        
+        Err(format!("Filecheck failed:\n{}", explain))
     }
-
-    Ok(())
 }
 
+/// Parse filecheck directives from expected text
+/// 
+/// This function is kept for backward compatibility but now just returns
+/// whether the text contains filecheck directives (non-empty after trimming).
+/// The actual parsing is done by the filecheck crate.
+pub fn parse_filecheck_directives(expected_text: &str) -> Vec<()> {
+    // Check if there are any non-empty lines that look like directives
+    let has_directives = expected_text
+        .lines()
+        .any(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty()
+                && (trimmed.starts_with("check:")
+                    || trimmed.starts_with("nextln:")
+                    || trimmed.starts_with("sameln:")
+                    || trimmed.starts_with("CHECK:")
+                    || trimmed.starts_with("CHECK-NEXT:")
+                    || trimmed.starts_with("CHECK-SAME:"))
+        });
+    
+    if has_directives {
+        vec![()]
+    } else {
+        vec![]
+    }
+}

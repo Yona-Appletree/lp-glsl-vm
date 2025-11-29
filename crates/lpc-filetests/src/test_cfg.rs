@@ -1,10 +1,7 @@
 //! The `print-cfg` subtest - CFG construction tests
 
-extern crate alloc;
-
-use crate::filecheck::{match_filecheck, parse_filecheck_directives};
+use crate::filecheck::match_filecheck;
 use crate::parser::{normalize_ir, parse_test_file};
-use alloc::{format, string::String, vec::Vec};
 use lpc_lpir::{parse_function, ControlFlowGraph};
 
 /// Run tests from cfg test files
@@ -50,8 +47,7 @@ fn run_print_cfg_test(function_text: &str, expected_text: &str) {
     let cfg = ControlFlowGraph::from_function(&func);
 
     // Check if expected_text contains filecheck directives
-    let directives = parse_filecheck_directives(expected_text);
-    if !directives.is_empty() {
+    if !expected_text.trim().is_empty() {
         // Use filecheck matching
         let mut actual_output = Vec::new();
 
@@ -74,7 +70,7 @@ fn run_print_cfg_test(function_text: &str, expected_text: &str) {
         }
 
         let actual = actual_output.join("\n");
-        if let Err(e) = match_filecheck(&actual, &directives) {
+        if let Err(e) = match_filecheck(&actual, expected_text) {
             panic!(
                 "Print-cfg test failed (filecheck): {}\n\nExpected:\n{}\n\nActual:\n{}\n\nFunction:\n{}",
                 e, expected_text, actual, function_text

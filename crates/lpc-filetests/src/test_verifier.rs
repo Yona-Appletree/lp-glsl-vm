@@ -1,9 +1,7 @@
 //! The `verifier` subtest - verifier error detection tests
 
-extern crate alloc;
-
 use crate::parser::parse_test_file;
-use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
+use std::collections::BTreeMap;
 use lpc_lpir::{parse_function, verify};
 
 /// Run tests from verifier test files

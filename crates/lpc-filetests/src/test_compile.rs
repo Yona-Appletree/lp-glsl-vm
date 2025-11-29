@@ -3,16 +3,11 @@
 //! Tests that LPIR functions compile correctly through the backend3 pipeline
 //! and emit expected RISC-V 32 assembly code.
 
-extern crate alloc;
-
-use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
+use std::collections::BTreeMap;
 
 use lpc_lpir::parse_function;
 
-use crate::{
-    filecheck::{match_filecheck, parse_filecheck_directives},
-    parser::parse_test_file,
-};
+use crate::{filecheck::match_filecheck, parser::parse_test_file};
 
 /// Run tests from compile test files
 #[allow(dead_code)]
@@ -65,7 +60,8 @@ fn run_compile_test(function_text: &str, expected_text: &str) {
         let code_bytes = buffer.as_bytes();
         let labels = build_label_map(&buffer, func_name);
         use lpc_codegen::disassemble_code_with_labels;
-        let disasm = disassemble_code_with_labels(&code_bytes, Some(&labels));
+        // Don't include addresses in test output
+        let disasm = disassemble_code_with_labels(&code_bytes, Some(&labels), false);
 
         // Add function header and disassembly to output
         all_emitted_code.push(format!("function %{}", func_name));
@@ -75,10 +71,9 @@ fn run_compile_test(function_text: &str, expected_text: &str) {
     let actual_output = all_emitted_code.join("\n");
 
     // Check if expected_text contains filecheck directives
-    let directives = parse_filecheck_directives(expected_text);
-    if !directives.is_empty() {
+    if !expected_text.trim().is_empty() {
         // Use filecheck matching
-        if let Err(e) = match_filecheck(&actual_output, &directives) {
+        if let Err(e) = match_filecheck(&actual_output, expected_text) {
             panic!(
                 "Compile test failed (filecheck): \
                  {}\n\nExpected:\n{}\n\nActual:\n{}\n\nFunction:\n{}",

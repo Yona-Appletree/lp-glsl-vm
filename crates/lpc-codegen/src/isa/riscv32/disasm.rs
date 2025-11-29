@@ -164,7 +164,7 @@ fn disassemble_instruction_with_labels(
 /// Returns a formatted string with one instruction per line, showing
 /// the address/offset and the disassembled instruction.
 pub fn disassemble_code(code: &[u8]) -> String {
-    disassemble_code_with_labels(code, None)
+    disassemble_code_with_labels(code, None, true)
 }
 
 /// Disassemble a code buffer containing RISC-V instructions with label support.
@@ -173,11 +173,16 @@ pub fn disassemble_code(code: &[u8]) -> String {
 ///
 /// * `code` - Binary code buffer to disassemble
 /// * `labels` - Optional map of address -> label name
+/// * `include_addresses` - Whether to include address prefixes (0x0000:) in output
 ///
 /// Returns a formatted string with labels printed at their addresses and
 /// used in branch/jump instructions. Auto-generates indexed labels for
 /// branch/jump targets if not provided.
-pub fn disassemble_code_with_labels(code: &[u8], labels: Option<&BTreeMap<u32, String>>) -> String {
+pub fn disassemble_code_with_labels(
+    code: &[u8],
+    labels: Option<&BTreeMap<u32, String>>,
+    include_addresses: bool,
+) -> String {
     let mut result = String::new();
     let mut offset = 0;
 
@@ -277,7 +282,11 @@ pub fn disassemble_code_with_labels(code: &[u8], labels: Option<&BTreeMap<u32, S
             None
         };
         let disasm = disassemble_instruction_with_labels(inst, offset_u32, labels_for_inst);
-        result.push_str(&format!("0x{:04x}: {}\n", offset, disasm));
+        if include_addresses {
+            result.push_str(&format!("0x{:04x}: {}\n", offset, disasm));
+        } else {
+            result.push_str(&format!("{}\n", disasm));
+        }
 
         offset += 4;
     }
@@ -288,7 +297,11 @@ pub fn disassemble_code_with_labels(code: &[u8], labels: Option<&BTreeMap<u32, S
         if let Some(label_name) = all_labels.get(&offset_u32) {
             result.push_str(&format!("{}:\n", label_name));
         }
-        result.push_str(&format!("0x{:04x}: <incomplete instruction>\n", offset));
+        if include_addresses {
+            result.push_str(&format!("0x{:04x}: <incomplete instruction>\n", offset));
+        } else {
+            result.push_str("<incomplete instruction>\n");
+        }
     }
 
     result
@@ -409,7 +422,7 @@ mod tests {
         code.extend_from_slice(&addi(Gpr::A0, Gpr::A0, 1).to_le_bytes());
 
         let labels = BTreeMap::from([(0x0008, "loop".to_string())]);
-        let disasm = disassemble_code_with_labels(&code, Some(&labels));
+        let disasm = disassemble_code_with_labels(&code, Some(&labels), true);
 
         assert!(disasm.contains("loop:"));
         assert!(disasm.contains("beq"));
@@ -424,7 +437,7 @@ mod tests {
         code.extend_from_slice(&jal(Gpr::Ra, 8).to_le_bytes());
         code.extend_from_slice(&addi(Gpr::A0, Gpr::A0, 1).to_le_bytes());
 
-        let disasm = disassemble_code_with_labels(&code, None);
+        let disasm = disassemble_code_with_labels(&code, None, true);
         // Should auto-generate label_2 for the jal target
         assert!(disasm.contains("label_"));
         assert!(disasm.contains("jal"));
@@ -456,7 +469,7 @@ mod tests {
 
         // Disassemble with labels
         let labels = BTreeMap::from([(0x0004, "loop".to_string())]);
-        let disasm = disassemble_code_with_labels(&code, Some(&labels));
+        let disasm = disassemble_code_with_labels(&code, Some(&labels), true);
 
         assert!(disasm.contains("loop:"));
         assert!(disasm.contains("beq"));

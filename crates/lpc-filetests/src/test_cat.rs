@@ -1,9 +1,6 @@
 //! The `cat` subtest - roundtrip parse/print tests
 
-extern crate alloc;
-
 use crate::parser::{normalize_ir, parse_test_file};
-use alloc::format;
 use lpc_lpir::parse_function;
 
 /// Run tests from cat test files

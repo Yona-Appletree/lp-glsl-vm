@@ -1,10 +1,8 @@
 //! The `domtree` subtest - dominator tree tests
 
-extern crate alloc;
-
-use crate::filecheck::{match_filecheck, parse_filecheck_directives};
+use crate::filecheck::match_filecheck;
 use crate::parser::parse_test_file;
-use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
+use std::collections::BTreeMap;
 use lpc_lpir::{parse_function, ControlFlowGraph, DominatorTree};
 
 /// Run tests from domtree test files
@@ -133,8 +131,7 @@ fn run_domtree_test(function_text: &str, expected_text: &str) {
     let domtree = DominatorTree::from_cfg(&cfg);
 
     // Check if expected_text contains filecheck directives
-    let directives = parse_filecheck_directives(expected_text);
-    if !directives.is_empty() {
+    if !expected_text.trim().is_empty() {
         // Use filecheck matching
         let mut actual_output: Vec<String> = Vec::new();
 
@@ -158,7 +155,7 @@ fn run_domtree_test(function_text: &str, expected_text: &str) {
         }
 
         let actual = actual_output.join("\n");
-        if let Err(e) = match_filecheck(&actual, &directives) {
+        if let Err(e) = match_filecheck(&actual, expected_text) {
             panic!(
                 "Domtree test failed (filecheck): {}\n\nExpected:\n{}\n\nActual:\n{}\n\nFunction:\n{}",
                 e, expected_text, actual, function_text

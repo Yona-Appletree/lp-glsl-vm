@@ -7,4 +7,5 @@ publish = false
 [dependencies]
 lpc-codegen = { path = "../lpc-codegen" }
 lpc-lpir = { path = "../lpc-lpir" }
+filecheck = "0.4"
 

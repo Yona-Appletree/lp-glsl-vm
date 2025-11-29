@@ -1,7 +1,5 @@
 //! Test file parsing
 
-use alloc::{string::String, vec::Vec};
-
 /// A test case extracted from a test file
 #[derive(Debug, Clone)]
 pub struct TestCase {
