@@ -247,10 +247,8 @@ fn test_logical_and() {
         "and",
         r#"
         function %and(u32, u32) -> u32 {
-        block0(v0: i32, v1: i32):
-            v3 = imul v0, v1
-            v4 = iconst 0
-            v2 = icmp ne v3, v4
+        block0(v0: u32, v1: u32):
+            v2 = iand v0, v1
             return v2
         }
     "#,
@@ -270,10 +268,8 @@ fn test_logical_or() {
         "or",
         r#"
         function %or(u32, u32) -> u32 {
-        block0(v0: i32, v1: i32):
-            v3 = iadd v0, v1
-            v4 = iconst 0
-            v2 = icmp ne v3, v4
+        block0(v0: u32, v1: u32):
+            v2 = ior v0, v1
             return v2
         }
     "#,
@@ -315,7 +311,7 @@ fn test_unary_not() {
         "not",
         r#"
         function %not(u32) -> u32 {
-        block0(v0: i32):
+        block0(v0: u32):
             v2 = iconst 0
             v1 = icmp eq v0, v2
             return v1

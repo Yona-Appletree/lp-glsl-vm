@@ -105,7 +105,6 @@ fn test_while_nested() {
             v4 = iconst 3
             v5 = icmp slt v3, v4
             brif v5, block3, block4
-            jump block6
         block2:
             return v0
         block3:
@@ -115,6 +114,7 @@ fn test_while_nested() {
         block4:
             v10 = iconst 1
             v11 = iadd v0, v10
+            jump block6
         block5:
             v8 = iconst 3
             v9 = icmp slt v3, v8

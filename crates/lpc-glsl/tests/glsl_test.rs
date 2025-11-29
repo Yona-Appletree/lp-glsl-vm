@@ -8,7 +8,7 @@ extern crate alloc;
 use alloc::{string::String, vec::Vec};
 
 use lpc_glsl::{parse_glsl, CodeGen, GlslError, GlslResult, GlslType, TypeChecker};
-use lpc_lpir::{Function, Signature, Type as LpirType};
+use lpc_lpir::{verify, Function, Signature, Type as LpirType, VerifierError};
 
 /// Test helper for GLSL compilation and LPIR verification.
 pub struct GlslTest {
@@ -47,6 +47,26 @@ impl GlslTest {
 
             // Store function
             let func = codegen.finish();
+            
+            // Validate generated LPIR
+            if let Err(errors) = verify(&func, None) {
+                let error_msgs: Vec<String> = errors
+                    .iter()
+                    .map(|e: &VerifierError| {
+                        if let Some(loc) = &e.location {
+                            format!("  {}: {}", loc, e.message)
+                        } else {
+                            format!("  {}", e.message)
+                        }
+                    })
+                    .collect();
+                return Err(GlslError::codegen(format!(
+                    "LPIR validation failed for function '{}':\n{}",
+                    func_info.name,
+                    error_msgs.join("\n")
+                )));
+            }
+            
             functions.push((func_info.name.clone(), func));
         }
 
@@ -57,8 +77,11 @@ impl GlslTest {
     ///
     /// # Panics
     ///
-    /// Panics if the function is not found or if the LPIR doesn't match.
+    /// Panics if the function is not found, if validation fails, or if the LPIR doesn't match.
     pub fn assert_lpir(&self, function_name: &str, expected_lpir: &str) {
+        // Validate first
+        self.validate_function(function_name);
+
         // Find function by name
         let (_, func) = self
             .functions
@@ -86,6 +109,35 @@ impl GlslTest {
                 function_name,
                 normalized_expected.join("\n"),
                 normalized_actual.join("\n")
+            );
+        }
+    }
+
+    /// Validate that a function is well-formed LPIR.
+    ///
+    /// # Panics
+    ///
+    /// Panics if validation fails, with detailed error messages.
+    pub fn validate_function(&self, function_name: &str) {
+        let func = self
+            .get_function(function_name)
+            .unwrap_or_else(|| panic!("Function '{}' not found", function_name));
+
+        if let Err(errors) = verify(func, None) {
+            let error_msgs: Vec<String> = errors
+                .iter()
+                .map(|e: &VerifierError| {
+                    if let Some(loc) = &e.location {
+                        format!("  {}: {}", loc, e.message)
+                    } else {
+                        format!("  {}", e.message)
+                    }
+                })
+                .collect();
+            panic!(
+                "LPIR validation failed for function '{}':\n{}",
+                function_name,
+                error_msgs.join("\n")
             );
         }
     }

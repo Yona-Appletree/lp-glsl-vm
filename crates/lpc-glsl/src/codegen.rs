@@ -9,7 +9,7 @@ use glsl::syntax::{
     CompoundStatement, Declaration, Expr, ForInitStatement, FunctionDefinition, IterationStatement,
     JumpStatement, SelectionRestStatement, SelectionStatement, SimpleStatement, Statement,
 };
-use lpc_lpir::{BlockEntity, Function, FunctionBuilder, Signature, Type as LpirType, Value};
+use lpc_lpir::{BlockEntity, Function, FunctionBuilder, Opcode, Signature, Type, Value};
 
 use crate::{
     error::{GlslError, GlslResult},
@@ -59,8 +59,20 @@ impl CodeGen {
 
         // Create entry block with parameters
         let mut entry_params = Vec::new();
-        for (idx, _param) in func_def.prototype.parameters.iter().enumerate() {
-            entry_params.push(Value::new(idx as u32));
+        let mut param_types = Vec::new();
+        
+        for param_decl in &func_def.prototype.parameters {
+            let param_idx = entry_params.len() as u32;
+            let param_value = Value::new(param_idx);
+            entry_params.push(param_value);
+            
+            // Extract parameter type
+            if let glsl::syntax::FunctionParameterDeclaration::Named(_, declarator) = param_decl {
+                let glsl_type = Self::extract_type_from_specifier(&declarator.ty)
+                    .ok_or_else(|| GlslError::codegen("Unsupported parameter type"))?;
+                let lpir_type = glsl_type.to_lpir();
+                param_types.push(lpir_type);
+            }
         }
 
         let entry_block = if entry_params.is_empty() {
@@ -68,6 +80,19 @@ impl CodeGen {
         } else {
             self.builder.block_with_params(entry_params.clone())
         };
+        
+        // Set parameter types in block data
+        if !entry_params.is_empty() {
+            if let Some(block_data) = self.builder.function_mut().block_data_mut(entry_block) {
+                block_data.param_types = param_types.clone();
+            }
+            
+            // Set value types in DFG for parameters
+            for (param_value, param_type) in entry_params.iter().zip(param_types.iter()) {
+                self.builder.function_mut().dfg.set_value_type(*param_value, *param_type);
+            }
+        }
+        
         self.current_block = Some(entry_block);
 
         // Advance SSA counter past parameters
@@ -218,6 +243,9 @@ impl CodeGen {
                 let value = self.builder.new_value();
                 let mut block_builder = self.builder.block_builder(block);
                 block_builder.iconst(value, if *b { 1 } else { 0 });
+                // Bool maps to u32 in LPIR, so set the type explicitly
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(value, Type::U32);
                 Ok(value)
             }
             Expr::UIntConst(_) | Expr::FloatConst(_) | Expr::DoubleConst(_) => {
@@ -332,9 +360,16 @@ impl CodeGen {
             }
             glsl::syntax::UnaryOp::Not => {
                 // Logical not: result = operand == 0 ? 1 : 0
-                // For simplicity, we'll use: result = operand == 0
+                // Use icmp_eq to compare with zero
                 block_builder.iconst(zero, 0);
+                // Set zero to u32 type to match operand (bool is u32)
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(zero, Type::U32);
+                let mut block_builder = self.builder.block_builder(block);
                 block_builder.icmp_eq(result, operand, zero);
+                // Bool maps to u32 in LPIR
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(result, Type::U32);
                 Ok(result)
             }
             _ => Err(GlslError::codegen("Unsupported unary operator")),
@@ -375,52 +410,62 @@ impl CodeGen {
             }
             glsl::syntax::BinaryOp::LT => {
                 block_builder.icmp_lt(result, left, right);
+                // Bool maps to u32 in LPIR
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(result, Type::U32);
                 Ok(result)
             }
             glsl::syntax::BinaryOp::GT => {
                 block_builder.icmp_gt(result, left, right);
+                // Bool maps to u32 in LPIR
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(result, Type::U32);
                 Ok(result)
             }
             glsl::syntax::BinaryOp::LTE => {
                 block_builder.icmp_le(result, left, right);
+                // Bool maps to u32 in LPIR
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(result, Type::U32);
                 Ok(result)
             }
             glsl::syntax::BinaryOp::GTE => {
                 block_builder.icmp_ge(result, left, right);
+                // Bool maps to u32 in LPIR
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(result, Type::U32);
                 Ok(result)
             }
             glsl::syntax::BinaryOp::Equal => {
                 block_builder.icmp_eq(result, left, right);
+                // Bool maps to u32 in LPIR
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(result, Type::U32);
                 Ok(result)
             }
             glsl::syntax::BinaryOp::NonEqual => {
                 block_builder.icmp_ne(result, left, right);
+                // Bool maps to u32 in LPIR
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(result, Type::U32);
                 Ok(result)
             }
             glsl::syntax::BinaryOp::And => {
                 // Logical AND: both must be non-zero
-                // result = (left != 0) && (right != 0)
-                // For simplicity, we'll use multiplication: result = left * right != 0
-                drop(block_builder); // Release borrow
-                let prod = self.builder.new_value();
-                let zero = self.builder.new_value();
-                let mut block_builder = self.builder.block_builder(block);
-                block_builder.imul(prod, left, right);
-                block_builder.iconst(zero, 0);
-                block_builder.icmp_ne(result, prod, zero);
+                // Since bool is u32 (0 or 1), bitwise AND works perfectly for logical AND
+                block_builder.iand(result, left, right);
+                // Bool maps to u32 in LPIR
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(result, Type::U32);
                 Ok(result)
             }
             glsl::syntax::BinaryOp::Or => {
                 // Logical OR: at least one must be non-zero
-                // result = (left != 0) || (right != 0)
-                // For simplicity: result = (left + right) != 0
-                drop(block_builder); // Release borrow
-                let sum = self.builder.new_value();
-                let zero = self.builder.new_value();
-                let mut block_builder = self.builder.block_builder(block);
-                block_builder.iadd(sum, left, right);
-                block_builder.iconst(zero, 0);
-                block_builder.icmp_ne(result, sum, zero);
+                // Since bool is u32 (0 or 1), bitwise OR works perfectly for logical OR
+                block_builder.ior(result, left, right);
+                // Bool maps to u32 in LPIR
+                drop(block_builder);
+                self.builder.function_mut().dfg.set_value_type(result, Type::U32);
                 Ok(result)
             }
             _ => Err(GlslError::codegen("Unsupported binary operator")),
@@ -436,7 +481,6 @@ impl CodeGen {
         let block = self.current_block.expect("No current block");
         let true_block = self.builder.create_block();
         let false_block = self.builder.create_block();
-        let merge_block = self.builder.create_block();
 
         // Now get block builder for branch instruction
         let mut block_builder = self.builder.block_builder(block);
@@ -453,29 +497,100 @@ impl CodeGen {
         match &sel.rest {
             SelectionRestStatement::Statement(true_stmt) => {
                 self.generate_statement(true_stmt)?;
-                // Jump to merge block
-                let mut true_block_builder = self.builder.block_builder(true_block);
-                true_block_builder.jump(merge_block, &Vec::new());
+                // Check what block we ended up in after generating the statement
+                let true_end_block = self.current_block.expect("No current block after true branch");
+                let true_ends_with_return_or_halt = self.block_ends_with_return_or_halt(true_end_block);
+                
+                // Create merge block - we always need it for the false branch
+                let merge_block = self.builder.create_block();
+                
+                if !true_ends_with_return_or_halt {
+                    // Need to jump to merge block from wherever we ended up
+                    if true_end_block != true_block {
+                        // Statement ended in a different block (e.g., for loop exit) - jump from there
+                        let mut end_block_builder = self.builder.block_builder(true_end_block);
+                        end_block_builder.jump(merge_block, &Vec::new());
+                    } else {
+                        // Statement ended in true_block - jump from there
+                        let mut true_block_builder = self.builder.block_builder(true_block);
+                        true_block_builder.jump(merge_block, &Vec::new());
+                    }
+                }
+                
+                // False branch is empty - jump directly to merge block
+                let mut false_block_builder = self.builder.block_builder(false_block);
+                false_block_builder.jump(merge_block, &Vec::new());
+                
+                // Continue in merge block
+                self.current_block = Some(merge_block);
             }
             SelectionRestStatement::Else(true_stmt, false_stmt) => {
                 self.generate_statement(true_stmt)?;
-                // Jump to merge block
-                let mut true_block_builder = self.builder.block_builder(true_block);
-                true_block_builder.jump(merge_block, &Vec::new());
+                // Check what block we ended up in after generating the statement
+                let true_end_block = self.current_block.expect("No current block after true branch");
+                let true_ends_with_return_or_halt = self.block_ends_with_return_or_halt(true_end_block);
 
                 // Generate false branch
                 self.current_block = Some(false_block);
                 self.generate_statement(false_stmt)?;
-                // Jump to merge block
-                let mut false_block_builder = self.builder.block_builder(false_block);
-                false_block_builder.jump(merge_block, &Vec::new());
+                // Check what block we ended up in after generating the statement
+                let false_end_block = self.current_block.expect("No current block after false branch");
+                let false_ends_with_return_or_halt = self.block_ends_with_return_or_halt(false_end_block);
+                
+                // Only create merge block if at least one branch doesn't return/halt
+                if !true_ends_with_return_or_halt || !false_ends_with_return_or_halt {
+                    let merge_block = self.builder.create_block();
+                    
+                    if !true_ends_with_return_or_halt {
+                        // Need to jump to merge block from wherever we ended up
+                        if true_end_block != true_block {
+                            // Statement ended in a different block (e.g., merge block from nested if) - jump from there
+                            let mut end_block_builder = self.builder.block_builder(true_end_block);
+                            end_block_builder.jump(merge_block, &Vec::new());
+                        } else {
+                            // Statement ended in true_block - jump from there
+                            let mut true_block_builder = self.builder.block_builder(true_block);
+                            true_block_builder.jump(merge_block, &Vec::new());
+                        }
+                    }
+                    
+                    if !false_ends_with_return_or_halt {
+                        // Need to jump to merge block from wherever we ended up
+                        if false_end_block != false_block {
+                            // Statement ended in a different block - jump from there
+                            let mut end_block_builder = self.builder.block_builder(false_end_block);
+                            end_block_builder.jump(merge_block, &Vec::new());
+                        } else {
+                            // Statement ended in false_block - jump from there
+                            let mut false_block_builder = self.builder.block_builder(false_block);
+                            false_block_builder.jump(merge_block, &Vec::new());
+                        }
+                    }
+                    
+                    // Continue in merge block
+                    self.current_block = Some(merge_block);
+                }
+                // If both branches return/halt, we don't create a merge block and current_block
+                // is left pointing to the false_end_block (which has return/halt)
             }
-        }
-
-        // Continue in merge block
-        self.current_block = Some(merge_block);
+        };
 
         Ok(())
+    }
+
+    /// Check if a block ends with a return or halt instruction (i.e., is unreachable).
+    fn block_ends_with_return_or_halt(&mut self, block: BlockEntity) -> bool {
+        let func = self.builder.function_mut();
+        let insts: Vec<_> = func.block_insts(block).collect();
+        if let Some(last_inst) = insts.last() {
+            if let Some(inst_data) = func.dfg.inst_data(*last_inst) {
+                matches!(inst_data.opcode, Opcode::Return | Opcode::Halt)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 
     /// Generate LPIR for an iteration statement (for/while).
@@ -507,11 +622,23 @@ impl CodeGen {
                 self.current_block = Some(body_block);
                 self.generate_statement(body)?;
 
+                // Check what block we ended up in after generating the body
+                let body_end_block = self.current_block.expect("No current block after body");
+                
                 // Jump back to condition (we'll need to regenerate condition)
                 // For simplicity, we'll jump to a new condition block
                 let new_cond_block = self.builder.create_block();
-                let mut body_block_builder = self.builder.block_builder(body_block);
-                body_block_builder.jump(new_cond_block, &Vec::new());
+                
+                // Jump from wherever the body ended (could be body_block or a merge block from nested control flow)
+                if body_end_block != body_block {
+                    // Body ended in a different block (e.g., merge block from nested if/while) - jump from there
+                    let mut end_block_builder = self.builder.block_builder(body_end_block);
+                    end_block_builder.jump(new_cond_block, &Vec::new());
+                } else {
+                    // Body ended in body_block - jump from there
+                    let mut body_block_builder = self.builder.block_builder(body_block);
+                    body_block_builder.jump(new_cond_block, &Vec::new());
+                }
 
                 // Generate condition again in new block
                 self.current_block = Some(new_cond_block);
@@ -570,7 +697,14 @@ impl CodeGen {
                 let cond_block = self.builder.create_block();
                 let body_block = self.builder.create_block();
                 let inc_block = self.builder.create_block();
-                let exit_block = self.builder.create_block();
+                
+                // Check if condition exists - if not, exit_block is unreachable
+                let has_condition = rest.condition.is_some();
+                let exit_block = if has_condition {
+                    Some(self.builder.create_block())
+                } else {
+                    None
+                };
 
                 // Generate initialization
                 match init {
@@ -608,16 +742,30 @@ impl CodeGen {
                 };
 
                 let mut cond_builder = self.builder.block_builder(cond_block);
-                // Branch: if condition, go to body, else exit
-                cond_builder.br(cond_value, body_block, &Vec::new(), exit_block, &Vec::new());
+                // Branch: if condition, go to body, else exit (if exit exists)
+                if let Some(exit) = exit_block {
+                    cond_builder.br(cond_value, body_block, &Vec::new(), exit, &Vec::new());
+                } else {
+                    // No exit block - always jump to body (condition is always true)
+                    cond_builder.jump(body_block, &Vec::new());
+                }
 
                 // Generate body
                 self.current_block = Some(body_block);
                 self.generate_statement(body)?;
-
-                // Jump to increment
-                let mut body_block_builder = self.builder.block_builder(body_block);
-                body_block_builder.jump(inc_block, &Vec::new());
+                
+                // If body ended in a different block (e.g., merge block from nested if),
+                // we need to jump from that block to increment
+                let body_end_block = self.current_block.expect("No current block after body");
+                if body_end_block != body_block {
+                    // Body ended in a merge block - jump to increment
+                    let mut merge_builder = self.builder.block_builder(body_end_block);
+                    merge_builder.jump(inc_block, &Vec::new());
+                } else {
+                    // Body ended in body_block - jump to increment
+                    let mut body_block_builder = self.builder.block_builder(body_block);
+                    body_block_builder.jump(inc_block, &Vec::new());
+                }
 
                 // Generate increment
                 self.current_block = Some(inc_block);
@@ -629,8 +777,14 @@ impl CodeGen {
                 let mut inc_builder = self.builder.block_builder(inc_block);
                 inc_builder.jump(cond_block, &Vec::new());
 
-                // Continue in exit block
-                self.current_block = Some(exit_block);
+                // Exit block will be continued by the next statement
+                if let Some(exit) = exit_block {
+                    self.current_block = Some(exit);
+                } else {
+                    // No exit block - body always continues, so current_block stays at inc_block
+                    // But actually, after the jump, we're done with the loop
+                    // The function should end with a return, so this is fine
+                }
 
                 Ok(())
             }
@@ -668,6 +822,13 @@ impl CodeGen {
     ) -> Option<GlslType> {
         GlslType::from_glsl_type_specifier(&ty.ty.ty)
     }
+
+    /// Extract type from type specifier (helper method).
+    fn extract_type_from_specifier(
+        ty: &glsl::syntax::TypeSpecifier,
+    ) -> Option<GlslType> {
+        GlslType::from_glsl_type_specifier(&ty.ty)
+    }
 }
 
 #[cfg(test)]
@@ -697,7 +858,7 @@ mod tests {
             .unwrap();
 
         // Generate code
-        let sig = Signature::new(vec![LpirType::I32, LpirType::I32], vec![LpirType::I32]);
+        let sig = Signature::new(vec![Type::I32, Type::I32], vec![Type::I32]);
         let mut codegen = CodeGen::new(String::from("add"), sig);
         codegen
             .generate_function(&functions[0].definition, checker.symbols())
@@ -723,7 +884,7 @@ mod tests {
             .type_check_function_body(&functions[0].definition)
             .unwrap();
 
-        let sig = Signature::new(vec![], vec![LpirType::I32]);
+        let sig = Signature::new(vec![], vec![Type::I32]);
         let mut codegen = CodeGen::new(String::from("main"), sig);
         codegen
             .generate_function(&functions[0].definition, checker.symbols())

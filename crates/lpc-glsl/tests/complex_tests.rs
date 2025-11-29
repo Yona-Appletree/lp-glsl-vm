@@ -27,15 +27,12 @@ fn test_factorial() {
         block1:
             v3 = iconst 1
             return v3
-            jump block3
         block2:
             v4 = iconst 1
             v5 = isub v0, v4
             call %factorial(v5) -> v6
             v7 = imul v0, v6
             return v7
-            jump block3
-        block3:
         }
     "#,
     );
@@ -64,7 +61,6 @@ fn test_fibonacci() {
             brif v2, block1, block2
         block1:
             return v0
-            jump block3
         block2:
             v3 = iconst 1
             v4 = isub v0, v3
@@ -74,8 +70,6 @@ fn test_fibonacci() {
             call %fibonacci(v7) -> v8
             v9 = iadd v5, v8
             return v9
-            jump block3
-        block3:
         }
     "#,
     );
@@ -109,31 +103,33 @@ fn test_nested_control_flow() {
             brif v3, block1, block2
         block1:
             v4 = iconst 0
-            jump block4
             jump block3
         block2:
+            jump block10
         block3:
-            return v1
-        block4:
             v5 = icmp slt v4, v0
-            brif v5, block5, block7
-        block5:
+            brif v5, block4, block6
+        block4:
             v6 = iconst 2
             v7 = irem v4, v6
             v8 = iconst 0
             v9 = icmp eq v7, v8
-            brif v9, block8, block9
-            jump block6
-        block6:
+            brif v9, block7, block8
+        block5:
             v11 = iconst 1
             v12 = iadd v4, v11
-            jump block4
-        block7:
-        block8:
-            v10 = iadd v1, v4
+            jump block3
+        block6:
             jump block10
+        block7:
+            v10 = iadd v1, v4
+            jump block9
+        block8:
+            jump block9
         block9:
+            jump block5
         block10:
+            return v1
         }
     "#,
     );
@@ -163,4 +159,3 @@ fn test_mixed_expressions() {
     "#,
     );
 }
-

@@ -102,22 +102,21 @@ fn test_for_no_condition() {
             jump block1
         block1:
             v1 = iconst 1
-            brif v1, block2, block4
+            jump block2
         block2:
             v2 = iconst 10
             v3 = icmp sge v0, v2
-            brif v3, block5, block6
-            jump block3
+            brif v3, block4, block5
         block3:
             v4 = iconst 1
             v5 = iadd v0, v4
             jump block1
         block4:
-        block5:
             return v0
-            jump block7
+        block5:
+            jump block6
         block6:
-        block7:
+            jump block3
         }
     "#,
     );
@@ -192,7 +191,6 @@ fn test_for_nested() {
         block2:
             v4 = iconst 0
             jump block5
-            jump block3
         block3:
             v11 = iconst 1
             v12 = iadd v1, v11
@@ -212,8 +210,8 @@ fn test_for_nested() {
             v10 = iadd v4, v9
             jump block5
         block8:
+            jump block3
         }
     "#,
     );
 }
-

@@ -137,15 +137,12 @@ fn test_function_recursive() {
         block1:
             v3 = iconst 1
             return v3
-            jump block3
         block2:
             v4 = iconst 1
             v5 = isub v0, v4
             call %factorial(v5) -> v6
             v7 = imul v0, v6
             return v7
-            jump block3
-        block3:
         }
     "#,
     );

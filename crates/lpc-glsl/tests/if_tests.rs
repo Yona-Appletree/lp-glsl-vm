@@ -25,8 +25,8 @@ fn test_if_simple() {
         block1:
             v1 = iconst 1
             return v1
-            jump block3
         block2:
+            jump block3
         block3:
             v2 = iconst 0
             return v2
@@ -52,17 +52,14 @@ fn test_if_else() {
         "main",
         r#"
         function %main(u32) -> i32 {
-        block0(v0: i32):
+        block0(v0: u32):
             brif v0, block1, block2
         block1:
             v1 = iconst 1
             return v1
-            jump block3
         block2:
             v2 = iconst 0
             return v2
-            jump block3
-        block3:
         }
     "#,
     );
@@ -89,25 +86,19 @@ fn test_if_nested() {
         "main",
         r#"
         function %main(u32, u32) -> i32 {
-        block0(v0: i32, v1: i32):
+        block0(v0: u32, v1: u32):
             brif v0, block1, block2
         block1:
-            brif v1, block4, block5
-            jump block3
+            brif v1, block3, block4
         block2:
             v4 = iconst 0
             return v4
-            jump block3
         block3:
-        block4:
             v2 = iconst 2
             return v2
-            jump block6
-        block5:
+        block4:
             v3 = iconst 1
             return v3
-            jump block6
-        block6:
         }
     "#,
     );
@@ -129,13 +120,13 @@ fn test_if_with_return() {
         "main",
         r#"
         function %main(u32) -> i32 {
-        block0(v0: i32):
+        block0(v0: u32):
             brif v0, block1, block2
         block1:
             v1 = iconst 10
             return v1
-            jump block3
         block2:
+            jump block3
         block3:
             v2 = iconst 20
             return v2
