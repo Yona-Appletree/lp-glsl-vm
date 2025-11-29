@@ -6,6 +6,30 @@
 
 **Deliverable**: Can compile simple functions end-to-end
 
+## Cranelift References
+
+**Primary Reference**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/src/machinst/`
+
+- **Emission State**: `buffer.rs` - MachBuffer with EmitState tracking
+  - Label-based branch resolution
+  - Forward reference handling
+  - Island/veneer insertion (for out-of-range branches)
+  - Branch optimization (latest-branches tracking, branch threading)
+- **VCode Emission**: `vcode.rs` - VCode emission methods
+  - Frame layout computation
+  - Prologue/epilogue generation
+  - Edit emission (moves, spills, reloads)
+- **MachInst Emission**: `mod.rs` - MachInstEmit trait definition
+
+**RISC-V Specific References**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/src/isa/riscv64/`
+
+- **Instruction Emission**: `inst/emit.rs` - RISC-V instruction emission
+  - `EmitState` struct (line 48-62) - Frame layout, vector state tracking
+  - `impl MachInstEmit for Inst` - Instruction encoding and emission
+  - Prologue/epilogue generation
+  - Branch emission and patching
+- **ABI Frame Layout**: `abi.rs` - Frame layout computation and prologue/epilogue helpers
+
 ## Tasks
 
 ### 1. Emission state tracking (ISA-agnostic)

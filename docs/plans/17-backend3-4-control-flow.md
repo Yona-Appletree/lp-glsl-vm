@@ -6,6 +6,36 @@
 
 **Deliverable**: Can compile functions with branches and calls
 
+## Cranelift References
+
+**Primary Reference**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/src/machinst/`
+
+- **Branch Resolution**: `buffer.rs` - Branch optimization and resolution
+  - Two-dest to single-dest conversion
+  - Fallthrough detection
+  - Branch threading (label aliasing)
+  - Latest-branches tracking
+  - Branch range validation and veneer insertion
+- **Lowering Branches**: `lower.rs` - Branch instruction lowering
+  - Jump and Br lowering
+  - Block parameter handling (phi moves)
+  - Two-dest branch representation
+- **Call Lowering**: `lower.rs` - Function call lowering
+  - Argument preparation
+  - Return value handling
+  - Call relocations
+
+**RISC-V Specific References**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/src/isa/riscv64/`
+
+- **Branch Emission**: `inst/emit.rs` - RISC-V branch instruction emission
+  - Conditional branch encoding
+  - Unconditional jump encoding
+  - Branch offset patching
+- **Call Emission**: `inst/emit.rs` - Function call emission
+  - JALR instruction for calls
+  - Argument passing
+  - Return value handling
+
 ## Tasks
 
 ### 1. Branch lowering

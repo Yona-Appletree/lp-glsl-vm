@@ -432,6 +432,28 @@ crates/lpc-codegen/src/isa/riscv32/backend3/
 8. ✅ Passes all existing tests
 9. ✅ Performance comparable or better than current backend
 
+## Cranelift References
+
+**Primary Codebase**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/`
+
+**Key Directories**:
+
+- **ISA-Agnostic Backend**: `src/machinst/` - Generic backend infrastructure
+  - `vcode.rs` - VCode structure and regalloc2 integration
+  - `blockorder.rs` - Block lowering order computation
+  - `lower.rs` - IR to VCode lowering
+  - `abi.rs` - ABI machine spec trait
+  - `buffer.rs` - MachBuffer for emission with branch resolution
+  - `compile.rs` - Main compilation pipeline entry point
+  - `mod.rs` - MachInst trait definitions
+- **RISC-V 64 Backend**: `src/isa/riscv64/` - RISC-V 64-specific implementation
+  - `inst/mod.rs` - MachInst enum with VReg operands
+  - `inst/emit.rs` - Instruction emission with EmitState
+  - `abi.rs` - RISC-V 64 ABI machine spec
+  - `lower.rs` - RISC-V specific lowering helpers
+
+**Note**: We're implementing RISC-V 32-bit, but the RISC-V 64 code serves as a good reference for structure and patterns.
+
 ## Related Documents
 
 ### Implementation Plans

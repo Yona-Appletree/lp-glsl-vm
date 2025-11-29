@@ -6,6 +6,34 @@
 
 **Deliverable**: Complete backend matching current backend features
 
+## Cranelift References
+
+**Primary Reference**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/src/machinst/`
+
+- **Memory Operations**: `lower.rs` - Load/store instruction lowering
+  - Stack frame access (SP-relative addressing)
+  - Frame pointer usage
+- **Block Layout Optimization**: `buffer.rs` - Block reordering and layout optimization
+  - Cold block sinking
+  - Fallthrough optimization
+  - Block reordering based on branch probabilities
+- **Branch Optimization**: `buffer.rs` - Advanced branch optimizations
+  - Branch simplification
+  - Unconditional branch elimination
+  - Branch target optimization
+- **Constant Pool**: `vcode.rs` - Constant handling and pooling
+  - Large constant storage
+  - PC-relative constant loading
+
+**RISC-V Specific References**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/src/isa/riscv64/`
+
+- **Memory Operations**: `inst/emit.rs` - Load/store emission
+  - SP-relative addressing
+  - Frame pointer usage
+- **Constant Materialization**: `lower.rs` - Constant handling
+  - LUI + ADDI sequences
+  - Constant pool references
+
 ## Tasks
 
 ### 1. Memory operations

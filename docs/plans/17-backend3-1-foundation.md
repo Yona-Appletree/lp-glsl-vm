@@ -6,6 +6,23 @@
 
 **Deliverable**: Can lower simple arithmetic functions to VCode
 
+## Cranelift References
+
+**Primary Reference**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/src/machinst/`
+
+- **VCode Structure**: `vcode.rs` - Complete VCode implementation with operands, blocks, constants, relocations
+- **Block Ordering**: `blockorder.rs` - Block lowering order computation with critical edge splitting
+- **Lowering**: `lower.rs` - IR to VCode lowering implementation
+- **MachInst Trait**: `mod.rs` - MachInst trait definition and related types
+- **Compilation Pipeline**: `compile.rs` - Main compilation entry point (lower → regalloc → emit)
+
+**RISC-V Specific References**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/src/isa/riscv64/`
+
+- **Machine Instructions**: `inst/mod.rs` - RISC-V 64-bit MachInst enum with VReg operands
+- **ABI**: `abi.rs` - RISC-V 64-bit ABI machine spec implementation
+- **Lowering**: `lower.rs` - RISC-V specific lowering helpers
+- **Emission**: `inst/emit.rs` - RISC-V instruction emission with EmitState
+
 ## Tasks
 
 ### 1. Create VCode structure (ISA-agnostic)

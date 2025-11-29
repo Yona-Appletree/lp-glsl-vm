@@ -6,6 +6,25 @@
 
 **Deliverable**: Can allocate registers for simple functions
 
+## Cranelift References
+
+**Primary Reference**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/src/machinst/`
+
+- **VCode regalloc2 Integration**: `vcode.rs` - Implementation of `regalloc2::Function` trait for VCode
+  - See `impl<...> Function for VCode<I>` around line 200-400
+  - Operand collection and ranges handling
+  - Block structure (succs, preds, params)
+  - Branch arguments handling
+- **ABI Machine Spec**: `abi.rs` - Generic ABI machine spec trait and implementation
+- **Compilation Pipeline**: `compile.rs` - Regalloc2 integration in compilation pipeline (line 57-80)
+
+**RISC-V Specific References**: `/Users/yona/dev/photomancer/wasmtime/cranelift/codegen/src/isa/riscv64/`
+
+- **ABI Implementation**: `abi.rs` - RISC-V 64-bit ABI machine spec
+  - `impl ABIMachineSpec for Riscv64MachineDeps` - Register classes, callee-saved/caller-saved
+  - Frame layout computation
+  - Multi-return handling
+
 ## Tasks
 
 ### 1. Implement regalloc2::Function trait (ISA-agnostic)
