@@ -165,3 +165,70 @@ fn test_entry_block_mapping() {
     }
 }
 
+/// Test that predecessors are computed correctly from successors
+#[test]
+fn test_predecessor_computation() {
+    let sig = Signature::new(alloc::vec![Type::I32], alloc::vec![Type::I32]);
+    let mut func = Function::new(sig, alloc::string::String::from("test"));
+    
+    let v0 = lpc_lpir::Value::new(0);
+    func.dfg.set_value_type(v0, Type::I32);
+    let block0 = func.create_block_with_params(alloc::vec![v0]);
+    let block1 = func.create_block();
+    let block2 = func.create_block();
+    
+    func.append_block(block0);
+    func.append_block(block1);
+    func.append_block(block2);
+    
+    // block0 branches to block1 and block2
+    let inst0 = InstData::branch(v0, block1, Vec::new(), block2, Vec::new());
+    let inst0_entity = func.create_inst(inst0);
+    func.append_inst(inst0_entity, block0);
+    
+    // Lower the function to get VCode with populated predecessors
+    use crate::backend3::lower::lower_function;
+    use crate::backend3::vcode::Callee;
+    use crate::isa::riscv32::backend3::{inst::Riscv32ABI, Riscv32LowerBackend};
+    
+    let backend = Riscv32LowerBackend;
+    let abi = Callee { abi: Riscv32ABI };
+    let vcode = lower_function(func, &backend, abi);
+    
+    // Verify predecessors are computed
+    assert_eq!(vcode.block_pred_range.len(), vcode.block_ranges.len(),
+               "Each block should have a predecessor range");
+    
+    // Verify predecessor computation: block1 and block2 should have block0 as predecessor
+    // (assuming block0 is at index 0, block1 at index 1, block2 at index 2)
+    let block0_idx = crate::backend3::types::BlockIndex::new(0);
+    
+    // Check block1 (index 1) has block0 as predecessor
+    if let Some(pred_range) = vcode.block_pred_range.get(1) {
+        let preds: Vec<_> = vcode.block_preds[pred_range.start..pred_range.end].iter().collect();
+        assert!(preds.contains(&&block0_idx), 
+                "Block1 should have block0 as predecessor");
+    }
+    
+    // Check block2 (index 2) has block0 as predecessor
+    if let Some(pred_range) = vcode.block_pred_range.get(2) {
+        let preds: Vec<_> = vcode.block_preds[pred_range.start..pred_range.end].iter().collect();
+        assert!(preds.contains(&&block0_idx), 
+                "Block2 should have block0 as predecessor");
+    }
+    
+    // Verify that for each successor relationship, there's a corresponding predecessor
+    for (block_idx, succ_range) in vcode.block_succ_range.iter().enumerate() {
+        let pred_block = crate::backend3::types::BlockIndex::new(block_idx as u32);
+        for succ in &vcode.block_succs[succ_range.start..succ_range.end] {
+            // Verify that pred_block appears in succ's predecessor list
+            if let Some(pred_range) = vcode.block_pred_range.get(succ.index() as usize) {
+                let preds = &vcode.block_preds[pred_range.start..pred_range.end];
+                assert!(preds.contains(&pred_block),
+                       "If block {} has {} as successor, then {} should have {} as predecessor",
+                       block_idx, succ.index(), succ.index(), block_idx);
+            }
+        }
+    }
+}
+

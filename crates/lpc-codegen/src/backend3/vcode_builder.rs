@@ -113,6 +113,139 @@ impl<I: MachInst> VCodeBuilder<I> {
         self.block_metadata.push(metadata);
     }
 
+    /// Compute predecessors from successors using counting sort
+    ///
+    /// This implements the inverse relationship: for each block that appears
+    /// as a successor, we record which blocks have it as a successor.
+    fn compute_preds_from_succs(
+        num_blocks: usize,
+        block_succ_range: &Ranges,
+        block_succs: &[BlockIndex],
+    ) -> (Ranges, Vec<BlockIndex>) {
+        // Step 1: Count how many times each block appears as a successor
+        let mut starts = Vec::with_capacity(num_blocks);
+        starts.resize(num_blocks, 0u32);
+        for succ in block_succs {
+            let idx = succ.index() as usize;
+            if idx < starts.len() {
+                starts[idx] += 1;
+            }
+        }
+
+        // Step 2: Determine starting positions for each block's predecessors
+        let mut block_pred_range = Ranges::new();
+        let mut end = 0;
+        for count in starts.iter_mut() {
+            let start = end;
+            end += *count;
+            *count = start;
+            block_pred_range.push(Range::new(start as usize, end as usize));
+        }
+        let end = end as usize;
+
+        // Step 3: Walk over successors again, pushing predecessors at correct positions
+        let mut block_preds = Vec::with_capacity(end);
+        block_preds.resize(end, BlockIndex::new(0));
+        for (pred_idx, range) in block_succ_range.iter().enumerate() {
+            let pred = BlockIndex::new(pred_idx as u32);
+            for succ in &block_succs[range.start..range.end] {
+                let succ_idx = succ.index() as usize;
+                if succ_idx < starts.len() {
+                    let pos = &mut starts[succ_idx];
+                    if (*pos as usize) < block_preds.len() {
+                        block_preds[*pos as usize] = pred;
+                        *pos += 1;
+                    }
+                }
+            }
+        }
+
+        (block_pred_range, block_preds)
+    }
+
+    /// Collect operands from all instructions
+    ///
+    /// This iterates over all instructions, calls `get_operands()` on each,
+    /// and builds flat arrays for regalloc2.
+    fn collect_operands(
+        insts: &[I],
+    ) -> (
+        Vec<crate::backend3::vcode::Operand>,
+        Ranges,
+        BTreeMap<InsnIndex, crate::backend3::vcode::PRegSet>,
+    ) {
+        use crate::backend3::vcode::{Operand, OperandKind, OperandVisitor};
+
+        struct OperandCollector {
+            operands: Vec<Operand>,
+        }
+
+        impl OperandVisitor for OperandCollector {
+            fn visit_use(
+                &mut self,
+                vreg: VReg,
+                constraint: crate::backend3::vcode::OperandConstraint,
+            ) {
+                self.operands.push(Operand {
+                    vreg,
+                    constraint,
+                    kind: OperandKind::Use,
+                });
+            }
+
+            fn visit_def(
+                &mut self,
+                vreg: VReg,
+                constraint: crate::backend3::vcode::OperandConstraint,
+            ) {
+                self.operands.push(Operand {
+                    vreg,
+                    constraint,
+                    kind: OperandKind::Def,
+                });
+            }
+
+            fn visit_mod(
+                &mut self,
+                vreg: VReg,
+                constraint: crate::backend3::vcode::OperandConstraint,
+            ) {
+                self.operands.push(Operand {
+                    vreg,
+                    constraint,
+                    kind: OperandKind::Mod,
+                });
+            }
+        }
+
+        let mut operands = Vec::new();
+        let mut operand_ranges = Ranges::new();
+        let mut clobbers = BTreeMap::new();
+
+        for (idx, inst) in insts.iter().enumerate() {
+            let mut collector = OperandCollector {
+                operands: Vec::new(),
+            };
+
+            // Create mutable clone to call get_operands
+            let mut inst_clone = inst.clone();
+            inst_clone.get_operands(&mut collector);
+
+            // Record operand range for this instruction
+            let start = operands.len();
+            operands.append(&mut collector.operands);
+            let end = operands.len();
+            operand_ranges.push(Range::new(start, end));
+
+            // Collect clobbers
+            if let Some(clobber_set) = inst_clone.get_clobbers() {
+                clobbers.insert(InsnIndex::new(idx as u32), clobber_set);
+            }
+        }
+
+        (operands, operand_ranges, clobbers)
+    }
+
     /// Build the final VCode
     ///
     /// This consumes the builder and produces a VCode structure.
@@ -140,16 +273,46 @@ impl<I: MachInst> VCodeBuilder<I> {
             block_ranges.push(Range::new(start, end));
         }
 
+        // Populate block successors from block_order
+        let mut block_succs = Vec::new();
+        let mut block_succ_range = Ranges::new();
+        for succ_list in &block_order.lowered_succs {
+            let start = block_succs.len();
+            block_succs.extend(succ_list.iter().copied());
+            let end = block_succs.len();
+            block_succ_range.push(Range::new(start, end));
+        }
+
+        // Compute predecessors from successors
+        let (block_pred_range, block_preds) =
+            Self::compute_preds_from_succs(block_ranges.len(), &block_succ_range, &block_succs);
+
+        // Collect operands from instructions
+        let (operands, operand_ranges, clobbers) = Self::collect_operands(&self.insts);
+
+        // Build block metadata from block_order
+        let mut block_metadata = Vec::new();
+        for (idx, _lowered_block) in block_order.lowered_order.iter().enumerate() {
+            let block_idx = BlockIndex::new(idx as u32);
+            let cold = block_order.cold_blocks.contains(&block_idx);
+            let indirect_target = block_order.indirect_targets.contains(&block_idx);
+            block_metadata.push(BlockMetadata {
+                cold,
+                indirect_target,
+                alignment: None, // Not implemented yet
+            });
+        }
+
         VCode {
             insts: self.insts,
-            operands: Vec::new(), // Will be populated during operand collection
-            operand_ranges: Ranges::new(), // Will be populated during operand collection
-            clobbers: BTreeMap::new(), // Will be populated during operand collection
+            operands,
+            operand_ranges,
+            clobbers,
             block_ranges,
-            block_succ_range: Ranges::new(), // Will be populated from block_order
-            block_succs: Vec::new(),         // Will be populated from block_order
-            block_pred_range: Ranges::new(), // Will be populated from block_order
-            block_preds: Vec::new(),         // Will be populated from block_order
+            block_succ_range,
+            block_succs,
+            block_pred_range,
+            block_preds,
             block_params_range: self.block_params_range,
             block_params: self.block_params,
             branch_block_args: self.branch_block_args,
@@ -161,7 +324,7 @@ impl<I: MachInst> VCodeBuilder<I> {
             constants: VCodeConstants {
                 constants: self.constants,
             },
-            block_metadata: self.block_metadata,
+            block_metadata,
             relocations: self.relocations,
             srclocs: self.srclocs,
         }

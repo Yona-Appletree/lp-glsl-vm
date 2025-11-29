@@ -184,6 +184,11 @@ impl Ranges {
     pub fn is_empty(&self) -> bool {
         self.ranges.is_empty()
     }
+
+    /// Iterate over all ranges
+    pub fn iter(&self) -> impl Iterator<Item = &Range> {
+        self.ranges.iter()
+    }
 }
 
 impl Default for Ranges {
@@ -191,4 +196,3 @@ impl Default for Ranges {
         Self::new()
     }
 }
-
