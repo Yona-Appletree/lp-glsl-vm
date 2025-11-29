@@ -51,16 +51,10 @@ pub fn generate_expr(ctx: &mut dyn CodeGenContext, expr: &Expr) -> GlslResult<Va
         // Variable reference
         Expr::Variable(ident) => {
             let name = ident.0.as_str();
-            // Try SSABuilder first, then fall back to legacy lookup
+            // Use lazy SSA construction to get the correct value
             let block = ctx.current_block()?;
-            let ssa_value = ctx.ssa_builder_mut().get_value(name, block);
-            if let Some(value) = ssa_value {
-                Ok(value)
-            } else if let Some(value) = ctx.variables().get(name) {
-                Ok(*value)
-            } else {
-                Err(GlslError::codegen(format!("Undefined variable '{}'", name)))
-            }
+            ctx.get_ssa_value(name, block)?
+                .ok_or_else(|| GlslError::codegen(format!("Undefined variable '{}'", name)))
         }
 
         // Unary operators

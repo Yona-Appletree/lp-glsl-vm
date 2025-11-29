@@ -9,7 +9,7 @@ use alloc::{
 };
 
 use glsl::syntax::{IterationStatement, JumpStatement, SelectionRestStatement, SelectionStatement};
-use lpc_lpir::{BlockEntity, Type, Value};
+use lpc_lpir::{Type, Value};
 
 use crate::{
     decl::codegen::generate_declaration,
@@ -143,7 +143,7 @@ pub fn generate_selection_statement(
 
             if !true_ends_with_return_or_halt {
                 // Collect values from true branch for phi nodes
-                // Use SSABuilder to get values at the jump source block to ensure dominance
+                // Use lazy SSA construction to get the correct value
                 let mut true_values = Vec::new();
                 let jump_source_block = if true_end_block != true_block {
                     true_end_block
@@ -151,28 +151,14 @@ pub fn generate_selection_statement(
                     true_block
                 };
                 for var_name in &phi_var_names {
-                    // Try to get a dominating value first (if dominance is computed)
-                    let val = if let Some(dom_val) = ctx
-                        .ssa_builder_mut()
-                        .get_dominating_value(var_name, jump_source_block)
-                    {
-                        // Found a value that dominates - use it
-                        dom_val
-                    } else if let Some(val) = true_end_vars.get(var_name) {
-                        // Fallback: use value from variables map
-                        *val
-                    } else if let Some(val) = pre_if_vars.get(var_name) {
-                        // Variable wasn't modified in true branch, use pre-if value
-                        *val
-                    } else {
-                        return Err(GlslError::codegen(format!(
-                            "Variable '{}' not found for phi node",
-                            var_name
-                        )));
-                    };
-                    // Record this value in SSABuilder at the jump source block
-                    ctx.ssa_builder_mut()
-                        .record_def(var_name, jump_source_block, val);
+                    let val = ctx
+                        .get_ssa_value(var_name, jump_source_block)?
+                        .ok_or_else(|| {
+                            GlslError::codegen(format!(
+                                "Variable '{}' not found for phi node (lazy SSA)",
+                                var_name
+                            ))
+                        })?;
                     true_values.push(val);
                 }
 
@@ -199,27 +185,15 @@ pub fn generate_selection_statement(
             }
 
             // Collect values from false branch for phi nodes
-            // Use the value from pre-if vars (false branch is empty, so no changes)
+            // Use lazy SSA construction to get the correct value
             let mut false_values = Vec::new();
             for var_name in &phi_var_names {
-                // Try to get a dominating value first (if dominance is computed)
-                let val = if let Some(dom_val) = ctx
-                    .ssa_builder_mut()
-                    .get_dominating_value(var_name, false_block)
-                {
-                    // Found a value that dominates - use it
-                    dom_val
-                } else if let Some(val) = pre_if_vars.get(var_name) {
-                    // Fallback: use pre-if value (false branch is empty)
-                    *val
-                } else {
-                    return Err(GlslError::codegen(format!(
-                        "Variable '{}' not found for phi node",
+                let val = ctx.get_ssa_value(var_name, false_block)?.ok_or_else(|| {
+                    GlslError::codegen(format!(
+                        "Variable '{}' not found for phi node (lazy SSA)",
                         var_name
-                    )));
-                };
-                // Record this value in SSABuilder at the false block
-                ctx.ssa_builder_mut().record_def(var_name, false_block, val);
+                    ))
+                })?;
                 false_values.push(val);
             }
 
@@ -356,31 +330,17 @@ pub fn generate_selection_statement(
                     } else {
                         true_block
                     };
+                    // Collect values using lazy SSA construction
                     for var_name in &phi_var_names {
-                        // Get value defined at the jump source block (for phi node)
-                        // First try SSABuilder to get value defined in this block
-                        let val = if let Some(val) = ctx
-                            .ssa_builder_mut()
-                            .get_value_in_block(var_name, jump_source_block)
-                        {
-                            Some(val)
-                        } else if let Some(val) = true_end_vars.get(var_name) {
-                            // Fallback: use value from variables map
-                            Some(*val)
-                        } else if let Some(val) = pre_if_vars.get(var_name) {
-                            // Variable wasn't modified in true branch, use pre-if value
-                            Some(*val)
-                        } else {
-                            None
-                        };
-                        if let Some(val) = val {
-                            true_values.push(val);
-                        } else {
-                            return Err(GlslError::codegen(format!(
-                                "Variable '{}' not found for phi node",
-                                var_name
-                            )));
-                        }
+                        let val =
+                            ctx.get_ssa_value(var_name, jump_source_block)?
+                                .ok_or_else(|| {
+                                    GlslError::codegen(format!(
+                                        "Variable '{}' not found for phi node (lazy SSA)",
+                                        var_name
+                                    ))
+                                })?;
+                        true_values.push(val);
                     }
 
                     // Need to jump to merge block from wherever we ended up
@@ -412,22 +372,16 @@ pub fn generate_selection_statement(
                     } else {
                         false_block
                     };
+                    // Collect values using lazy SSA construction
                     for var_name in &phi_var_names {
-                        // Use the value from the variables map at the end of the branch
-                        let val = if let Some(val) = false_end_vars.get(var_name) {
-                            *val
-                        } else if let Some(val) = pre_if_vars.get(var_name) {
-                            // Variable wasn't modified in false branch, use pre-if value
-                            *val
-                        } else {
-                            return Err(GlslError::codegen(format!(
-                                "Variable '{}' not found for phi node",
-                                var_name
-                            )));
-                        };
-                        // Record this value in SSABuilder at the jump source block
-                        ctx.ssa_builder_mut()
-                            .record_def(var_name, jump_source_block, val);
+                        let val =
+                            ctx.get_ssa_value(var_name, jump_source_block)?
+                                .ok_or_else(|| {
+                                    GlslError::codegen(format!(
+                                        "Variable '{}' not found for phi node (lazy SSA)",
+                                        var_name
+                                    ))
+                                })?;
                         false_values.push(val);
                     }
 
@@ -806,7 +760,26 @@ pub fn generate_iteration_statement(
             // Find variables referenced in the body (for phi nodes)
             let body_vars = find_variable_references_in_statement(body);
             let mut loop_vars = cond_vars.clone();
-            loop_vars.extend(body_vars);
+            loop_vars.extend(body_vars.clone());
+
+            // Also include variables declared in the initialization that are used in condition or body
+            // (variables declared in init are now in ctx.variables() but may not be in cond_vars/body_vars yet)
+            // Actually, if a variable is declared in init and used in condition/body, it should already
+            // be in cond_vars/body_vars. But we need to make sure variables declared in init are included
+            // in loop_vars even if they're not yet referenced (they will be when we generate the code).
+            // For now, include all variables that are in ctx.variables() after initialization
+            // and are either in cond_vars, body_vars, or were just declared.
+            let init_declared_vars: BTreeSet<String> = ctx
+                .variables()
+                .keys()
+                .filter(|name| !pre_loop_vars.contains_key(*name))
+                .cloned()
+                .collect();
+            for var_name in &init_declared_vars {
+                // Include if used in condition or body, or if it's a newly declared variable
+                // (newly declared variables in for init are always loop variables)
+                loop_vars.insert(var_name.clone());
+            }
 
             // Create phi nodes for variables used in condition or body
             let mut phi_params = Vec::new();
@@ -877,10 +850,21 @@ pub fn generate_iteration_statement(
             }
 
             // Collect initial values for phi nodes
+            // Use current variables (after initialization) for variables declared in init,
+            // otherwise use pre_loop_vars
             let mut initial_values = Vec::new();
             for var_name in &phi_var_names {
-                if let Some(initial_val) = pre_loop_vars.get(var_name) {
+                // First check if variable was declared in initialization (now in ctx.variables())
+                if let Some(initial_val) = ctx.variables().get(var_name) {
                     initial_values.push(*initial_val);
+                } else if let Some(initial_val) = pre_loop_vars.get(var_name) {
+                    initial_values.push(*initial_val);
+                } else {
+                    // Variable should have been found - this is an error
+                    return Err(GlslError::codegen(format!(
+                        "Variable '{}' not found for loop phi node",
+                        var_name
+                    )));
                 }
             }
 

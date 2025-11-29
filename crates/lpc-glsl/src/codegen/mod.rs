@@ -10,7 +10,9 @@ pub mod ssa;
 pub mod value;
 
 pub use builder::CodeGenBuilder;
-pub use r#loop::{LoopInfo, LoopStack};
-pub use scope::{Scope, ScopeGuard, ScopeStack};
+pub use r#loop::LoopStack;
+pub use scope::ScopeStack;
 pub use ssa::SSABuilder;
+// Value types are exported but unused - see docs/glsl/05-values.md for migration plan
+#[allow(unused_imports)]
 pub use value::{GlslLValue, GlslRValue, GlslValue};

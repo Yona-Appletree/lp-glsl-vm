@@ -5,7 +5,6 @@ use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
     string::String,
-    vec,
     vec::Vec,
 };
 
@@ -27,6 +26,7 @@ use crate::{
 pub trait CodeGenContext {
     fn current_block(&self) -> GlslResult<BlockEntity>;
     fn builder_mut(&mut self) -> &mut FunctionBuilder;
+    fn builder(&self) -> &FunctionBuilder;
     fn variables(&self) -> &BTreeMap<String, Value>;
     fn variables_mut(&mut self) -> &mut BTreeMap<String, Value>;
     fn symbols(&self) -> &SymbolTable;
@@ -48,6 +48,10 @@ pub trait CodeGenContext {
     fn loop_stack_mut(&mut self) -> &mut LoopStack;
     /// Get the new scope stack.
     fn scope_stack_new_mut(&mut self) -> &mut ScopeStack;
+
+    /// Get a variable value using lazy SSA construction.
+    /// This helper method avoids borrow conflicts by handling the function access internally.
+    fn get_ssa_value(&mut self, var: &str, block: BlockEntity) -> GlslResult<Option<Value>>;
 }
 
 /// Code generator context.
@@ -83,6 +87,10 @@ impl CodeGenContext for CodeGen {
 
     fn builder_mut(&mut self) -> &mut FunctionBuilder {
         &mut self.builder
+    }
+
+    fn builder(&self) -> &FunctionBuilder {
+        &self.builder
     }
 
     fn variables(&self) -> &BTreeMap<String, Value> {
@@ -146,6 +154,29 @@ impl CodeGenContext for CodeGen {
 
     fn scope_stack_new_mut(&mut self) -> &mut ScopeStack {
         &mut self.scope_stack_new
+    }
+
+    fn get_ssa_value(&mut self, var: &str, block: BlockEntity) -> GlslResult<Option<Value>> {
+        // Fix borrow conflict: We need both &Function (from builder) and &mut SSABuilder.
+        // Rust's borrow checker sees both as borrowing from self, so we need to restructure.
+        //
+        // Solution: Use unsafe to work around borrow checker's conservatism.
+        // This is safe because:
+        // 1. We're only reading from the function (immutable borrow of builder)
+        // 2. We're only mutating SSABuilder (mutable borrow of ssa_builder)
+        // 3. These are different fields with no actual aliasing conflict
+        // 4. The function reference is only used during the call
+        //
+        // We get the raw pointer first, then get the function reference to avoid
+        // the borrow checker seeing overlapping borrows.
+        let ssa_builder_ptr: *mut SSABuilder = &mut self.ssa_builder;
+        let function_ref = self.builder().function();
+        // SAFETY: builder and ssa_builder are separate fields, so there's no aliasing.
+        // We're only reading from function_ref and mutating ssa_builder, which is safe.
+        unsafe {
+            let ssa_builder = &mut *ssa_builder_ptr;
+            ssa_builder.get_value_at_end_of_block(var, block, function_ref)
+        }
     }
 }
 
@@ -289,10 +320,17 @@ impl CodeGen {
                     // Store mapping: variable name -> (address, type) for storing back before return
                     self.out_inout_params
                         .insert(name.clone(), (address_param, glsl_type));
-                    self.variables.insert(name, loaded_value);
+                    self.variables.insert(name.clone(), loaded_value);
+                    // Record in SSABuilder for lazy SSA construction
+                    self.ssa_builder
+                        .record_def(&name, entry_block, loaded_value);
                 } else {
                     // For in: parameter is the value itself
+                    let param_name = name.clone();
                     self.variables.insert(name, entry_params[idx]);
+                    // Record in SSABuilder for lazy SSA construction
+                    self.ssa_builder
+                        .record_def(&param_name, entry_block, entry_params[idx]);
                 }
             }
         }
@@ -301,11 +339,8 @@ impl CodeGen {
         let body_stmt = glsl::syntax::Statement::Compound(Box::new(func_def.statement.clone()));
         generate_statement(self, &body_stmt)?;
 
-        // Compute dominance tree for SSABuilder (for dominance-aware value lookup)
-        // This allows SSABuilder to find values that dominate merge points
-        // We can do this during codegen now that FunctionBuilder exposes function()
-        let function = self.builder.function();
-        self.ssa_builder.compute_dominance(function);
+        // Note: SSABuilder now uses lazy dominance computation, so no need to
+        // pre-compute dominance. Values are computed on-demand when needed.
 
         // Check if function ends with a return statement
         // If not, add an implicit return (required for LPIR)

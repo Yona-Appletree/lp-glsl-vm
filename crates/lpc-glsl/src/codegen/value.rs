@@ -2,6 +2,14 @@
 //!
 //! This module provides abstractions for representing lvalues and rvalues
 //! in GLSL code generation, similar to Clang's CGValue system.
+//!
+//! **Note**: These types are currently unused but will be migrated to in the future.
+//! See `docs/glsl/05-values.md` for the migration plan.
+//!
+//! TODO: Migrate codebase to use GlslValue/GlslLValue/GlslRValue types
+//! (see docs/glsl/05-values.md)
+
+#![allow(dead_code)]
 
 use lpc_lpir::{Type, Value};
 
@@ -9,6 +17,9 @@ use crate::types::GlslType;
 
 /// Trait for operations needed by value loading/storing.
 /// This avoids circular dependencies.
+///
+/// TODO: Migrate codebase to use this trait (see docs/glsl/05-values.md)
+#[allow(dead_code)]
 pub trait ValueBuilder {
     fn load(&mut self, result: Value, address: Value, ty: Type);
     fn store(&mut self, address: Value, value: Value, ty: Type);
@@ -16,6 +27,9 @@ pub trait ValueBuilder {
 }
 
 /// Represents an rvalue - the result of evaluating an expression.
+///
+/// TODO: Migrate codebase to use this type (see docs/glsl/05-values.md)
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum GlslRValue {
     /// Simple scalar value (int, float, bool)
@@ -26,6 +40,9 @@ pub enum GlslRValue {
 }
 
 /// Represents an lvalue - something that can be assigned to.
+///
+/// TODO: Migrate codebase to use this type (see docs/glsl/05-values.md)
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct GlslLValue {
     /// Address of the value
@@ -39,6 +56,9 @@ pub struct GlslLValue {
 }
 
 /// A value that can be either an lvalue or rvalue.
+///
+/// TODO: Migrate codebase to use this type (see docs/glsl/05-values.md)
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum GlslValue {
     LValue(GlslLValue),
