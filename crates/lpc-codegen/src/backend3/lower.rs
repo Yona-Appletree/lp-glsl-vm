@@ -6,6 +6,7 @@ use lpc_lpir::{
     BlockEntity as Block, ControlFlowGraph, DominatorTree, Function, InstEntity, Opcode,
     RelSourceLoc, Value,
 };
+use regalloc2::RegClass;
 
 use crate::backend3::{
     blockorder::compute_block_order,
@@ -134,12 +135,13 @@ impl<I: MachInst> Lower<I> {
     /// This is called once before lowering. In SSA form, all Values already exist
     /// in the IR (function params, block params, instruction results), so we can
     /// create VRegs for all of them upfront. The mapping is then immutable during lowering.
+    /// Defaults to Int register class (GPR) for RISC-V 32.
     fn create_virtual_registers(&mut self) {
         // 1. Function parameters (entry block params)
         if let Some(entry_block) = self.func.entry_block() {
             if let Some(block_data) = self.func.block_data(entry_block) {
                 for param_value in &block_data.params {
-                    let vreg = self.vcode.alloc_vreg();
+                    let vreg = self.vcode.alloc_vreg(RegClass::Int);
                     self.value_to_vreg.insert(*param_value, vreg);
                 }
             }
@@ -150,7 +152,7 @@ impl<I: MachInst> Lower<I> {
             if let Some(block_data) = self.func.block_data(block) {
                 for param_value in &block_data.params {
                     if !self.value_to_vreg.contains_key(param_value) {
-                        let vreg = self.vcode.alloc_vreg();
+                        let vreg = self.vcode.alloc_vreg(RegClass::Int);
                         self.value_to_vreg.insert(*param_value, vreg);
                     }
                 }
@@ -162,7 +164,7 @@ impl<I: MachInst> Lower<I> {
             for inst in self.func.block_insts(block) {
                 if let Some(inst_data) = self.func.dfg.inst_data(inst) {
                     for result_value in &inst_data.results {
-                        let vreg = self.vcode.alloc_vreg();
+                        let vreg = self.vcode.alloc_vreg(RegClass::Int);
                         self.value_to_vreg.insert(*result_value, vreg);
                     }
                 }

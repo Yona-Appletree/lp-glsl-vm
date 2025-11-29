@@ -3,13 +3,13 @@
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
 use lpc_lpir::RelSourceLoc;
-use regalloc2::{Operand, OperandKind as RegallocOperandKind, OperandPos, PRegSet, RegClass, VReg};
+use regalloc2::{Operand, OperandKind, OperandPos, PRegSet, RegClass};
 
 use crate::backend3::{
-    types::{BlockIndex, InsnIndex, Range, Ranges, VReg as OurVReg},
+    types::{BlockIndex, InsnIndex, Range, Ranges, VReg},
     vcode::{
-        BlockLoweringOrder, BlockMetadata, Callee, Constant, MachInst, OperandConstraint,
-        OperandKind, RegClass as OurRegClass, RelocKind, VCode, VCodeConstants, VCodeReloc,
+        BlockLoweringOrder, BlockMetadata, Callee, Constant, MachInst, OperandVisitor, RelocKind,
+        VCode, VCodeConstants, VCodeReloc,
     },
 };
 
@@ -19,8 +19,8 @@ pub struct VCodeBuilder<I: MachInst> {
     insts: Vec<I>,
     /// Source locations (parallel to insts)
     srclocs: Vec<RelSourceLoc>,
-    /// Constants (indexed by our internal VReg)
-    constants: BTreeMap<OurVReg, Constant>,
+    /// Constants (indexed by VReg)
+    constants: BTreeMap<VReg, Constant>,
     /// Relocations
     relocations: Vec<VCodeReloc>,
     /// Block metadata
@@ -68,10 +68,10 @@ impl<I: MachInst> VCodeBuilder<I> {
 
     /// Allocate a new virtual register
     ///
-    /// Returns our internal VReg type, which will be converted to regalloc2::VReg
-    /// during operand collection or when storing in block_params/branch_args.
-    pub fn alloc_vreg(&mut self) -> OurVReg {
-        let vreg = OurVReg::new(self.next_vreg);
+    /// Returns a regalloc2::VReg with the specified register class.
+    /// Defaults to Int (GPR) for RISC-V 32.
+    pub fn alloc_vreg(&mut self, regclass: RegClass) -> VReg {
+        let vreg = VReg::new(self.next_vreg as usize, regclass);
         self.next_vreg += 1;
         vreg
     }
@@ -83,7 +83,7 @@ impl<I: MachInst> VCodeBuilder<I> {
     }
 
     /// Record a constant for a virtual register
-    pub fn record_constant(&mut self, vreg: OurVReg, constant: Constant) {
+    pub fn record_constant(&mut self, vreg: VReg, constant: Constant) {
         self.constants.insert(vreg, constant);
     }
 
@@ -98,21 +98,15 @@ impl<I: MachInst> VCodeBuilder<I> {
 
     /// Start a new block
     ///
-    /// `params` are our internal VRegs, which will be converted to regalloc2::VReg
-    /// when stored. Default register class is Int (GPR) for RISC-V 32.
-    pub fn start_block(&mut self, block_idx: BlockIndex, params: Vec<OurVReg>) {
+    /// `params` are VRegs that will be stored directly.
+    pub fn start_block(&mut self, block_idx: BlockIndex, params: Vec<VReg>) {
         self.current_block = Some(block_idx);
         let start_inst = self.insts.len();
         self.block_starts.push(start_inst);
 
-        // Record block parameters, converting OurVReg to regalloc2::VReg
+        // Record block parameters
         let param_start = self.block_params.len();
-        for vreg in params {
-            // Convert our VReg to regalloc2::VReg
-            // Default to Int register class (GPR) for RISC-V 32
-            let regalloc_vreg = VReg::new(vreg.index() as usize, RegClass::Int);
-            self.block_params.push(regalloc_vreg);
-        }
+        self.block_params.extend(params);
         let param_end = self.block_params.len();
         self.block_params_range
             .push(Range::new(param_start, param_end));
@@ -129,12 +123,12 @@ impl<I: MachInst> VCodeBuilder<I> {
     /// for each successor of the block that was just ended.
     ///
     /// `block_idx` is the BlockIndex of the block these branch args belong to.
-    /// `args_per_succ` contains our internal VRegs, which will be converted to regalloc2::VReg.
+    /// `args_per_succ` contains VRegs that will be stored directly.
     pub fn add_branch_args(
         &mut self,
         block_idx: BlockIndex,
         succs: &[BlockIndex],
-        args_per_succ: &[Vec<OurVReg>],
+        args_per_succ: &[Vec<VReg>],
     ) {
         assert_eq!(succs.len(), args_per_succ.len());
 
@@ -148,15 +142,10 @@ impl<I: MachInst> VCodeBuilder<I> {
         // Record where we start adding ranges for this block's successors
         let succ_start = self.branch_block_arg_range.len();
 
-        // Add argument ranges for each successor, converting OurVReg to regalloc2::VReg
+        // Add argument ranges for each successor
         for args in args_per_succ {
             let arg_start = self.branch_block_args.len();
-            for vreg in args {
-                // Convert our VReg to regalloc2::VReg
-                // Default to Int register class (GPR) for RISC-V 32
-                let regalloc_vreg = VReg::new(vreg.index() as usize, RegClass::Int);
-                self.branch_block_args.push(regalloc_vreg);
-            }
+            self.branch_block_args.extend(args.iter().copied());
             let arg_end = self.branch_block_args.len();
             self.branch_block_arg_range
                 .push(Range::new(arg_start, arg_end));
@@ -502,27 +491,52 @@ impl<I: MachInst> VCodeBuilder<I> {
     /// Collect operands from all instructions
     ///
     /// This iterates over all instructions, calls `get_operands()` on each,
-    /// and converts our internal types to regalloc2 types.
+    /// and collects regalloc2 operands directly without conversion.
     fn collect_operands(insts: &[I]) -> (Vec<Operand>, Ranges, BTreeMap<InsnIndex, PRegSet>) {
-        use crate::backend3::vcode::OperandVisitor;
-
         struct OperandCollector {
-            operands: Vec<(OurVReg, OperandConstraint, OperandKind)>,
+            operands: Vec<Operand>,
         }
 
         impl OperandVisitor for OperandCollector {
-            fn visit_use(&mut self, vreg: OurVReg, constraint: OperandConstraint) {
-                self.operands.push((vreg, constraint, OperandKind::Use));
+            fn visit_use(&mut self, vreg: VReg, constraint: regalloc2::OperandConstraint) {
+                // VReg already has the correct register class from allocation
+                let operand = Operand::new(
+                    vreg,
+                    constraint,
+                    OperandKind::Use,
+                    OperandPos::Early, // Default to Early position
+                );
+                self.operands.push(operand);
             }
 
-            fn visit_def(&mut self, vreg: OurVReg, constraint: OperandConstraint) {
-                self.operands.push((vreg, constraint, OperandKind::Def));
+            fn visit_def(&mut self, vreg: VReg, constraint: regalloc2::OperandConstraint) {
+                // VReg already has the correct register class from allocation
+                let operand = Operand::new(
+                    vreg,
+                    constraint,
+                    OperandKind::Def,
+                    OperandPos::Early, // Default to Early position
+                );
+                self.operands.push(operand);
             }
 
-            fn visit_mod(&mut self, vreg: OurVReg, constraint: OperandConstraint) {
+            fn visit_mod(&mut self, vreg: VReg, constraint: regalloc2::OperandConstraint) {
                 // regalloc2 doesn't support Mod, so we create separate Use and Def operands
-                self.operands.push((vreg, constraint, OperandKind::Use));
-                self.operands.push((vreg, constraint, OperandKind::Def));
+                // VReg already has the correct register class from allocation
+                let use_operand = Operand::new(
+                    vreg,
+                    constraint,
+                    OperandKind::Use,
+                    OperandPos::Early,
+                );
+                let def_operand = Operand::new(
+                    vreg,
+                    constraint,
+                    OperandKind::Def,
+                    OperandPos::Early,
+                );
+                self.operands.push(use_operand);
+                self.operands.push(def_operand);
             }
         }
 
@@ -539,59 +553,15 @@ impl<I: MachInst> VCodeBuilder<I> {
             let mut inst_clone = inst.clone();
             inst_clone.get_operands(&mut collector);
 
-            // Convert collected operands to regalloc2 types
+            // Record operand range for this instruction
             let start = operands.len();
-            for (vreg, constraint, kind) in collector.operands {
-                // Determine register class from constraint or default to Int
-                let regclass = match constraint {
-                    OperandConstraint::RegClass(OurRegClass::Gpr) => RegClass::Int,
-                    OperandConstraint::RegClass(OurRegClass::Fpr) => RegClass::Float,
-                    _ => RegClass::Int, // Default to Int for RISC-V 32
-                };
-
-                // Convert our VReg to regalloc2::VReg
-                let regalloc_vreg = VReg::new(vreg.index() as usize, regclass);
-
-                // Convert our OperandConstraint to regalloc2::OperandConstraint
-                let regalloc_constraint = match constraint {
-                    OperandConstraint::Any => regalloc2::OperandConstraint::Any,
-                    OperandConstraint::Fixed(_reg) => {
-                        // TODO: Convert u32 to PReg properly for FixedReg
-                        // For now, use Any as placeholder
-                        regalloc2::OperandConstraint::Any
-                    }
-                    OperandConstraint::RegClass(_) => regalloc2::OperandConstraint::Reg,
-                };
-
-                // Convert our OperandKind to regalloc2::OperandKind
-                let regalloc_kind = match kind {
-                    OperandKind::Use => RegallocOperandKind::Use,
-                    OperandKind::Def => RegallocOperandKind::Def,
-                    OperandKind::Mod => {
-                        // Should not happen here since Mod is split above
-                        RegallocOperandKind::Use
-                    }
-                };
-
-                // Create regalloc2::Operand
-                let regalloc_operand = Operand::new(
-                    regalloc_vreg,
-                    regalloc_constraint,
-                    regalloc_kind,
-                    OperandPos::Early, // Default to Early position
-                );
-
-                operands.push(regalloc_operand);
-            }
+            operands.extend(collector.operands);
             let end = operands.len();
             operand_ranges.push(Range::new(start, end));
 
-            // Collect clobbers - convert our PRegSet to regalloc2::PRegSet
+            // Collect clobbers - PRegSet is already regalloc2::PRegSet
             if let Some(clobber_set) = inst_clone.get_clobbers() {
-                let mut regalloc_clobbers = PRegSet::empty();
-                // TODO: Properly convert BTreeSet<u32> to PRegSet
-                // For now, leave empty as placeholder
-                clobbers.insert(InsnIndex::new(idx), regalloc_clobbers);
+                clobbers.insert(InsnIndex::new(idx), clobber_set);
             }
         }
 

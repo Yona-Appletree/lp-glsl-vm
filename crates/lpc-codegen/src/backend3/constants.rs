@@ -1,6 +1,7 @@
 //! Constant materialization
 
 use lpc_lpir::RelSourceLoc;
+use regalloc2::RegClass;
 
 use crate::backend3::{
     types::{VReg, Writable},
@@ -28,7 +29,7 @@ where
         // The constant will be embedded directly in the instruction
         // during lowering (e.g., addi rd, rs1, value)
         // Return a VReg that represents this constant value
-        let vreg = vcode.alloc_vreg();
+        let vreg = vcode.alloc_vreg(RegClass::Int);
         vcode.record_constant(vreg, Constant::Inline(value));
         vreg
     } else {
@@ -68,7 +69,7 @@ where
     FLui: FnOnce(Writable<VReg>, u32) -> I,
     FAddi: FnOnce(Writable<VReg>, VReg, i32) -> I,
 {
-    let vreg = vcode.alloc_vreg();
+    let vreg = vcode.alloc_vreg(RegClass::Int);
 
     // Split value into upper 20 bits and lower 12 bits
     // Note: RISC-V sign-extends the lower 12 bits in ADDI, so we need to handle sign correctly
@@ -86,7 +87,7 @@ where
     };
 
     // Emit LUI: load upper 20 bits (shifted left by 12)
-    let temp_vreg = vcode.alloc_vreg();
+    let temp_vreg = vcode.alloc_vreg(RegClass::Int);
     let lui_imm = (upper << 12) as u32;
     let lui_inst = create_lui(Writable::new(temp_vreg), lui_imm);
     vcode.push(lui_inst, srcloc);

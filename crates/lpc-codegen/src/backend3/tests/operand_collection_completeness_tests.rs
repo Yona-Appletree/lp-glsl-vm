@@ -173,7 +173,7 @@ block0:
 /// Test that operand constraints are correct for each instruction type
 #[test]
 fn test_operand_constraints_correct() {
-    use crate::backend3::vcode::{OperandConstraint, OperandKind};
+    use regalloc2::{OperandConstraint, OperandKind};
 
     let test = LowerTest::from_lpir(
         r#"
@@ -196,11 +196,11 @@ block0(v0: i32, v1: i32):
                 // ADD should have: 1 def, 2 uses
                 let defs: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Def)
+                    .filter(|op| op.kind() == OperandKind::Def)
                     .collect();
                 let uses: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Use)
+                    .filter(|op| op.kind() == OperandKind::Use)
                     .collect();
 
                 assert_eq!(defs.len(), 1, "ADD should have 1 def operand");
@@ -209,7 +209,7 @@ block0(v0: i32, v1: i32):
                 // All operands should use OperandConstraint::Any (for now)
                 for operand in operands {
                     assert_eq!(
-                        operand.constraint,
+                        operand.constraint(),
                         OperandConstraint::Any,
                         "RISC-V operands should use OperandConstraint::Any"
                     );

@@ -1,8 +1,10 @@
 //! RISC-V 32-bit machine instructions for backend3
 
+use regalloc2::OperandConstraint;
+
 use crate::backend3::{
     types::{VReg, Writable},
-    vcode::{MachInst, MachTerminator, OperandConstraint, OperandVisitor, PRegSet},
+    vcode::{MachInst, MachTerminator, OperandVisitor, PRegSet},
 };
 
 /// RISC-V 32-bit machine instruction with virtual registers

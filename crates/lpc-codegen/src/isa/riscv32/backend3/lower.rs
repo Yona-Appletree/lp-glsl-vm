@@ -1,6 +1,7 @@
 //! RISC-V 32-specific lowering backend
 
 use lpc_lpir::{Immediate, InstEntity, IntCC, Opcode, RelSourceLoc};
+use regalloc2::RegClass;
 
 use crate::{
     backend3::{
@@ -196,7 +197,7 @@ impl LowerBackend for Riscv32LowerBackend {
                                 IntCC::Equal => {
                                     // eq: sub + sltiu pattern
                                     // Compute diff = rs1 - rs2
-                                    let temp_vreg = ctx.vcode.alloc_vreg();
+                                    let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
                                     let diff = Writable::new(temp_vreg);
                                     let sub_inst = Riscv32MachInst::Sub { rd: diff, rs1, rs2 };
                                     ctx.vcode.push(sub_inst, srcloc);
@@ -211,11 +212,11 @@ impl LowerBackend for Riscv32LowerBackend {
                                 }
                                 IntCC::NotEqual => {
                                     // ne: same as eq, then invert
-                                    let temp_vreg = ctx.vcode.alloc_vreg();
+                                    let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
                                     let diff = Writable::new(temp_vreg);
                                     let sub_inst = Riscv32MachInst::Sub { rd: diff, rs1, rs2 };
                                     ctx.vcode.push(sub_inst, srcloc);
-                                    let temp_result = ctx.vcode.alloc_vreg();
+                                    let temp_result = ctx.vcode.alloc_vreg(RegClass::Int);
                                     let temp_result_writable = Writable::new(temp_result);
                                     let sltiu_inst = Riscv32MachInst::Sltiu {
                                         rd: temp_result_writable,
@@ -240,7 +241,7 @@ impl LowerBackend for Riscv32LowerBackend {
                                 }
                                 IntCC::SignedLessThanOrEqual => {
                                     // le: slt with swapped operands, then invert
-                                    let temp_vreg = ctx.vcode.alloc_vreg();
+                                    let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
                                     let temp_writable = Writable::new(temp_vreg);
                                     let slt_inst = Riscv32MachInst::Slt {
                                         rd: temp_writable,
@@ -268,7 +269,7 @@ impl LowerBackend for Riscv32LowerBackend {
                                 }
                                 IntCC::SignedGreaterThanOrEqual => {
                                     // ge: slt, then invert
-                                    let temp_vreg = ctx.vcode.alloc_vreg();
+                                    let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
                                     let temp_writable = Writable::new(temp_vreg);
                                     let slt_inst = Riscv32MachInst::Slt {
                                         rd: temp_writable,
@@ -292,7 +293,7 @@ impl LowerBackend for Riscv32LowerBackend {
                                 }
                                 IntCC::UnsignedLessThanOrEqual => {
                                     // ule: sltu with swapped operands, then invert
-                                    let temp_vreg = ctx.vcode.alloc_vreg();
+                                    let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
                                     let temp_writable = Writable::new(temp_vreg);
                                     let sltu_inst = Riscv32MachInst::Sltu {
                                         rd: temp_writable,
@@ -320,7 +321,7 @@ impl LowerBackend for Riscv32LowerBackend {
                                 }
                                 IntCC::UnsignedGreaterThanOrEqual => {
                                     // uge: sltu, then invert
-                                    let temp_vreg = ctx.vcode.alloc_vreg();
+                                    let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
                                     let temp_writable = Writable::new(temp_vreg);
                                     let sltu_inst = Riscv32MachInst::Sltu {
                                         rd: temp_writable,
@@ -366,7 +367,7 @@ impl LowerBackend for Riscv32LowerBackend {
                     Writable::new(result_vreg)
                 } else {
                     // Use v0 as placeholder for x0 - will be handled during emission
-                    let zero_vreg = ctx.vcode.alloc_vreg();
+                    let zero_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
                     Writable::new(zero_vreg)
                 };
 

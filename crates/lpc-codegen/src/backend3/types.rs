@@ -7,26 +7,9 @@ use regalloc2::{Block, Inst};
 ///
 /// Virtual registers are used during lowering and register allocation.
 /// They are later replaced by physical registers during allocation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct VReg(u32);
-
-impl VReg {
-    /// Create a new virtual register with the given index
-    pub fn new(index: u32) -> Self {
-        VReg(index)
-    }
-
-    /// Get the index of this virtual register
-    pub fn index(self) -> u32 {
-        self.0
-    }
-}
-
-impl fmt::Display for VReg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "v{}", self.0)
-    }
-}
+/// This is a type alias for regalloc2::VReg to ensure compatibility
+/// with regalloc2's Function trait.
+pub type VReg = regalloc2::VReg;
 
 /// Block index in VCode
 ///

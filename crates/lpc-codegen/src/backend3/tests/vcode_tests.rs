@@ -8,6 +8,8 @@ use alloc::{
     vec::Vec,
 };
 
+use regalloc2::RegClass;
+
 use crate::{
     backend3::{
         types::{BlockIndex, VReg},
@@ -26,17 +28,17 @@ fn test_vcode_builder_new() {
 #[test]
 fn test_vcode_builder_alloc_vreg() {
     let mut builder = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
-    let vreg1 = builder.alloc_vreg();
-    let vreg2 = builder.alloc_vreg();
-    assert_eq!(vreg1.index(), 0);
-    assert_eq!(vreg2.index(), 1);
+    let vreg1 = builder.alloc_vreg(RegClass::Int);
+    let vreg2 = builder.alloc_vreg(RegClass::Int);
+    assert_eq!(vreg1.vreg(), 0);
+    assert_eq!(vreg2.vreg(), 1);
 }
 
 #[test]
 fn test_vcode_builder_start_block() {
     let mut builder = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
     let block_idx = BlockIndex::new(0);
-    let params = alloc::vec![VReg::new(1), VReg::new(2)];
+    let params = alloc::vec![VReg::new(1, RegClass::Int), VReg::new(2, RegClass::Int)];
     builder.start_block(block_idx, params.clone());
     builder.end_block();
 

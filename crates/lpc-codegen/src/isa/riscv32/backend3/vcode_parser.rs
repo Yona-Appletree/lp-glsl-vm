@@ -13,6 +13,8 @@ use nom::{
     IResult,
 };
 
+use regalloc2::RegClass;
+
 use crate::{
     backend3::{
         types::{BlockIndex, Range, Ranges, VReg, Writable},
@@ -28,9 +30,10 @@ fn parse_vreg(input: &str) -> IResult<&str, VReg> {
         recognize(pair(char('v'), take_while1(|c: char| c.is_ascii_digit()))),
         |s: &str| -> Result<VReg, alloc::string::String> {
             let num = s[1..]
-                .parse::<u32>()
+                .parse::<usize>()
                 .map_err(|_| format!("Invalid VReg number: {}", s))?;
-            Ok(VReg::new(num))
+            // Default to Int register class for RISC-V 32
+            Ok(VReg::new(num, RegClass::Int))
         },
     )(input)
 }

@@ -4,10 +4,9 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use crate::backend3::{
-    tests::vcode_test_helpers::LowerTest,
-    vcode::{OperandConstraint, OperandKind},
-};
+use regalloc2::{OperandConstraint, OperandKind};
+
+use crate::backend3::tests::vcode_test_helpers::LowerTest;
 
 /// Test that operand constraints are correctly collected
 #[test]
@@ -27,10 +26,12 @@ block0(v0: i32, v1: i32):
     // Verify operands have constraints
     for operand in &vcode.operands {
         // Constraint should be one of the valid types
-        match operand.constraint {
+        match operand.constraint() {
             OperandConstraint::Any => {}
-            OperandConstraint::Fixed(_) => {}
-            OperandConstraint::RegClass(_) => {}
+            OperandConstraint::FixedReg(_) => {}
+            OperandConstraint::Reg => {}
+            OperandConstraint::Stack => {}
+            OperandConstraint::Reuse(_) => {}
         }
     }
 }
@@ -64,11 +65,11 @@ block0(v0: i32, v1: i32):
                 // ADD should have: 1 def (rd), 2 uses (rs1, rs2)
                 let defs: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Def)
+                    .filter(|op| (**op).kind() == OperandKind::Def)
                     .collect();
                 let uses: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Use)
+                    .filter(|op| (**op).kind() == OperandKind::Use)
                     .collect();
 
                 assert_eq!(
@@ -195,11 +196,11 @@ block0(v0: i32, v1: i32, v2: i32):
                 // JAL should have: 1 def (rd), N uses (args)
                 let defs: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Def)
+                    .filter(|op| (**op).kind() == OperandKind::Def)
                     .collect();
                 let uses: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Use)
+                    .filter(|op| (**op).kind() == OperandKind::Use)
                     .collect();
 
                 assert_eq!(
@@ -242,11 +243,11 @@ block0(v0: i32, v1: i32):
                 // SW should have: 2 uses (rs1=address, rs2=value), no defs
                 let defs: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Def)
+                    .filter(|op| (**op).kind() == OperandKind::Def)
                     .collect();
                 let uses: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Use)
+                    .filter(|op| (**op).kind() == OperandKind::Use)
                     .collect();
 
                 assert_eq!(defs.len(), 0, "SW instruction should have no def operands");
@@ -285,11 +286,11 @@ block0(v0: i32):
                 // LW should have: 1 def (rd), 1 use (rs1=address)
                 let defs: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Def)
+                    .filter(|op| (**op).kind() == OperandKind::Def)
                     .collect();
                 let uses: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Use)
+                    .filter(|op| (**op).kind() == OperandKind::Use)
                     .collect();
 
                 assert_eq!(
@@ -331,11 +332,11 @@ block0(v0: i32):
                 // Return should have: N uses (ret_vals), no defs
                 let defs: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Def)
+                    .filter(|op| (**op).kind() == OperandKind::Def)
                     .collect();
                 let uses: Vec<_> = operands
                     .iter()
-                    .filter(|op| op.kind == OperandKind::Use)
+                    .filter(|op| (**op).kind() == OperandKind::Use)
                     .collect();
 
                 assert_eq!(
@@ -370,7 +371,7 @@ block0(v0: i32, v1: i32):
 
     // All operands should have valid VRegs (just verify they exist)
     for operand in &vcode.operands {
-        let _vreg = operand.vreg; // Should not panic
+        let _vreg = operand.vreg(); // Should not panic
     }
 }
 
@@ -427,14 +428,11 @@ block0(v0: i32):
 
     // Verify that operands are collected (even if none are Mod)
     // Currently, RISC-V instructions use Use/Def, not Mod
+    // Note: regalloc2 doesn't support Mod directly - it's split into Use+Def
     for operand in &vcode.operands {
-        match operand.kind {
+        match operand.kind() {
             OperandKind::Use => {}
             OperandKind::Def => {}
-            OperandKind::Mod => {
-                // If we find Mod operands, verify they're handled correctly
-                // (Currently, none should exist for RISC-V)
-            }
         }
     }
 
@@ -465,12 +463,14 @@ block0(v0: i32):
 
     // Verify operand constraints are collected
     for operand in &vcode.operands {
-        match operand.constraint {
+        match operand.constraint() {
             OperandConstraint::Any => {}
-            OperandConstraint::Fixed(_) => {
+            OperandConstraint::FixedReg(_) => {
                 // If fixed registers are used, verify they're handled correctly
             }
-            OperandConstraint::RegClass(_) => {}
+            OperandConstraint::Reg => {}
+            OperandConstraint::Stack => {}
+            OperandConstraint::Reuse(_) => {}
         }
     }
 
@@ -498,17 +498,16 @@ block0(v0: i32):
     let vcode = test.vcode();
 
     // Verify register class constraints are supported
+    // Note: Register class is determined by the VReg's register class, not a separate constraint
     for operand in &vcode.operands {
-        match operand.constraint {
+        match operand.constraint() {
             OperandConstraint::Any => {}
-            OperandConstraint::Fixed(_) => {}
-            OperandConstraint::RegClass(reg_class) => {
-                // If register class constraints are used, verify they're handled
-                match reg_class {
-                    crate::backend3::vcode::RegClass::Gpr => {}
-                    crate::backend3::vcode::RegClass::Fpr => {}
-                }
+            OperandConstraint::FixedReg(_) => {}
+            OperandConstraint::Reg => {
+                // Reg constraint means the operand must be in the same register class as the VReg
             }
+            OperandConstraint::Stack => {}
+            OperandConstraint::Reuse(_) => {}
         }
     }
 
