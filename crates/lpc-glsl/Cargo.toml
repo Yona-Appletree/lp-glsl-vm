@@ -1,0 +1,15 @@
+[package]
+name = "lpc-glsl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GLSL frontend compiler for LPIR"
+
+[lib]
+
+[dependencies]
+glsl = { git = "https://github.com/Yona-Appletree/glsl-parser.git", branch = "feature/no_std", default-features = false }
+lpc-lpir = { path = "../lpc-lpir" }
+
+[dev-dependencies]
+

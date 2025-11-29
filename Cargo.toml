@@ -5,6 +5,7 @@ members = [
     "apps/embive-program",
     "apps/esp32c3-jit-test",
     "crates/lpc-codegen",
+    "crates/lpc-glsl",
     "crates/lpc-lpir",
     "crates/riscv-shared",
 ]
