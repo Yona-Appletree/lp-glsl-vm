@@ -2,9 +2,15 @@
 
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
-use crate::backend3::types::{BlockIndex, InsnIndex, Range, Ranges, VReg, Writable};
-use crate::backend3::vcode::{BlockLoweringOrder, BlockMetadata, Callee, Constant, MachInst, RelocKind, VCode, VCodeConstants, VCodeReloc};
 use lpc_lpir::RelSourceLoc;
+
+use crate::backend3::{
+    types::{BlockIndex, InsnIndex, Range, Ranges, VReg},
+    vcode::{
+        BlockLoweringOrder, BlockMetadata, Callee, Constant, MachInst, RelocKind, VCode,
+        VCodeConstants, VCodeReloc,
+    },
+};
 
 /// Builder for constructing VCode incrementally
 pub struct VCodeBuilder<I: MachInst> {
@@ -93,7 +99,8 @@ impl<I: MachInst> VCodeBuilder<I> {
         let param_start = self.block_params.len();
         self.block_params.extend(params.iter().copied());
         let param_end = self.block_params.len();
-        self.block_params_range.push(Range::new(param_start, param_end));
+        self.block_params_range
+            .push(Range::new(param_start, param_end));
     }
 
     /// End the current block
@@ -135,9 +142,9 @@ impl<I: MachInst> VCodeBuilder<I> {
             clobbers: BTreeMap::new(), // Will be populated during operand collection
             block_ranges,
             block_succ_range: Ranges::new(), // Will be populated from block_order
-            block_succs: Vec::new(), // Will be populated from block_order
+            block_succs: Vec::new(),         // Will be populated from block_order
             block_pred_range: Ranges::new(), // Will be populated from block_order
-            block_preds: Vec::new(), // Will be populated from block_order
+            block_preds: Vec::new(),         // Will be populated from block_order
             block_params_range: self.block_params_range,
             block_params: self.block_params,
             branch_block_args: self.branch_block_args,
@@ -161,4 +168,3 @@ impl<I: MachInst> Default for VCodeBuilder<I> {
         Self::new()
     }
 }
-

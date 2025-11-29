@@ -10,3 +10,6 @@ pub mod reloc;
 pub mod types;
 pub mod vcode;
 pub mod vcode_builder;
+
+#[cfg(test)]
+mod tests;

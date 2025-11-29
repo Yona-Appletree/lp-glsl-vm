@@ -1,10 +1,9 @@
 //! RISC-V 32-bit machine instructions for backend3
 
-use core::fmt;
-
-use crate::backend3::types::{VReg, Writable};
-use crate::backend3::vcode::{MachInst, OperandConstraint, OperandKind, OperandVisitor};
-use crate::isa::riscv32::regs::Gpr;
+use crate::backend3::{
+    types::{VReg, Writable},
+    vcode::{MachInst, OperandConstraint, OperandVisitor},
+};
 
 /// RISC-V 32-bit machine instruction with virtual registers
 #[derive(Debug, Clone)]
@@ -31,10 +30,7 @@ pub enum Riscv32MachInst {
     },
 
     /// LUI: Load upper immediate (rd = imm << 12)
-    Lui {
-        rd: Writable<VReg>,
-        imm: u32,
-    },
+    Lui { rd: Writable<VReg>, imm: u32 },
 
     /// LW: Load word (rd = mem[rs1 + imm])
     Lw {
@@ -44,11 +40,7 @@ pub enum Riscv32MachInst {
     },
 
     /// SW: Store word (mem[rs1 + imm] = rs2)
-    Sw {
-        rs1: VReg,
-        rs2: VReg,
-        imm: i32,
-    },
+    Sw { rs1: VReg, rs2: VReg, imm: i32 },
 }
 
 impl MachInst for Riscv32MachInst {
@@ -95,4 +87,3 @@ impl MachInst for Riscv32MachInst {
 /// for register allocation and calling conventions.
 #[derive(Debug, Clone)]
 pub struct Riscv32ABI;
-

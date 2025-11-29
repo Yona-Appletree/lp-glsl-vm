@@ -1,10 +1,17 @@
 //! Block lowering order computation with critical edge splitting
 
-use alloc::{collections::BTreeMap, collections::BTreeSet, vec, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec,
+    vec::Vec,
+};
 
-use crate::backend3::types::BlockIndex;
-use crate::backend3::vcode::{BlockLoweringOrder, LoweredBlock};
 use lpc_lpir::{BlockEntity, ControlFlowGraph, DominatorTree};
+
+use crate::backend3::{
+    types::BlockIndex,
+    vcode::{BlockLoweringOrder, LoweredBlock},
+};
 
 /// Compute block lowering order for a function
 ///
@@ -16,7 +23,7 @@ use lpc_lpir::{BlockEntity, ControlFlowGraph, DominatorTree};
 pub fn compute_block_order(
     func: &lpc_lpir::Function,
     cfg: &ControlFlowGraph,
-    domtree: &DominatorTree,
+    _domtree: &DominatorTree,
 ) -> BlockLoweringOrder {
     // Build block index mapping
     let block_to_index: BTreeMap<BlockEntity, usize> = func
@@ -39,7 +46,8 @@ pub fn compute_block_order(
     }
 
     // 3. Build lowered block order (RPO)
-    let lowered_order = build_lowered_order(func, cfg, critical_edges, &edge_blocks, &block_to_index);
+    let lowered_order =
+        build_lowered_order(func, cfg, critical_edges, &edge_blocks, &block_to_index);
 
     // 4. Build successor lists for lowered blocks
     let lowered_succs = build_lowered_succs(
@@ -59,7 +67,7 @@ pub fn compute_block_order(
                 let lowered_idx = BlockIndex::new(idx as u32);
                 block_to_lowered_index.insert(*block, lowered_idx);
             }
-            LoweredBlock::Edge { from: _, to } => {
+            LoweredBlock::Edge { from: _, to: _ } => {
                 // Edge blocks don't map to IR blocks, but we can still track them
                 // For now, we'll skip them in the mapping
             }
@@ -131,15 +139,12 @@ fn detect_critical_edges(
 fn build_lowered_order(
     func: &lpc_lpir::Function,
     cfg: &ControlFlowGraph,
-    critical_edges: &[(BlockEntity, BlockEntity)],
+    _critical_edges: &[(BlockEntity, BlockEntity)],
     edge_blocks: &BTreeMap<(BlockEntity, BlockEntity), BlockIndex>,
-    block_to_index: &BTreeMap<BlockEntity, usize>,
+    _block_to_index: &BTreeMap<BlockEntity, usize>,
 ) -> Vec<LoweredBlock> {
     // Get RPO order of original blocks
     let rpo = cfg.reverse_post_order();
-
-    // Build set of critical edges for quick lookup
-    let critical_edge_set: BTreeSet<(BlockEntity, BlockEntity)> = critical_edges.iter().copied().collect();
 
     // Build lowered order: original blocks in RPO, then edge blocks
     let mut lowered_order = Vec::new();
@@ -172,8 +177,8 @@ fn build_lowered_succs(
     func: &lpc_lpir::Function,
     cfg: &ControlFlowGraph,
     critical_edges: &[(BlockEntity, BlockEntity)],
-    edge_blocks: &BTreeMap<(BlockEntity, BlockEntity), BlockIndex>,
-    block_to_index: &BTreeMap<BlockEntity, usize>,
+    _edge_blocks: &BTreeMap<(BlockEntity, BlockEntity), BlockIndex>,
+    _block_to_index: &BTreeMap<BlockEntity, usize>,
     lowered_order: &[LoweredBlock],
 ) -> Vec<Vec<BlockIndex>> {
     // Build mapping from IR blocks to lowered block indices
@@ -205,7 +210,13 @@ fn build_lowered_succs(
     for lowered_block in lowered_order {
         match lowered_block {
             LoweredBlock::Orig { block } => {
-                let block_idx = block_to_index.get(block).copied().unwrap_or(0);
+                // Find block index by searching through blocks
+                let block_idx = func
+                    .blocks()
+                    .enumerate()
+                    .find(|(_, b)| *b == *block)
+                    .map(|(idx, _)| idx)
+                    .unwrap_or(0);
                 let mut succs = Vec::new();
 
                 // Get original successors
@@ -248,4 +259,3 @@ fn build_lowered_succs(
 
     lowered_succs
 }
-

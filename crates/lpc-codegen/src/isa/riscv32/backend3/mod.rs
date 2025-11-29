@@ -9,6 +9,9 @@ pub mod lower;
 /// Type alias for RISC-V 32-bit machine instructions
 pub type MachInst = inst::Riscv32MachInst;
 
+/// RISC-V 32-bit lowering backend
+pub use lower::Riscv32LowerBackend;
+
 /// Helper functions for creating RISC-V 32 instructions during lowering
 pub mod lower_helpers {
     use crate::{

@@ -1,16 +1,28 @@
 //! Constant materialization
 
-use crate::backend3::types::VReg;
-use crate::backend3::vcode::{Constant, MachInst};
-use crate::backend3::vcode_builder::VCodeBuilder;
+use lpc_lpir::RelSourceLoc;
+
+use crate::backend3::{
+    types::{VReg, Writable},
+    vcode::{Constant, MachInst},
+    vcode_builder::VCodeBuilder,
+};
 
 /// Materialize a constant value, choosing the appropriate strategy
 ///
 /// Returns the VReg representing the constant value.
-pub fn materialize_constant<I: MachInst>(
+/// For large constants, this will emit LUI+ADDI instructions via the helpers.
+pub fn materialize_constant<I: MachInst, FLui, FAddi>(
     vcode: &mut VCodeBuilder<I>,
     value: i32,
-) -> VReg {
+    srcloc: RelSourceLoc,
+    create_lui: FLui,
+    create_addi: FAddi,
+) -> VReg
+where
+    FLui: FnOnce(Writable<VReg>, u32) -> I,
+    FAddi: FnOnce(Writable<VReg>, VReg, i32) -> I,
+{
     if fits_in_12_bits(value) {
         // Strategy 1: Inline immediate
         // The constant will be embedded directly in the instruction
@@ -21,7 +33,7 @@ pub fn materialize_constant<I: MachInst>(
         vreg
     } else {
         // Strategy 2: LUI + ADDI sequence
-        materialize_large_constant(vcode, value)
+        materialize_large_constant(vcode, value, srcloc, create_lui, create_addi)
     }
 }
 
@@ -31,10 +43,17 @@ fn fits_in_12_bits(value: i32) -> bool {
 }
 
 /// Materialize large constant via LUI + ADDI
-fn materialize_large_constant<I: MachInst>(
+fn materialize_large_constant<I: MachInst, FLui, FAddi>(
     vcode: &mut VCodeBuilder<I>,
     value: i32,
-) -> VReg {
+    srcloc: RelSourceLoc,
+    create_lui: FLui,
+    create_addi: FAddi,
+) -> VReg
+where
+    FLui: FnOnce(Writable<VReg>, u32) -> I,
+    FAddi: FnOnce(Writable<VReg>, VReg, i32) -> I,
+{
     let vreg = vcode.alloc_vreg();
 
     // Split value into upper 20 bits and lower 12 bits
@@ -51,11 +70,15 @@ fn materialize_large_constant<I: MachInst>(
         upper_20
     };
 
-    // Record constant for later emission
-    // TODO: When we implement emission, we'll emit LUI + ADDI here
-    // For now, just record it as a large constant
-    vcode.record_constant(vreg, Constant::Large(value));
+    // Emit LUI: load upper 20 bits
+    let temp_vreg = vcode.alloc_vreg();
+    let lui_imm = (upper << 12) as u32;
+    let lui_inst = create_lui(Writable::new(temp_vreg), lui_imm);
+    vcode.push(lui_inst, srcloc);
+
+    // Emit ADDI: add lower 12 bits (sign-extended)
+    let addi_inst = create_addi(Writable::new(vreg), temp_vreg, lower_12 as i32);
+    vcode.push(addi_inst, srcloc);
 
     vreg
 }
-

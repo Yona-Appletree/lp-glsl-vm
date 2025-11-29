@@ -3,8 +3,9 @@
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use core::fmt;
 
-use crate::backend3::types::{BlockIndex, CodeOffset, InsnIndex, Range, Ranges, VReg};
 use lpc_lpir::RelSourceLoc;
+
+use crate::backend3::types::{BlockIndex, InsnIndex, Ranges, VReg};
 
 /// Virtual-register code: machine instructions with virtual registers
 ///
@@ -27,13 +28,13 @@ pub struct VCode<I: MachInst> {
     pub clobbers: BTreeMap<InsnIndex, PRegSet>,
 
     /// Block structure
-    pub block_ranges: Ranges,           // Per-block instruction ranges
-    pub block_succ_range: Ranges,       // Per-block successor ranges
-    pub block_succs: Vec<BlockIndex>,    // Successors (flat array)
-    pub block_pred_range: Ranges,       // Per-block predecessor ranges
-    pub block_preds: Vec<BlockIndex>,    // Predecessors (flat array)
-    pub block_params_range: Ranges,     // Per-block parameter ranges
-    pub block_params: Vec<VReg>,         // Block parameter VRegs (flat array)
+    pub block_ranges: Ranges, // Per-block instruction ranges
+    pub block_succ_range: Ranges,     // Per-block successor ranges
+    pub block_succs: Vec<BlockIndex>, // Successors (flat array)
+    pub block_pred_range: Ranges,     // Per-block predecessor ranges
+    pub block_preds: Vec<BlockIndex>, // Predecessors (flat array)
+    pub block_params_range: Ranges,   // Per-block parameter ranges
+    pub block_params: Vec<VReg>,      // Block parameter VRegs (flat array)
 
     /// Branch arguments (values passed to blocks)
     pub branch_block_args: Vec<VReg>,
@@ -142,7 +143,10 @@ pub enum LoweredBlock {
     /// Original IR block
     Orig { block: lpc_lpir::BlockEntity },
     /// Edge block (for critical edges)
-    Edge { from: lpc_lpir::BlockEntity, to: lpc_lpir::BlockEntity },
+    Edge {
+        from: lpc_lpir::BlockEntity,
+        to: lpc_lpir::BlockEntity,
+    },
 }
 
 /// ABI information (Callee)
@@ -266,4 +270,3 @@ impl<I: MachInst> VCode<I> {
         }
     }
 }
-

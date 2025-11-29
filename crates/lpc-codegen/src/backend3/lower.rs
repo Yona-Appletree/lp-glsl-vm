@@ -3,14 +3,37 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use crate::backend3::blockorder::compute_block_order;
-use crate::backend3::constants::materialize_constant;
-use crate::backend3::types::{BlockIndex, VReg, Writable};
+use crate::backend3::types::{BlockIndex, VReg};
 use crate::backend3::vcode::{BlockLoweringOrder, Callee, MachInst, VCode};
 use crate::backend3::vcode_builder::VCodeBuilder;
 use lpc_lpir::{
-    BlockEntity as Block, ControlFlowGraph, DominatorTree, Function, Immediate,
-    InstEntity, Opcode, RelSourceLoc, Value,
+    BlockEntity as Block, ControlFlowGraph, DominatorTree, Function,
+    InstEntity, RelSourceLoc, Value,
 };
+
+/// Lowering backend trait: ISA-specific instruction creation
+///
+/// This trait allows ISA-specific backends to create machine instructions
+/// during lowering. The generic `Lower` struct delegates instruction creation
+/// to the backend implementation.
+pub trait LowerBackend {
+    /// The machine instruction type for this backend
+    type MInst: MachInst;
+
+    /// Lower a single IR instruction to machine instructions
+    ///
+    /// The backend should create the appropriate machine instructions and
+    /// push them to the VCodeBuilder via the Lower context.
+    ///
+    /// Returns `true` if the instruction was lowered, `false` if it's not
+    /// supported or handled elsewhere.
+    fn lower_inst(
+        &self,
+        ctx: &mut Lower<Self::MInst>,
+        inst: InstEntity,
+        srcloc: RelSourceLoc,
+    ) -> bool;
+}
 
 /// Lowering context: converts IR to VCode
 /// Generic over MachInst trait (ISA-agnostic)
@@ -35,9 +58,10 @@ pub struct Lower<I: MachInst> {
 }
 
 impl<I: MachInst> Lower<I> {
-    /// Lower a function to VCode
-    pub fn lower(
+    /// Lower a function to VCode using the given backend
+    pub fn lower<B: LowerBackend<MInst = I>>(
         mut self,
+        backend: &B,
         block_order: &BlockLoweringOrder,
     ) -> VCode<I> {
 
@@ -51,7 +75,7 @@ impl<I: MachInst> Lower<I> {
         for lowered_block in &block_order.lowered_order {
             match lowered_block {
                 crate::backend3::vcode::LoweredBlock::Orig { block } => {
-                    self.lower_block(*block);
+                    self.lower_block(backend, *block);
                 }
                 crate::backend3::vcode::LoweredBlock::Edge { from, to } => {
                     // Emit phi moves for edge block
@@ -130,8 +154,8 @@ impl<I: MachInst> Lower<I> {
                 for (pred_block, source_value) in sources {
                     if pred_block == from {
                         // Emit move: vreg_target = vreg_source
-                        let target_vreg = self.value_to_vreg[param_value];
-                        let source_vreg = self.value_to_vreg[&source_value];
+                        let _target_vreg = self.value_to_vreg[param_value];
+                        let _source_vreg = self.value_to_vreg[&source_value];
                         // TODO: Emit move instruction (will be implemented when we add move instructions)
                         // For now, this is a placeholder
                         break;
@@ -142,7 +166,7 @@ impl<I: MachInst> Lower<I> {
     }
 
     /// Lower a block
-    fn lower_block(&mut self, block: Block) {
+    fn lower_block<B: LowerBackend<MInst = I>>(mut self: &mut Self, backend: &B, block: Block) {
         // Get block index for VCode
         let block_idx = self.block_to_index.get(&block).copied().unwrap_or(BlockIndex::new(0));
 
@@ -164,92 +188,45 @@ impl<I: MachInst> Lower<I> {
         // Collect instructions first to avoid borrow checker issues
         let insts: Vec<_> = self.func.block_insts(block).collect();
         for inst in insts {
-            self.lower_inst(inst);
+            // Get source location from IR instruction
+            let ir_srcloc = self.func.srcloc(inst);
+            let base_srcloc = self.func.base_srcloc();
+            let rel_srcloc = RelSourceLoc::from_base_offset(base_srcloc, ir_srcloc);
+            
+            // Delegate to backend for instruction creation
+            backend.lower_inst(&mut self, inst, rel_srcloc);
         }
 
         // End block
         self.vcode.end_block();
     }
 
-    /// Lower an instruction
-    fn lower_inst(&mut self, inst: InstEntity) {
-        let inst_data = match self.func.dfg.inst_data(inst) {
-            Some(data) => data,
-            None => return,
-        };
-
-        // Get source location from IR instruction
-        let ir_srcloc = self.func.srcloc(inst);
-        let base_srcloc = self.func.base_srcloc();
-        let rel_srcloc = RelSourceLoc::from_base_offset(base_srcloc, ir_srcloc);
-
-        // Lower based on opcode
-        match inst_data.opcode {
-            Opcode::Iadd => {
-                if inst_data.args.len() >= 2 && !inst_data.results.is_empty() {
-                    let rs1 = self.value_to_vreg[&inst_data.args[0]];
-                    let rs2 = self.value_to_vreg[&inst_data.args[1]];
-                    let rd = Writable::new(self.value_to_vreg[&inst_data.results[0]]);
-                    // Create instruction - for Phase 1, we only support RISC-V 32
-                    // TODO: Make this properly generic in future phases
-                    self.create_and_push_add(rd, rs1, rs2, rel_srcloc);
-                }
-            }
-            Opcode::Isub => {
-                if inst_data.args.len() >= 2 && !inst_data.results.is_empty() {
-                    let rs1 = self.value_to_vreg[&inst_data.args[0]];
-                    let rs2 = self.value_to_vreg[&inst_data.args[1]];
-                    let rd = Writable::new(self.value_to_vreg[&inst_data.results[0]]);
-                    // Create instruction - for Phase 1, we only support RISC-V 32
-                    // TODO: Make this properly generic in future phases
-                    self.create_and_push_sub(rd, rs1, rs2, rel_srcloc);
-                }
-            }
-            Opcode::Iconst => {
-                if !inst_data.results.is_empty() {
-                    // Materialize constant
-                    if let Some(imm) = &inst_data.imm {
-                        let value = match imm {
-                            Immediate::I32(val) => *val,
-                            Immediate::I64(val) => *val as i32, // Truncate to i32
-                            _ => 0,
-                        };
-                        let vreg = materialize_constant(&mut self.vcode, value);
-                        // Map the result value to the constant VReg
-                        self.value_to_vreg.insert(inst_data.results[0], vreg);
-                    }
-                }
-            }
-            _ => {
-                // Other opcodes not yet implemented
-            }
-        }
+    /// Get the value-to-VReg mapping (for backend use)
+    pub(crate) fn value_to_vreg(&self) -> &BTreeMap<Value, VReg> {
+        &self.value_to_vreg
     }
 
-    /// Create and push ADD instruction (Phase 1: RISC-V 32 only)
-    /// This will be made properly generic in future phases
-    fn create_and_push_add(&mut self, rd: Writable<VReg>, rs1: VReg, rs2: VReg, srcloc: RelSourceLoc) {
-        // For Phase 1, we only support RISC-V 32
-        // This is a workaround - in future phases this will be properly generic via a trait
-        // We know that I is Riscv32MachInst for Phase 1
-        // This will be replaced with a proper trait-based approach in Phase 2+
+    /// Get mutable access to value-to-VReg mapping (for backend use)
+    /// Used for cases like iconst where we need to update the mapping
+    pub(crate) fn value_to_vreg_mut(&mut self) -> &mut BTreeMap<Value, VReg> {
+        &mut self.value_to_vreg
     }
 
-    /// Create and push SUB instruction (Phase 1: RISC-V 32 only)
-    /// This will be made properly generic in future phases
-    fn create_and_push_sub(&mut self, rd: Writable<VReg>, rs1: VReg, rs2: VReg, srcloc: RelSourceLoc) {
-        // For Phase 1, we only support RISC-V 32
-        // This is a workaround - in future phases this will be properly generic via a trait
-        // We know that I is Riscv32MachInst for Phase 1
-        // This will be replaced with a proper trait-based approach in Phase 2+
+    /// Get the function being lowered (for backend use)
+    pub(crate) fn func(&self) -> &Function {
+        &self.func
     }
 }
 
-/// Lower a function to VCode
-pub fn lower_function<I: MachInst>(
+/// Lower a function to VCode using the given backend
+pub fn lower_function<B: LowerBackend>(
     func: Function,
-    abi: Callee<I::ABIMachineSpec>,
-) -> VCode<I> {
+    backend: &B,
+    abi: Callee<<B::MInst as MachInst>::ABIMachineSpec>,
+) -> VCode<B::MInst>
+where
+    B::MInst: MachInst,
+{
     // Build CFG and dominator tree
     let cfg = ControlFlowGraph::from_function(&func);
     let domtree = DominatorTree::from_cfg(&cfg);
@@ -267,6 +244,6 @@ pub fn lower_function<I: MachInst>(
     };
 
     // Lower the function
-    lower.lower(&block_order)
+    lower.lower(backend, &block_order)
 }
 
