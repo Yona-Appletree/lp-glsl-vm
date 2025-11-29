@@ -175,7 +175,7 @@ impl GlslTest {
     /// Build LPIR Signature from function definition.
     fn build_signature(func_def: &glsl::syntax::FunctionDefinition) -> GlslResult<Signature> {
         // Use TypeChecker to extract function signature, then convert to LPIR Signature
-        let func_sig = TypeChecker::extract_function_signature(func_def)?;
+        let func_sig = lpc_glsl::extract_function_signature(func_def)?;
 
         // Convert parameter types
         // For out/inout parameters, use I32 (address type) instead of the value type
