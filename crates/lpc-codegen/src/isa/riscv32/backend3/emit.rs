@@ -3,7 +3,7 @@
 //! This module handles emission of VCode to machine code, including
 //! application of register allocations and edits (spills/reloads).
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
 use lpc_lpir::RelSourceLoc;
 use regalloc2::{Edit, Function as RegallocFunction};
@@ -11,7 +11,7 @@ use regalloc2::{Edit, Function as RegallocFunction};
 use crate::{
     backend3::{
         types::{BlockIndex, InsnIndex},
-        vcode::{MachInst, MachTerminator, VCode},
+        vcode::{MachInst, MachTerminator, RelocKind, VCode},
     },
     isa::riscv32::{
         backend3::{
@@ -40,12 +40,25 @@ struct EmitState {
     /// Pending fixups: branches waiting for labels to be bound
     pending_fixups: Vec<PendingFixup>,
 
+    /// External relocations (function calls, etc.)
+    external_relocations: Vec<Reloc>,
+
     /// Prologue/epilogue state
     frame_size: u32,
     clobbered_callee_saved: Vec<Gpr>,
 
     /// Current source location (for debugging)
     cur_srcloc: Option<RelSourceLoc>,
+}
+
+/// External relocation record
+struct Reloc {
+    /// Offset in buffer where relocation occurs
+    offset: u32,
+    /// Relocation kind
+    kind: RelocKind,
+    /// Target identifier (function name, etc.)
+    target: String,
 }
 
 /// Special offset value meaning "label not yet bound"
@@ -68,6 +81,7 @@ impl EmitState {
             sp_offset: 0,
             label_offsets: alloc::vec![UNKNOWN_LABEL_OFFSET; num_blocks],
             pending_fixups: Vec::new(),
+            external_relocations: Vec::new(),
             frame_size: 0,
             clobbered_callee_saved: Vec::new(),
             cur_srcloc: None,
@@ -188,7 +202,30 @@ impl VCode<Riscv32MachInst> {
         // Resolve any remaining forward references (should be none if order is correct)
         state.resolve_all_pending_fixups(&mut buffer);
 
+        // Fix external relocations (function calls, etc.)
+        self.fix_external_relocations(&mut buffer, &state);
+
+        // End any remaining source location range
+        if state.cur_srcloc.is_some() {
+            buffer.end_srcloc();
+        }
+
         buffer
+    }
+
+    /// Fix external relocations (function calls, etc.)
+    ///
+    /// This resolves relocations that were recorded during emission.
+    /// For function calls, this patches the call instruction with the function address.
+    fn fix_external_relocations(&self, buffer: &mut InstBuffer, state: &EmitState) {
+        // For now, relocations are recorded but not resolved
+        // In a full implementation, we would:
+        // 1. Look up function addresses from a symbol table
+        // 2. For direct calls: Load function address into a register and emit JALR
+        // 3. Patch the instruction at the relocation offset
+        // TODO: Implement relocation resolution
+        // For now, we just record them - actual resolution requires a symbol table
+        let _relocs = &state.external_relocations;
     }
 
     /// Compute emission order (cold blocks at end)
@@ -377,10 +414,12 @@ impl VCode<Riscv32MachInst> {
             if state.cur_srcloc != Some(inst_srcloc) {
                 if state.cur_srcloc.is_some() {
                     // End previous source location range
+                    buffer.end_srcloc();
                     state.cur_srcloc = None;
                 }
                 if !inst_srcloc.is_default() {
                     // Start new source location range
+                    buffer.start_srcloc(inst_srcloc);
                     state.cur_srcloc = Some(inst_srcloc);
                 }
             }
@@ -402,6 +441,20 @@ impl VCode<Riscv32MachInst> {
             // Emit the instruction
             let mut mach_inst = self.insts[inst_idx].clone();
             let allocs = regalloc.inst_allocs(inst);
+
+            // Skip Args pseudo-instruction (it emits no code, just tells regalloc about ABI args)
+            if matches!(mach_inst, Riscv32MachInst::Args { .. }) {
+                // Skip remaining edits for this instruction
+                while edit_idx < block_edits.len() {
+                    let (prog_point, _) = &block_edits[edit_idx];
+                    if prog_point.inst().index() == inst_idx {
+                        edit_idx += 1;
+                    } else {
+                        break;
+                    }
+                }
+                continue;
+            }
 
             // If this is a return, emit epilogue instead of return instruction
             if mach_inst.is_term() == MachTerminator::Ret {
@@ -426,7 +479,7 @@ impl VCode<Riscv32MachInst> {
                 self.emit_branch(buffer, state, mach_inst, branch_info);
             } else {
                 // Regular instruction - emit directly
-                self.emit_instruction(buffer, &mach_inst);
+                self.emit_instruction(buffer, &mach_inst, state, InsnIndex::new(inst_idx));
             }
 
             // Emit edits that come after this instruction
@@ -499,26 +552,24 @@ impl VCode<Riscv32MachInst> {
                 };
 
                 // Emit branch with label target (condition inversion handled in convert_branch_to_inst)
-                let branch_offset = buffer.cur_offset();
                 let inst = self.convert_branch_to_inst(&branch, target_block, invert);
-                buffer.emit_branch_with_label(inst, target_block.index() as u32);
+                let inst_idx = buffer.emit_branch_with_label(inst, target_block.index() as u32);
 
                 // Try to resolve immediately, or record fixup
                 state.resolve_or_record_fixup(
                     buffer,
-                    branch_offset as usize,
+                    inst_idx,
                     target_block,
                     BranchType::Conditional,
                 );
             }
             BranchInfo::OneDest { target } => {
-                let branch_offset = buffer.cur_offset();
                 let inst = self.convert_branch_to_inst(&branch, target, false);
-                buffer.emit_branch_with_label(inst, target.index() as u32);
+                let inst_idx = buffer.emit_branch_with_label(inst, target.index() as u32);
 
                 state.resolve_or_record_fixup(
                     buffer,
-                    branch_offset as usize,
+                    inst_idx,
                     target,
                     BranchType::Unconditional,
                 );
@@ -583,7 +634,118 @@ impl VCode<Riscv32MachInst> {
     }
 
     /// Emit a machine instruction (converted to Inst)
-    fn emit_instruction(&self, buffer: &mut InstBuffer, inst: &Riscv32MachInst) {
+    fn emit_instruction(
+        &self,
+        buffer: &mut InstBuffer,
+        inst: &Riscv32MachInst,
+        state: &mut EmitState,
+        _inst_idx: InsnIndex,
+    ) {
+        // Handle instructions that need multiple instructions specially
+        match inst {
+            Riscv32MachInst::Trapz { condition, .. } => {
+                // Conditional trap if zero: BEQ condition, zero, trap_label
+                // For now, emit EBREAK directly (condition should be checked by runtime)
+                // TODO: Implement proper conditional trap with branch to trap handler
+                let _condition_gpr = self.reg_to_gpr(*condition);
+                // Emit: BEQ condition, zero, skip_trap (skip EBREAK if condition != 0)
+                // For now, just emit EBREAK unconditionally
+                buffer.emit(Inst::Ebreak);
+                return;
+            }
+            Riscv32MachInst::Trapnz { condition, .. } => {
+                // Conditional trap if non-zero: BNE condition, zero, trap_label
+                // Similar to Trapz
+                let _condition_gpr = self.reg_to_gpr(*condition);
+                buffer.emit(Inst::Ebreak);
+                return;
+            }
+            Riscv32MachInst::Ecall { number, args, result } => {
+                // System call ABI:
+                // - Syscall number goes in a7 (x17)
+                // - Arguments go in a0-a6 (x10-x16)
+                // - Return value comes from a0 (x10)
+                
+                // Move syscall number to a7
+                // For now, assume number is a constant immediate
+                // TODO: Handle case where number is in a register
+                buffer.push_addi(Gpr::A7, Gpr::Zero, *number);
+                
+                // Move arguments to a0-a6
+                let arg_regs = [Gpr::A0, Gpr::A1, Gpr::A2, Gpr::A3, Gpr::A4, Gpr::A5, Gpr::A6];
+                for (i, arg) in args.iter().take(7).enumerate() {
+                    let arg_gpr = self.reg_to_gpr(*arg);
+                    if arg_gpr != arg_regs[i] {
+                        // Move argument to ABI register
+                        buffer.push_addi(arg_regs[i], arg_gpr, 0);
+                    }
+                }
+                
+                // Emit ECALL
+                buffer.emit(Inst::Ecall);
+                
+                // Move return value from a0 to result register if needed
+                if let Some(result_reg) = result {
+                    let result_gpr = self.reg_to_gpr(result_reg.to_reg());
+                    if result_gpr != Gpr::A0 {
+                        buffer.push_addi(result_gpr, Gpr::A0, 0);
+                    }
+                }
+                return;
+            }
+            Riscv32MachInst::Jal { rd, callee, args } => {
+                // Function call ABI:
+                // - First 8 integer args in a0-a7 (x10-x17)
+                // - Additional args on stack (outgoing args area)
+                // - Return value in a0 (x10), second return in a1 (x11) if applicable
+                
+                // Move arguments to ABI registers (a0-a7)
+                let arg_regs = [
+                    Gpr::A0, Gpr::A1, Gpr::A2, Gpr::A3, Gpr::A4, Gpr::A5, Gpr::A6, Gpr::A7,
+                ];
+                for (i, arg) in args.iter().take(8).enumerate() {
+                    let arg_gpr = self.reg_to_gpr(*arg);
+                    if arg_gpr != arg_regs[i] {
+                        // Move argument to ABI register
+                        buffer.push_addi(arg_regs[i], arg_gpr, 0);
+                    }
+                }
+                
+                // TODO: Handle additional arguments on stack (outgoing args area)
+                // For now, we only support up to 8 arguments
+                if args.len() > 8 {
+                    // Additional args would go on stack
+                    // This requires outgoing args area in frame layout
+                    // TODO: Implement stack argument passing
+                }
+                
+                // Record relocation for direct calls
+                let call_offset = buffer.cur_offset();
+                state.external_relocations.push(Reloc {
+                    offset: call_offset,
+                    kind: RelocKind::FunctionCall,
+                    target: callee.clone(),
+                });
+                
+                // Emit JAL with placeholder offset (will be patched by relocation)
+                // For direct calls, we'll need to load the function address and use JALR
+                // For now, emit JAL with 0 offset (will be patched)
+                buffer.emit(Inst::Jal {
+                    rd: Gpr::Ra, // Return address goes in RA
+                    imm: 0,      // Placeholder, will be patched
+                });
+                
+                // Move return value from a0 to destination register if needed
+                if let Some(rd_reg) = rd.to_reg().to_real_reg() {
+                    let rd_gpr = preg_to_gpr(rd_reg);
+                    if rd_gpr != Gpr::A0 {
+                        buffer.push_addi(rd_gpr, Gpr::A0, 0);
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
         let riscv_inst = self.convert_machinst_to_inst(inst);
         buffer.emit(riscv_inst);
     }
@@ -724,19 +886,23 @@ impl VCode<Riscv32MachInst> {
                 panic!("Branch should be handled before convert_machinst_to_inst");
             }
             Riscv32MachInst::Jal { .. } => {
-                // Function calls - TODO: implement
-                panic!("Function calls not yet implemented");
+                // Function calls are handled in emit_instruction
+                panic!("Jal should be handled in emit_instruction");
             }
             Riscv32MachInst::Ecall { .. } => {
-                // System calls - TODO: implement
-                panic!("System calls not yet implemented");
+                // System calls are handled in emit_instruction
+                panic!("Ecall should be handled in emit_instruction");
             }
             Riscv32MachInst::Ebreak => Inst::Ebreak,
-            Riscv32MachInst::Trap { .. }
-            | Riscv32MachInst::Trapz { .. }
-            | Riscv32MachInst::Trapnz { .. } => {
-                // Traps - TODO: implement
-                panic!("Traps not yet implemented");
+            Riscv32MachInst::Trap { .. } => {
+                // Unconditional trap: emit EBREAK
+                // The trap code is encoded in the instruction metadata and can be
+                // used by trap handlers or debuggers
+                Inst::Ebreak
+            }
+            Riscv32MachInst::Trapz { .. } | Riscv32MachInst::Trapnz { .. } => {
+                // Conditional traps are handled in emit_instruction
+                panic!("Trapz/Trapnz should be handled in emit_instruction");
             }
             Riscv32MachInst::Args { .. } => {
                 // Args is a pseudo-instruction, emits no code

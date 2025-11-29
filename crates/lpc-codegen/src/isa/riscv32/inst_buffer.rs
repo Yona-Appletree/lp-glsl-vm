@@ -2,6 +2,8 @@
 
 use alloc::vec::Vec;
 
+use lpc_lpir::RelSourceLoc;
+
 use crate::{Gpr, Inst};
 
 /// A code buffer that accumulates RISC-V 32-bit instructions.
@@ -10,6 +12,20 @@ use crate::{Gpr, Inst};
 /// only when `as_bytes()` is called (lazy encoding, like Cranelift).
 pub struct InstBuffer {
     instructions: Vec<Inst>,
+    /// Source location ranges for debugging
+    /// Each entry corresponds to a range of instructions with the same source location
+    srcloc_ranges: Vec<SourceLocRange>,
+}
+
+/// Source location range
+#[derive(Debug, Clone)]
+struct SourceLocRange {
+    /// Start instruction index (inclusive)
+    start: usize,
+    /// End instruction index (exclusive)
+    end: usize,
+    /// Source location
+    srcloc: RelSourceLoc,
 }
 
 impl InstBuffer {
@@ -17,6 +33,7 @@ impl InstBuffer {
     pub fn new() -> Self {
         Self {
             instructions: Vec::new(),
+            srcloc_ranges: Vec::new(),
         }
     }
 
@@ -114,6 +131,50 @@ impl InstBuffer {
     /// Clear the buffer.
     pub fn clear(&mut self) {
         self.instructions.clear();
+        self.srcloc_ranges.clear();
+    }
+
+    /// Start a new source location range
+    ///
+    /// This marks the beginning of a range of instructions that correspond to
+    /// a specific source location. The range continues until `end_srcloc()` is called.
+    pub fn start_srcloc(&mut self, srcloc: RelSourceLoc) {
+        // End any previous source location range
+        if let Some(last_range) = self.srcloc_ranges.last_mut() {
+            if last_range.end == self.instructions.len() {
+                // Extend the current range
+                return;
+            }
+        }
+
+        // Start a new range
+        self.srcloc_ranges.push(SourceLocRange {
+            start: self.instructions.len(),
+            end: self.instructions.len(),
+            srcloc,
+        });
+    }
+
+    /// End the current source location range
+    ///
+    /// This marks the end of the current source location range.
+    pub fn end_srcloc(&mut self) {
+        if let Some(last_range) = self.srcloc_ranges.last_mut() {
+            last_range.end = self.instructions.len();
+        }
+    }
+
+    /// Get source location for a given instruction index
+    ///
+    /// Returns the source location that corresponds to the instruction at the given index,
+    /// or `None` if no source location is available.
+    pub fn get_srcloc(&self, inst_idx: usize) -> Option<RelSourceLoc> {
+        for range in &self.srcloc_ranges {
+            if inst_idx >= range.start && inst_idx < range.end {
+                return Some(range.srcloc);
+            }
+        }
+        None
     }
 
     /// Get current code offset (in bytes)
