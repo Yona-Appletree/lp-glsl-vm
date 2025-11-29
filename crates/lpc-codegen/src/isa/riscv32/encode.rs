@@ -207,6 +207,88 @@ pub fn xori(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
     encode_i(0x13, rd, rs1, imm, 0x4)
 }
 
+// Logical instructions
+
+/// AND: rd = rs1 & rs2
+pub fn and(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x7, 0x0)
+}
+
+/// ANDI: rd = rs1 & imm
+pub fn andi(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
+    encode_i(0x13, rd, rs1, imm, 0x7)
+}
+
+/// OR: rd = rs1 | rs2
+pub fn or(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x6, 0x0)
+}
+
+/// ORI: rd = rs1 | imm
+pub fn ori(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
+    encode_i(0x13, rd, rs1, imm, 0x6)
+}
+
+/// XOR: rd = rs1 ^ rs2
+pub fn xor(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x4, 0x0)
+}
+
+// Shift instructions
+
+/// SLL: rd = rs1 << rs2 (logical left shift)
+pub fn sll(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x1, 0x0)
+}
+
+/// SLLI: rd = rs1 << imm (logical left shift immediate)
+/// Note: imm[11:5] must be 0, only imm[4:0] is used for shift amount
+pub fn slli(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
+    // For SLLI, imm[11:5] must be 0, so we only use imm[4:0]
+    let imm = imm & 0x1f; // Mask to 5 bits
+    encode_i(0x13, rd, rs1, imm, 0x1)
+}
+
+/// SRL: rd = rs1 >> rs2 (logical right shift)
+pub fn srl(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x5, 0x0)
+}
+
+/// SRLI: rd = rs1 >> imm (logical right shift immediate)
+/// Note: imm[11:5] must be 0, only imm[4:0] is used for shift amount
+pub fn srli(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
+    // For SRLI, imm[11:5] must be 0, so we only use imm[4:0]
+    let imm = imm & 0x1f; // Mask to 5 bits
+    encode_i(0x13, rd, rs1, imm, 0x5)
+}
+
+/// SRA: rd = rs1 >> rs2 (arithmetic right shift)
+pub fn sra(rd: Gpr, rs1: Gpr, rs2: Gpr) -> u32 {
+    encode_r(0x33, rd, rs1, rs2, 0x5, 0x20)
+}
+
+/// SRAI: rd = rs1 >> imm (arithmetic right shift immediate)
+/// Note: imm[11:5] must be 0x20, only imm[4:0] is used for shift amount
+pub fn srai(rd: Gpr, rs1: Gpr, imm: i32) -> u32 {
+    // For SRAI, imm[11:5] must be 0x20, so we encode it specially
+    // imm[4:0] is the shift amount
+    let imm_lo = imm & 0x1f; // bits [4:0]
+    let imm_hi = 0x20; // bits [11:5] must be 0x20
+    encode_i_with_imm_hi(0x13, rd, rs1, imm_lo, imm_hi, 0x5)
+}
+
+/// Encode an I-type instruction with explicit imm[11:5] (for SRAI)
+fn encode_i_with_imm_hi(opcode: u8, rd: Gpr, rs1: Gpr, imm_lo: i32, imm_hi: u8, funct3: u8) -> u32 {
+    let opcode = opcode as u32;
+    let rd = rd.num() as u32;
+    let funct3 = funct3 as u32;
+    let rs1 = rs1.num() as u32;
+    let imm_lo = (imm_lo as u32) & 0x1f; // bits [4:0]
+    let imm_hi = imm_hi as u32; // bits [11:5]
+
+    opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | (imm_lo << 20) | (imm_hi << 25)
+}
+
 // Immediate generation
 
 /// LUI: rd = imm << 12

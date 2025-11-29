@@ -54,6 +54,32 @@ pub enum Inst {
     /// XORI: rd = rs1 ^ imm
     Xori { rd: Gpr, rs1: Gpr, imm: i32 },
 
+    // Logical instructions
+    /// AND: rd = rs1 & rs2
+    And { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// ANDI: rd = rs1 & imm
+    Andi { rd: Gpr, rs1: Gpr, imm: i32 },
+    /// OR: rd = rs1 | rs2
+    Or { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// ORI: rd = rs1 | imm
+    Ori { rd: Gpr, rs1: Gpr, imm: i32 },
+    /// XOR: rd = rs1 ^ rs2
+    Xor { rd: Gpr, rs1: Gpr, rs2: Gpr },
+
+    // Shift instructions
+    /// SLL: rd = rs1 << rs2 (logical left shift)
+    Sll { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// SLLI: rd = rs1 << imm (logical left shift immediate)
+    Slli { rd: Gpr, rs1: Gpr, imm: i32 },
+    /// SRL: rd = rs1 >> rs2 (logical right shift)
+    Srl { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// SRLI: rd = rs1 >> imm (logical right shift immediate)
+    Srli { rd: Gpr, rs1: Gpr, imm: i32 },
+    /// SRA: rd = rs1 >> rs2 (arithmetic right shift)
+    Sra { rd: Gpr, rs1: Gpr, rs2: Gpr },
+    /// SRAI: rd = rs1 >> imm (arithmetic right shift immediate)
+    Srai { rd: Gpr, rs1: Gpr, imm: i32 },
+
     // Immediate generation
     /// LUI: rd = imm << 12
     Lui { rd: Gpr, imm: u32 },
@@ -91,6 +117,17 @@ impl Inst {
             Inst::Sltu { rd, rs1, rs2 } => sltu(*rd, *rs1, *rs2),
             Inst::Sltiu { rd, rs1, imm } => sltiu(*rd, *rs1, *imm),
             Inst::Xori { rd, rs1, imm } => xori(*rd, *rs1, *imm),
+            Inst::And { rd, rs1, rs2 } => and(*rd, *rs1, *rs2),
+            Inst::Andi { rd, rs1, imm } => andi(*rd, *rs1, *imm),
+            Inst::Or { rd, rs1, rs2 } => or(*rd, *rs1, *rs2),
+            Inst::Ori { rd, rs1, imm } => ori(*rd, *rs1, *imm),
+            Inst::Xor { rd, rs1, rs2 } => xor(*rd, *rs1, *rs2),
+            Inst::Sll { rd, rs1, rs2 } => sll(*rd, *rs1, *rs2),
+            Inst::Slli { rd, rs1, imm } => slli(*rd, *rs1, *imm),
+            Inst::Srl { rd, rs1, rs2 } => srl(*rd, *rs1, *rs2),
+            Inst::Srli { rd, rs1, imm } => srli(*rd, *rs1, *imm),
+            Inst::Sra { rd, rs1, rs2 } => sra(*rd, *rs1, *rs2),
+            Inst::Srai { rd, rs1, imm } => srai(*rd, *rs1, *imm),
             Inst::Lui { rd, imm } => lui(*rd, *imm),
             Inst::Auipc { rd, imm } => auipc(*rd, *imm),
             Inst::Ecall => ecall(),

@@ -5,6 +5,7 @@ pub mod blockorder_tests;
 pub mod cfg_patterns_tests;
 pub mod clobber_tests;
 pub mod constants_tests;
+pub mod emission_tests;
 pub mod integration_tests;
 pub mod lower_tests;
 pub mod operand_collection_completeness_tests;

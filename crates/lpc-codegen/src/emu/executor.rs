@@ -520,6 +520,216 @@ pub fn execute_instruction(
                 rd_new: result,
             }
         }
+        Inst::And { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1);
+            let val2 = read_reg(regs, rs2);
+            let rd_old = read_reg(regs, rd);
+            let result = val1 & val2;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Andi { rd, rs1, imm } => {
+            let val1 = read_reg(regs, rs1);
+            let rd_old = read_reg(regs, rd);
+            let result = val1 & imm;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: None,
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Or { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1);
+            let val2 = read_reg(regs, rs2);
+            let rd_old = read_reg(regs, rd);
+            let result = val1 | val2;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Ori { rd, rs1, imm } => {
+            let val1 = read_reg(regs, rs1);
+            let rd_old = read_reg(regs, rd);
+            let result = val1 | imm;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: None,
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Xor { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1);
+            let val2 = read_reg(regs, rs2);
+            let rd_old = read_reg(regs, rd);
+            let result = val1 ^ val2;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Sll { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1);
+            let val2 = read_reg(regs, rs2);
+            let rd_old = read_reg(regs, rd);
+            let shift_amount = (val2 & 0x1f) as u32; // Only use bottom 5 bits
+            let result = (val1 as u32).wrapping_shl(shift_amount) as i32;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Slli { rd, rs1, imm } => {
+            let val1 = read_reg(regs, rs1);
+            let rd_old = read_reg(regs, rd);
+            let shift_amount = (imm & 0x1f) as u32; // Only use bottom 5 bits
+            let result = (val1 as u32).wrapping_shl(shift_amount) as i32;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: None,
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Srl { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1);
+            let val2 = read_reg(regs, rs2);
+            let rd_old = read_reg(regs, rd);
+            let shift_amount = (val2 & 0x1f) as u32; // Only use bottom 5 bits
+            let result = ((val1 as u32).wrapping_shr(shift_amount)) as i32;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Srli { rd, rs1, imm } => {
+            let val1 = read_reg(regs, rs1);
+            let rd_old = read_reg(regs, rd);
+            let shift_amount = (imm & 0x1f) as u32; // Only use bottom 5 bits
+            let result = ((val1 as u32).wrapping_shr(shift_amount)) as i32;
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: None,
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Sra { rd, rs1, rs2 } => {
+            let val1 = read_reg(regs, rs1);
+            let val2 = read_reg(regs, rs2);
+            let rd_old = read_reg(regs, rd);
+            let shift_amount = (val2 & 0x1f) as u32; // Only use bottom 5 bits
+            let result = val1.wrapping_shr(shift_amount);
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: Some(val2),
+                rd_old,
+                rd_new: result,
+            }
+        }
+        Inst::Srai { rd, rs1, imm } => {
+            let val1 = read_reg(regs, rs1);
+            let rd_old = read_reg(regs, rd);
+            let shift_amount = (imm & 0x1f) as u32; // Only use bottom 5 bits
+            let result = val1.wrapping_shr(shift_amount);
+            if rd.num() != 0 {
+                regs[rd.num() as usize] = result;
+            }
+            InstLog::Arithmetic {
+                cycle: 0,
+                pc,
+                instruction: instruction_word,
+                rd,
+                rs1_val: val1,
+                rs2_val: None,
+                rd_old,
+                rd_new: result,
+            }
+        }
         Inst::Ecall => {
             syscall = true;
             InstLog::System {

@@ -288,11 +288,11 @@ impl VCode<Riscv32MachInst> {
         // 1. Setup area: save FP and RA
         // addi sp, sp, -8
         // sw ra, 4(sp)
-        // sw fp, 0(sp)
+        // sw fp, 0(sp)  (fp is s0/x8)
         state.sp_offset = -8;
         buffer.push_addi(Gpr::Sp, Gpr::Sp, -8);
         buffer.push_sw(Gpr::Sp, Gpr::Ra, 4);
-        buffer.push_sw(Gpr::Sp, Gpr::S0, 0);
+        buffer.push_sw(Gpr::Sp, Gpr::S0, 0); // Save old frame pointer (s0/x8)
 
         // 2. Adjust SP for entire frame
         let total_size = frame.total_size();
@@ -325,7 +325,7 @@ impl VCode<Riscv32MachInst> {
         }
 
         // 3. Restore FP and RA
-        buffer.push_lw(Gpr::S0, Gpr::Sp, 0);
+        buffer.push_lw(Gpr::S0, Gpr::Sp, 0); // Restore old frame pointer (s0/x8)
         buffer.push_lw(Gpr::Ra, Gpr::Sp, 4);
         buffer.push_addi(Gpr::Sp, Gpr::Sp, 8);
 
@@ -487,7 +487,7 @@ impl VCode<Riscv32MachInst> {
                 // For now, assume false is fallthrough (next block)
                 // In practice, need to check block order
                 let current_offset = buffer.cur_offset();
-                let true_offset = state.get_label_offset(target_true);
+                let _true_offset = state.get_label_offset(target_true);
                 let false_offset = state.get_label_offset(target_false);
 
                 // Determine if one target is fallthrough
@@ -498,16 +498,9 @@ impl VCode<Riscv32MachInst> {
                     (target_false, true)
                 };
 
-                // Invert condition if needed (simplified - actual implementation would
-                // need to modify the instruction condition)
-                if invert {
-                    // For now, just emit the branch as-is
-                    // TODO: Implement condition inversion
-                }
-
-                // Emit branch with label target
+                // Emit branch with label target (condition inversion handled in convert_branch_to_inst)
                 let branch_offset = buffer.cur_offset();
-                let inst = self.convert_branch_to_inst(&branch, target_block);
+                let inst = self.convert_branch_to_inst(&branch, target_block, invert);
                 buffer.emit_branch_with_label(inst, target_block.index() as u32);
 
                 // Try to resolve immediately, or record fixup
@@ -520,7 +513,7 @@ impl VCode<Riscv32MachInst> {
             }
             BranchInfo::OneDest { target } => {
                 let branch_offset = buffer.cur_offset();
-                let inst = self.convert_branch_to_inst(&branch, target);
+                let inst = self.convert_branch_to_inst(&branch, target, false);
                 buffer.emit_branch_with_label(inst, target.index() as u32);
 
                 state.resolve_or_record_fixup(
@@ -534,15 +527,33 @@ impl VCode<Riscv32MachInst> {
     }
 
     /// Convert Riscv32MachInst branch to Inst for emission
-    fn convert_branch_to_inst(&self, branch: &Riscv32MachInst, _target: BlockIndex) -> Inst {
+    fn convert_branch_to_inst(
+        &self,
+        branch: &Riscv32MachInst,
+        _target: BlockIndex,
+        invert: bool,
+    ) -> Inst {
         match branch {
             Riscv32MachInst::Br { condition } => {
-                // For now, emit as BEQ with zero (simplified)
-                // TODO: Extract actual condition and convert properly
-                Inst::Beq {
-                    rs1: Gpr::Zero,
-                    rs2: Gpr::Zero,
-                    imm: 0, // Will be patched
+                // Condition is a Reg containing comparison result (0 or non-zero)
+                // For true branch: BNE condition, zero, target (branch if condition != 0)
+                // For false branch: BEQ condition, zero, target (branch if condition == 0)
+                // If invert is true, we invert the condition
+                let condition_gpr = self.reg_to_gpr(*condition);
+                if invert {
+                    // Inverted: branch if condition == 0 (false)
+                    Inst::Beq {
+                        rs1: condition_gpr,
+                        rs2: Gpr::Zero,
+                        imm: 0, // Will be patched
+                    }
+                } else {
+                    // Normal: branch if condition != 0 (true)
+                    Inst::Bne {
+                        rs1: condition_gpr,
+                        rs2: Gpr::Zero,
+                        imm: 0, // Will be patched
+                    }
                 }
             }
             Riscv32MachInst::Jump => Inst::Jal {
@@ -649,68 +660,57 @@ impl VCode<Riscv32MachInst> {
                 rs1: self.reg_to_gpr(*rs1),
                 imm: *imm,
             },
-            Riscv32MachInst::And { rd, rs1, rs2 } => Inst::Add {
-                // TODO: Add AND instruction to Inst enum
+            Riscv32MachInst::And { rd, rs1, rs2 } => Inst::And {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 rs2: self.reg_to_gpr(*rs2),
             },
-            Riscv32MachInst::Andi { rd, rs1, imm } => Inst::Addi {
-                // TODO: Add ANDI instruction to Inst enum
+            Riscv32MachInst::Andi { rd, rs1, imm } => Inst::Andi {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 imm: *imm,
             },
-            Riscv32MachInst::Or { rd, rs1, rs2 } => Inst::Add {
-                // TODO: Add OR instruction to Inst enum
+            Riscv32MachInst::Or { rd, rs1, rs2 } => Inst::Or {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 rs2: self.reg_to_gpr(*rs2),
             },
-            Riscv32MachInst::Ori { rd, rs1, imm } => Inst::Addi {
-                // TODO: Add ORI instruction to Inst enum
+            Riscv32MachInst::Ori { rd, rs1, imm } => Inst::Ori {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 imm: *imm,
             },
-            Riscv32MachInst::Xor { rd, rs1, rs2 } => Inst::Add {
-                // TODO: Add XOR instruction to Inst enum
+            Riscv32MachInst::Xor { rd, rs1, rs2 } => Inst::Xor {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 rs2: self.reg_to_gpr(*rs2),
             },
-            Riscv32MachInst::Sll { rd, rs1, rs2 } => Inst::Add {
-                // TODO: Add SLL instruction to Inst enum
+            Riscv32MachInst::Sll { rd, rs1, rs2 } => Inst::Sll {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 rs2: self.reg_to_gpr(*rs2),
             },
-            Riscv32MachInst::Slli { rd, rs1, imm } => Inst::Addi {
-                // TODO: Add SLLI instruction to Inst enum
+            Riscv32MachInst::Slli { rd, rs1, imm } => Inst::Slli {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 imm: *imm,
             },
-            Riscv32MachInst::Srl { rd, rs1, rs2 } => Inst::Add {
-                // TODO: Add SRL instruction to Inst enum
+            Riscv32MachInst::Srl { rd, rs1, rs2 } => Inst::Srl {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 rs2: self.reg_to_gpr(*rs2),
             },
-            Riscv32MachInst::Srli { rd, rs1, imm } => Inst::Addi {
-                // TODO: Add SRLI instruction to Inst enum
+            Riscv32MachInst::Srli { rd, rs1, imm } => Inst::Srli {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 imm: *imm,
             },
-            Riscv32MachInst::Sra { rd, rs1, rs2 } => Inst::Add {
-                // TODO: Add SRA instruction to Inst enum
+            Riscv32MachInst::Sra { rd, rs1, rs2 } => Inst::Sra {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 rs2: self.reg_to_gpr(*rs2),
             },
-            Riscv32MachInst::Srai { rd, rs1, imm } => Inst::Addi {
-                // TODO: Add SRAI instruction to Inst enum
+            Riscv32MachInst::Srai { rd, rs1, imm } => Inst::Srai {
                 rd: self.reg_to_gpr(rd.to_reg()),
                 rs1: self.reg_to_gpr(*rs1),
                 imm: *imm,
@@ -894,10 +894,515 @@ impl ApplyAllocations for Riscv32MachInst {
                 }
                 *operand_idx += 1;
             }
-            // Add more instruction types as needed...
-            _ => {
-                // For other instructions, apply allocations similarly
-                // This is a simplified version - full implementation would handle all cases
+            Riscv32MachInst::Sub { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Lui { rd, imm: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Lw { rd, rs1, imm: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Sw { rs1, rs2, imm: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Move { rd, rs } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Mul { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Div { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Rem { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Slt { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Sltiu { rd, rs1, imm: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Sltu { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Xori { rd, rs1, imm: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::And { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Andi { rd, rs1, imm: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Or { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Ori { rd, rs1, imm: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Xor { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Sll { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Slli { rd, rs1, imm: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Srl { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Srli { rd, rs1, imm: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Sra { rd, rs1, rs2 } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs2 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Srai { rd, rs1, imm: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rs1 = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Br { condition } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *condition = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Trapz { condition, code: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *condition = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Trapnz { condition, code: _ } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *condition = crate::backend3::types::Reg::from_real_reg(preg);
+                    }
+                }
+                *operand_idx += 1;
+            }
+            Riscv32MachInst::Return { ret_vals } => {
+                for ret_val in ret_vals.iter_mut() {
+                    if let Some(alloc) = allocs.get(*operand_idx) {
+                        if let Some(preg) = alloc.as_reg() {
+                            *ret_val = crate::backend3::types::Reg::from_real_reg(preg);
+                        }
+                    }
+                    *operand_idx += 1;
+                }
+            }
+            Riscv32MachInst::Jal { rd, callee: _, args } => {
+                if let Some(alloc) = allocs.get(*operand_idx) {
+                    if let Some(preg) = alloc.as_reg() {
+                        *rd = crate::backend3::types::Writable::new(
+                            crate::backend3::types::Reg::from_real_reg(preg),
+                        );
+                    }
+                }
+                *operand_idx += 1;
+                for arg in args.iter_mut() {
+                    if let Some(alloc) = allocs.get(*operand_idx) {
+                        if let Some(preg) = alloc.as_reg() {
+                            *arg = crate::backend3::types::Reg::from_real_reg(preg);
+                        }
+                    }
+                    *operand_idx += 1;
+                }
+            }
+            Riscv32MachInst::Ecall { number: _, args, result } => {
+                for arg in args.iter_mut() {
+                    if let Some(alloc) = allocs.get(*operand_idx) {
+                        if let Some(preg) = alloc.as_reg() {
+                            *arg = crate::backend3::types::Reg::from_real_reg(preg);
+                        }
+                    }
+                    *operand_idx += 1;
+                }
+                if let Some(ref mut result_reg) = result {
+                    if let Some(alloc) = allocs.get(*operand_idx) {
+                        if let Some(preg) = alloc.as_reg() {
+                            *result_reg = crate::backend3::types::Writable::new(
+                                crate::backend3::types::Reg::from_real_reg(preg),
+                            );
+                        }
+                    }
+                    *operand_idx += 1;
+                }
+            }
+            Riscv32MachInst::Jump
+            | Riscv32MachInst::Ebreak
+            | Riscv32MachInst::Trap { .. }
+            | Riscv32MachInst::Args { .. } => {
+                // These instructions have no operands that need allocation
             }
         }
     }
