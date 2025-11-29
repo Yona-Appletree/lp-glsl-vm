@@ -20,3 +20,11 @@ pub fn writable_zero_reg() -> Writable<Reg> {
     Writable::new(zero_reg())
 }
 
+/// Get the frame pointer register (x8/s0/fp) as a Reg
+///
+/// The frame pointer is used to access stack-allocated variables and
+/// function parameters passed on the stack.
+pub fn frame_pointer() -> Reg {
+    Reg::from_real_reg(PReg::new(8, RegClass::Int))
+}
+

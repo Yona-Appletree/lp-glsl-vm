@@ -30,8 +30,8 @@ fn test_vcode_builder_alloc_vreg() {
     let mut builder = VCodeBuilder::<Riscv32MachInst>::new(Riscv32EmitInfo);
     let vreg1 = builder.alloc_vreg(RegClass::Int);
     let vreg2 = builder.alloc_vreg(RegClass::Int);
-    assert_eq!(vreg1.vreg(), 0);
-    assert_eq!(vreg2.vreg(), 1);
+    assert_eq!(vreg1.vreg(), 192); // VRegs start from PINNED_VREGS
+    assert_eq!(vreg2.vreg(), 193);
 }
 
 #[test]

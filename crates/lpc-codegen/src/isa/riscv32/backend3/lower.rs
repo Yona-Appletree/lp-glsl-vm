@@ -105,6 +105,13 @@ impl LowerBackend for Riscv32LowerBackend {
                             |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
                             || zero_reg(),
                         );
+                        // Record constant in constants map
+                        use crate::backend3::vcode::Constant;
+                        if crate::backend3::constants::fits_in_12_bits(value) {
+                            ctx.vcode.record_constant(vreg, Constant::Inline(value));
+                        } else {
+                            ctx.vcode.record_constant(vreg, Constant::Large(value));
+                        }
                         // Now update value_to_vreg (vcode borrow is dropped, so we can borrow ctx mutably)
                         let result_value = results[0];
                         ctx.value_to_vreg_mut().insert(result_value, vreg);
@@ -607,33 +614,61 @@ impl LowerBackend for Riscv32LowerBackend {
         srcloc: lpc_lpir::RelSourceLoc,
     ) {
         use crate::backend3::types::Reg;
-        use crate::isa::riscv32::backend3::{abi::Riscv32ABI, inst::ArgPair, inst::Riscv32MachInst};
+        use crate::isa::riscv32::backend3::{abi::Riscv32ABI, inst::ArgPair, inst::Riscv32MachInst, regs::frame_pointer};
 
         // Get function parameters from entry block
-        if let Some(block_data) = ctx.func().block_data(entry_block) {
-            let params = &block_data.params;
-            if !params.is_empty() {
-                // Get ABI argument registers
-                let arg_regs = Riscv32ABI::arg_regs();
+        // Collect parameters first to avoid borrow checker issues
+        let params: alloc::vec::Vec<_> = ctx
+            .func()
+            .block_data(entry_block)
+            .map(|bd| bd.params.clone())
+            .unwrap_or_default();
+        
+        if !params.is_empty() {
+            // Get ABI argument registers
+            let arg_regs = Riscv32ABI::arg_regs();
 
-                // Create ArgPairs: map each parameter Value to its VReg and ABI register
-                let mut arg_pairs = alloc::vec::Vec::new();
-                for (idx, param_value) in params.iter().enumerate() {
-                    if let Some(&vreg) = ctx.value_to_vreg().get(param_value) {
-                        if let Some(&preg) = arg_regs.get(idx) {
-                            arg_pairs.push(ArgPair {
-                                vreg: Reg::from_virtual_reg(vreg),
-                                preg,
-                            });
-                        }
+            // Create ArgPairs: map each parameter Value to its VReg and ABI register
+            // For parameters beyond ABI argument registers, emit LW instructions to load from stack
+            let mut arg_pairs = alloc::vec::Vec::new();
+            let mut stack_loads = alloc::vec::Vec::new();
+            
+            for (idx, param_value) in params.iter().enumerate() {
+                if let Some(&vreg) = ctx.value_to_vreg().get(param_value) {
+                    if let Some(&preg) = arg_regs.get(idx) {
+                        // Parameter fits in ABI argument register
+                        arg_pairs.push(ArgPair {
+                            vreg: Reg::from_virtual_reg(vreg),
+                            preg,
+                        });
+                    } else {
+                        // Parameter beyond ABI argument registers - passed on stack
+                        // Emit LW instruction to load from stack
+                        // Stack parameters start at offset 0 from frame pointer
+                        // Each parameter is 4 bytes (i32), and we skip the first 8 (in registers)
+                        let stack_offset = (idx - arg_regs.len()) * 4;
+                        
+                        let fp_reg = frame_pointer();
+                        let vreg_writable = Reg::from_virtual_reg(vreg);
+                        
+                        stack_loads.push(Riscv32MachInst::Lw {
+                            rd: crate::backend3::types::Writable::new(vreg_writable),
+                            rs1: fp_reg,
+                            imm: stack_offset as i32,
+                        });
                     }
                 }
+            }
 
-                // Emit Args instruction if we have parameters
-                if !arg_pairs.is_empty() {
-                    let args_inst = Riscv32MachInst::Args { args: arg_pairs };
-                    ctx.vcode.push(args_inst, srcloc);
-                }
+            // Emit LW instructions for stack parameters first
+            for lw_inst in stack_loads {
+                ctx.vcode.push(lw_inst, srcloc);
+            }
+
+            // Emit Args instruction if we have register parameters
+            if !arg_pairs.is_empty() {
+                let args_inst = Riscv32MachInst::Args { args: arg_pairs };
+                ctx.vcode.push(args_inst, srcloc);
             }
         }
     }

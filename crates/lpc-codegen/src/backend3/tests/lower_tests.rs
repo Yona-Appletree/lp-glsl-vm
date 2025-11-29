@@ -19,9 +19,8 @@ use crate::{
 fn test_lower_iconst() {
     use crate::backend3::tests::vcode_test_helpers::LowerTest;
 
-    // iconst 42 fits in 12 bits, so it's recorded as an inline constant
-    // The constant will be embedded in instructions that use it
-    // For now, we just verify the structure is correct
+    // iconst 42 fits in 12 bits, so it's materialized as an ADDI instruction
+    // The constant is materialized immediately for SSA correctness
     LowerTest::from_lpir(
         r#"
 function %test() -> i32 {
@@ -37,6 +36,7 @@ vcode {
   entry: block0
 
   block0:
+    addi v1, preg0, 42
     return v1
 
 }
@@ -62,7 +62,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     add v2, v0, v1
     return v2
 
@@ -89,7 +89,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     sub v2, v0, v1
     return v2
 
@@ -119,7 +119,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     add v2, v0, v1
     return v2
 
@@ -209,10 +209,11 @@ block4(v6: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     brif v0, block4, block1
 
   block1:
+    addi v7, preg0, 2
     add v6, v0, v7
     brif v0, block2_edge_2_3, block3_edge_2_4
 
@@ -225,6 +226,7 @@ vcode {
     jump block7(v6)
 
   block4:
+    addi v8, preg0, 1
     add v4, v0, v8
     brif v0, block5_edge_1_3, block6_edge_1_4
 
@@ -305,7 +307,7 @@ block0(v0: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     lw v1, 0(v0)
     return v1
 
@@ -332,7 +334,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     sw v1, 0(v0)
     return v1
 
@@ -359,7 +361,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     mul v2, v0, v1
     return v2
 
@@ -386,7 +388,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     div v2, v0, v1
     return v2
 
@@ -413,7 +415,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     rem v2, v0, v1
     return v2
 
@@ -440,7 +442,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     sub v3, v0, v1
     sltiu v2, v3, 1
     return v2
@@ -470,7 +472,7 @@ block1(v1: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     jump block1(v0)
 
   block1(v1):
@@ -506,7 +508,8 @@ block2(v4: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
+    addi v5, preg0, 0
     sub v6, v0, v5
     sltiu v4, v6, 1
     brif v4, block2(v0), block1(v0)
@@ -540,7 +543,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     sub v3, v0, v1
     sltiu v4, v3, 1
     xori v2, v4, 1
@@ -569,7 +572,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     slt v2, v0, v1
     return v2
 
@@ -596,7 +599,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     slt v3, v1, v0
     xori v2, v3, 1
     return v2
@@ -624,7 +627,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     slt v2, v1, v0
     return v2
 
@@ -651,7 +654,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     slt v3, v0, v1
     xori v2, v3, 1
     return v2
@@ -686,6 +689,7 @@ vcode {
     jump block1
 
   block1:
+    addi v1, preg0, 42
     return v1
 
 }
@@ -720,15 +724,18 @@ block2:
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
+    addi v5, preg0, 0
     sub v6, v0, v5
     sltiu v2, v6, 1
     brif v2, block2, block1
 
   block1:
+    addi v7, preg0, 2
     return v7
 
   block2:
+    addi v8, preg0, 1
     return v8
 
 }
@@ -762,7 +769,8 @@ block2(v4: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
+    addi v5, preg0, 0
     sub v6, v0, v5
     sltiu v3, v6, 1
     brif v3, block2, block1(v0)
@@ -771,6 +779,7 @@ vcode {
     return v1
 
   block2:
+    addi v7, preg0, 1
     return v7
 
 }
@@ -797,7 +806,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     sltu v2, v0, v1
     return v2
 
@@ -825,7 +834,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     sltu v3, v1, v0
     xori v2, v3, 1
     return v2
@@ -854,7 +863,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     sltu v2, v1, v0
     return v2
 
@@ -882,7 +891,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     sltu v3, v0, v1
     xori v2, v3, 1
     return v2
@@ -911,7 +920,7 @@ block0(v0: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     jal v1, other_func(v0)
     return v1
 
@@ -940,9 +949,10 @@ block0(v0: i32):
 vcode {
   entry: block0
 
-  block0(v0):
-    jal v2, other_func(v0)
-    return v3
+  block0:
+    jal preg0, other_func(v0)
+    addi v2, preg0, 42
+    return v2
 
 }
 "#,
@@ -968,7 +978,7 @@ block0(v0: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     ecall v1, 1(v0)
     return v1
 
@@ -1050,8 +1060,9 @@ block0(v0: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     trapz v0, int_divz
+    addi v2, preg0, 42
     return v2
 
 }
@@ -1079,8 +1090,9 @@ block0(v0: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     trapnz v0, int_ovf
+    addi v2, preg0, 42
     return v2
 
 }
@@ -1108,6 +1120,7 @@ vcode {
   entry: block0
 
   block0:
+    addi v1, preg0, 0
     return v1
 
 }
@@ -1134,7 +1147,7 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1, v2, v3, v4):
+  block0:
     add v5, v0, v1
     return v5
 
@@ -1161,7 +1174,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     return v0, v1
 
 }
@@ -1189,7 +1202,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     add v2, v0, v1
     sub v3, v0, v1
     return v2
@@ -1219,7 +1232,7 @@ block0(v0: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     add v1, v0, v0
     mul v2, v0, v1
     return v2
@@ -1249,6 +1262,7 @@ vcode {
   entry: block0
 
   block0:
+    addi v1, preg0, 42
     return v1
 
 }
@@ -1375,7 +1389,7 @@ block0(v0: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     return v0
 
 }
@@ -1415,15 +1429,18 @@ block3(v5: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
+    addi v6, preg0, 0
     sub v7, v0, v6
     sltiu v3, v7, 1
     brif v3, block2, block1
 
   block1:
+    addi v8, preg0, 2
     jump block3(v8)
 
   block2:
+    addi v9, preg0, 1
     jump block3(v9)
 
   block3(v1):

@@ -21,7 +21,7 @@ block0(v0: i32, v1: i32):
 vcode {
   entry: block0
 
-  block0(v0, v1):
+  block0:
     add v2, v0, v1
     return v2
 
@@ -50,6 +50,8 @@ vcode {
   entry: block0
 
   block0:
+    addi v3, preg0, 10
+    addi v4, preg0, 20
     add v2, v3, v4
     return v2
 
@@ -90,7 +92,7 @@ block3:
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     brif v0, block2, block1
 
   block1:
@@ -100,6 +102,7 @@ vcode {
     jump block3
 
   block3:
+    addi v2, preg0, 42
     return v2
 
 }

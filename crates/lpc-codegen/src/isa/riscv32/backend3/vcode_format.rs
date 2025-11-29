@@ -213,7 +213,9 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                             if i > 0 {
                                 write!(f, ", ")?;
                             }
-                            write!(f, "{}", param)?;
+                            // Convert VReg to Reg for display
+                            let reg = crate::backend3::types::Reg::from_virtual_reg(*param);
+                            write!(f, "{}", reg)?;
                         }
                         write!(f, "):\n")?;
                     }
@@ -253,6 +255,11 @@ impl fmt::Display for VCode<Riscv32MachInst> {
             for inst_idx in inst_range.start..inst_range.end {
                 let inst = &self.insts[inst_idx];
                 let is_last = inst_idx == inst_range.end - 1;
+
+                // Skip Args instruction in entry block (it's an implementation detail)
+                if matches!(inst, Riscv32MachInst::Args { .. }) && block_index == self.entry {
+                    continue;
+                }
 
                 // If this is the last instruction and it's a branch, format it with successors
                 if is_last && last_inst_is_branch {
@@ -317,7 +324,9 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                                 if i > 0 {
                                     write!(f, ", ")?;
                                 }
-                                write!(f, "{}", arg)?;
+                                // Convert VReg to Reg for display
+                                let reg = crate::backend3::types::Reg::from_virtual_reg(*arg);
+                                write!(f, "{}", reg)?;
                             }
                             write!(f, ")")?;
                         }
@@ -346,7 +355,9 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                             if i > 0 {
                                 write!(f, ", ")?;
                             }
-                            write!(f, "{}", arg)?;
+                            // Convert VReg to Reg for display
+                            let reg = crate::backend3::types::Reg::from_virtual_reg(*arg);
+                            write!(f, "{}", reg)?;
                         }
                         write!(f, ")")?;
                     }
@@ -375,7 +386,9 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                                 if i > 0 {
                                     write!(f, ", ")?;
                                 }
-                                write!(f, "{}", arg)?;
+                                // Convert VReg to Reg for display
+                                let reg = crate::backend3::types::Reg::from_virtual_reg(*arg);
+                                write!(f, "{}", reg)?;
                             }
                             writeln!(f, ")")?;
                         }

@@ -32,13 +32,15 @@ block3(v3: i32):
 vcode {
   entry: block0
 
-  block0(v0):
+  block0:
     brif v0, block2, block1
 
   block1:
+    addi v4, preg0, 20
     jump block3(v4)
 
   block2:
+    addi v5, preg0, 10
     jump block3(v5)
 
   block3(v1):

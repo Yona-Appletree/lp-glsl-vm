@@ -261,7 +261,11 @@ impl MachInst for Riscv32MachInst {
             }
             Riscv32MachInst::Addi { rd, rs1, imm: _ } => {
                 collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
-                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                // Skip pinned VRegs (physical registers) - they don't need allocation
+                // regalloc2 doesn't expect pinned VRegs to be collected as operands
+                if rs1.is_virtual() {
+                    collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                }
                 // Immediate is handled separately, not as an operand
             }
             Riscv32MachInst::Sub { rd, rs1, rs2 } => {
@@ -275,7 +279,10 @@ impl MachInst for Riscv32MachInst {
             }
             Riscv32MachInst::Lw { rd, rs1, imm: _ } => {
                 collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
-                collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                // Skip pinned VRegs (physical registers) - they don't need allocation
+                if rs1.is_virtual() {
+                    collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
+                }
                 // Immediate is handled separately
             }
             Riscv32MachInst::Sw { rs1, rs2, imm: _ } => {
@@ -434,16 +441,15 @@ impl MachInst for Riscv32MachInst {
     /// Get clobbered registers (for function calls, etc.)
     ///
     /// Returns None if no explicit clobbers, or Some(set) if there are clobbers.
-    /// For RISC-V 32, function calls (JAL) clobber caller-saved registers.
+    /// For RISC-V 32, function calls (JAL) and system calls (ECALL) clobber caller-saved registers.
     fn get_clobbers(&self) -> Option<PRegSet> {
         match self {
-            Riscv32MachInst::Jal { .. } => {
-                // Function calls clobber caller-saved registers
+            Riscv32MachInst::Jal { .. } | Riscv32MachInst::Ecall { .. } => {
+                // Function calls and system calls clobber caller-saved registers
                 // RISC-V 32 calling convention (System V ABI):
                 // Caller-saved: t0-t6 (x5-x7, x28-x31), a0-a7 (x10-x17)
-                // TODO: Properly convert to regalloc2::PRegSet
-                // For now, return None - clobbers will be handled by ABI
-                None
+                use crate::isa::riscv32::backend3::abi::Riscv32ABI;
+                Some(Riscv32ABI::caller_saved_pregset())
             }
             _ => None,
         }

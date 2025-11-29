@@ -332,8 +332,7 @@ impl<I: MachInst> Lower<I> {
 
         // Emit entry block setup (e.g., Args instruction for function parameters)
         if block == entry_block {
-            let base_srcloc = self.func.base_srcloc();
-            let dummy_srcloc = RelSourceLoc::from_base_offset(base_srcloc, 0);
+            let dummy_srcloc = RelSourceLoc::default();
             backend.emit_entry_block_setup(&mut self, entry_block, dummy_srcloc);
         }
 

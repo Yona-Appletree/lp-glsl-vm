@@ -43,7 +43,7 @@ where
 }
 
 /// Determine if a constant fits in 12-bit signed immediate
-fn fits_in_12_bits(value: i32) -> bool {
+pub(crate) fn fits_in_12_bits(value: i32) -> bool {
     value >= -2048 && value <= 2047
 }
 

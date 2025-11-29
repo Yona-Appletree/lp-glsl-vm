@@ -769,13 +769,14 @@ block0(v0: i32, v1: i32):
 
     let vcode = test.vcode();
 
-    // Entry block should have parameters
+    // Entry block parameters are handled by Args instruction, not as block params
+    // So entry block should have 0 block parameters
     if let Some(param_range) = vcode.block_params_range.get(0) {
         let params = &vcode.block_params[param_range.start..param_range.end];
         assert_eq!(
             params.len(),
-            2,
-            "Entry block should have 2 parameters (v0, v1)"
+            0,
+            "Entry block should have 0 block parameters (function params handled by Args instruction)"
         );
     }
 

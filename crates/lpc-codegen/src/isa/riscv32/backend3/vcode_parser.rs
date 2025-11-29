@@ -12,7 +12,6 @@ use nom::{
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
 };
-
 use regalloc2::RegClass;
 
 use crate::{

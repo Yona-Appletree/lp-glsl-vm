@@ -11,7 +11,10 @@ use crate::{
         vcode::{BlockLoweringOrder, Callee, Constant, LoweredBlock},
         vcode_builder::VCodeBuilder,
     },
-    isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32EmitInfo, Riscv32MachInst},
+    isa::riscv32::backend3::{
+        inst::{Riscv32ABI, Riscv32EmitInfo, Riscv32MachInst},
+        regs::zero_reg,
+    },
 };
 
 /// Helper to build VCode with a single empty block
@@ -44,23 +47,26 @@ fn test_materialize_inline_constant() {
 
     let srcloc = RelSourceLoc::default();
 
-    // Small constant that fits in 12 bits
+    // Small constant that fits in 12 bits - now emits Addi instruction
     let vreg = materialize_constant(
         &mut vcode,
         42,
         srcloc,
-        |_rd, _imm| panic!("Should not create LUI for inline constant"),
-        |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
+        |_rd, _imm| panic!("Should not create LUI for small constant"),
+        |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     vcode.end_block();
 
-    // Build VCode to check constants
+    // Build VCode to check instructions
     let built_vcode = build_vcode_with_single_block(vcode);
-    // Should have recorded the constant
-    assert!(built_vcode.constants.constants.contains_key(&vreg));
-    // Should not have emitted any instructions for inline constants
-    assert_eq!(built_vcode.insts.len(), 0);
+    // Small constants now emit Addi instructions (SSA requirement)
+    assert_eq!(built_vcode.insts.len(), 1, "Small constant should emit Addi instruction");
+    match &built_vcode.insts[0] {
+        Riscv32MachInst::Addi { imm, .. } => assert_eq!(*imm, 42),
+        _ => panic!("Should emit Addi for small constant"),
+    }
 }
 
 #[test]
@@ -78,6 +84,7 @@ fn test_materialize_large_constant() {
         srcloc,
         |rd, imm| Riscv32MachInst::Lui { rd, imm },
         |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     vcode.end_block();
@@ -108,23 +115,26 @@ fn test_materialize_negative_constant() {
 
     let srcloc = RelSourceLoc::default();
 
-    // Negative constant that fits in 12 bits (inline)
+    // Negative constant that fits in 12 bits - now emits Addi instruction
     let vreg = materialize_constant(
         &mut vcode,
         -100,
         srcloc,
-        |_rd, _imm| panic!("Should not create LUI for inline constant"),
-        |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
+        |_rd, _imm| panic!("Should not create LUI for small constant"),
+        |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     vcode.end_block();
 
-    // Build VCode to check constants
+    // Build VCode to check instructions
     let built_vcode = build_vcode_with_single_block(vcode);
-    // Should have recorded the constant
-    assert!(built_vcode.constants.constants.contains_key(&vreg));
-    // Should not have emitted any instructions for inline constants
-    assert_eq!(built_vcode.insts.len(), 0);
+    // Small constants now emit Addi instructions (SSA requirement)
+    assert_eq!(built_vcode.insts.len(), 1, "Small constant should emit Addi instruction");
+    match &built_vcode.insts[0] {
+        Riscv32MachInst::Addi { imm, .. } => assert_eq!(*imm, -100),
+        _ => panic!("Should emit Addi for small constant"),
+    }
 }
 
 #[test]
@@ -142,6 +152,7 @@ fn test_materialize_large_negative_constant() {
         srcloc,
         |rd, imm| Riscv32MachInst::Lui { rd, imm },
         |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     vcode.end_block();
@@ -172,6 +183,7 @@ fn test_materialize_constant_with_sign_bit_in_lower() {
         srcloc,
         |rd, imm| Riscv32MachInst::Lui { rd, imm },
         |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     vcode.end_block();
@@ -212,13 +224,14 @@ fn test_materialize_boundary_constants() {
 
     let srcloc = RelSourceLoc::default();
 
-    // Test at the boundary: 2047 (fits in 12 bits, should be inline)
+    // Test at the boundary: 2047 (fits in 12 bits, emits Addi)
     let vreg1 = materialize_constant(
         &mut vcode,
         2047,
         srcloc,
-        |_rd, _imm| panic!("Should not create LUI for inline constant"),
-        |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
+        |_rd, _imm| panic!("Should not create LUI for small constant"),
+        |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     // Test just above boundary: 2048 (doesn't fit, needs LUI+ADDI)
@@ -228,15 +241,17 @@ fn test_materialize_boundary_constants() {
         srcloc,
         |rd, imm| Riscv32MachInst::Lui { rd, imm },
         |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
-    // Test at negative boundary: -2048 (fits in 12 bits, should be inline)
+    // Test at negative boundary: -2048 (fits in 12 bits, emits Addi)
     let vreg3 = materialize_constant(
         &mut vcode,
         -2048,
         srcloc,
-        |_rd, _imm| panic!("Should not create LUI for inline constant"),
-        |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
+        |_rd, _imm| panic!("Should not create LUI for small constant"),
+        |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     // Test just below boundary: -2049 (doesn't fit, needs LUI+ADDI)
@@ -246,36 +261,21 @@ fn test_materialize_boundary_constants() {
         srcloc,
         |rd, imm| Riscv32MachInst::Lui { rd, imm },
         |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     vcode.end_block();
 
     let vcode = build_vcode_with_single_block(vcode);
 
-    // Inline constants (vreg1, vreg3) are recorded in constants map
-    // Large constants (vreg2, vreg4) emit instructions but don't record in constants map
-    assert!(
-        vcode.constants.constants.contains_key(&vreg1),
-        "Inline constant 2047 should be recorded"
-    );
-    assert!(
-        !vcode.constants.constants.contains_key(&vreg2),
-        "Large constant 2048 should not be in constants map (emits instructions)"
-    );
-    assert!(
-        vcode.constants.constants.contains_key(&vreg3),
-        "Inline constant -2048 should be recorded"
-    );
-    assert!(
-        !vcode.constants.constants.contains_key(&vreg4),
-        "Large constant -2049 should not be in constants map (emits instructions)"
-    );
-
-    // Should have 4 instructions (2 LUI + 2 ADDI for the two large constants: 2048 and -2049)
+    // All constants now emit instructions (SSA requirement)
+    // Small constants (vreg1, vreg3) emit Addi
+    // Large constants (vreg2, vreg4) emit LUI+ADDI
+    // Should have 6 instructions total: 2 Addi (for 2047 and -2048) + 2 LUI + 2 ADDI (for 2048 and -2049)
     assert_eq!(
         vcode.insts.len(),
-        4,
-        "Should have 2 LUI + 2 ADDI instructions for large constants"
+        6,
+        "Should have 2 Addi + 2 LUI + 2 ADDI instructions"
     );
 }
 
@@ -288,41 +288,34 @@ fn test_zero_constant() {
 
     let srcloc = RelSourceLoc::default();
 
-    // Zero constant fits in 12 bits, so it's recorded as an inline constant
+    // Zero constant fits in 12 bits, now emits Addi instruction
     let vreg = materialize_constant(
         &mut vcode,
         0,
         srcloc,
-        |_rd, _imm| panic!("Should not create LUI for inline constant"),
-        |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
+        |_rd, _imm| panic!("Should not create LUI for small constant"),
+        |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     vcode.end_block();
 
-    // Build VCode to check constants
+    // Build VCode to check instructions
     let built_vcode = build_vcode_with_single_block(vcode);
 
-    // Zero should be recorded as an inline constant
-    assert!(
-        built_vcode.constants.constants.contains_key(&vreg),
-        "Zero constant should be recorded as inline constant"
-    );
-
-    // Should not have emitted any instructions for inline constants
+    // Zero constant now emits Addi instruction (SSA requirement)
     assert_eq!(
         built_vcode.insts.len(),
-        0,
-        "Zero constant should not emit instructions (inline)"
+        1,
+        "Zero constant should emit Addi instruction"
     );
 
-    // Verify the constant value
-    if let Some(constant) = built_vcode.constants.constants.get(&vreg) {
-        match constant {
-            Constant::Inline(value) => {
-                assert_eq!(*value, 0i32, "Zero constant should have value 0");
-            }
-            _ => panic!("Zero constant should be inline"),
+    // Verify the instruction
+    match &built_vcode.insts[0] {
+        Riscv32MachInst::Addi { imm, .. } => {
+            assert_eq!(*imm, 0i32, "Zero constant should have value 0");
         }
+        _ => panic!("Zero constant should emit Addi"),
     }
 }
 
@@ -340,16 +333,18 @@ fn test_constant_reuse() {
         &mut vcode,
         42,
         srcloc,
-        |_rd, _imm| panic!("Should not create LUI for inline constant"),
-        |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
+        |_rd, _imm| panic!("Should not create LUI for small constant"),
+        |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     let vreg2 = materialize_constant(
         &mut vcode,
         42,
         srcloc,
-        |_rd, _imm| panic!("Should not create LUI for inline constant"),
-        |_rd, _rs1, _imm| panic!("Should not create ADDI for inline constant"),
+        |_rd, _imm| panic!("Should not create LUI for small constant"),
+        |rd, rs1, imm| Riscv32MachInst::Addi { rd, rs1, imm },
+        || zero_reg(),
     );
 
     vcode.end_block();
@@ -357,28 +352,20 @@ fn test_constant_reuse() {
     // Build VCode
     let built_vcode = build_vcode_with_single_block(vcode);
 
-    // Both VRegs should be recorded as constants
-    assert!(
-        built_vcode.constants.constants.contains_key(&vreg1),
-        "First constant should be recorded"
-    );
-    assert!(
-        built_vcode.constants.constants.contains_key(&vreg2),
-        "Second constant should be recorded"
+    // Both constants now emit Addi instructions
+    assert_eq!(
+        built_vcode.insts.len(),
+        2,
+        "Each constant materialization should emit an Addi instruction"
     );
 
-    // Both should have the same value
-    if let (Some(c1), Some(c2)) = (
-        built_vcode.constants.constants.get(&vreg1),
-        built_vcode.constants.constants.get(&vreg2),
-    ) {
-        match (c1, c2) {
-            (Constant::Inline(v1), Constant::Inline(v2)) => {
-                assert_eq!(*v1, 42i32, "First constant should have value 42");
-                assert_eq!(*v2, 42i32, "Second constant should have value 42");
-            }
-            _ => panic!("Both constants should be inline"),
+    // Both instructions should have the same immediate value
+    match (&built_vcode.insts[0], &built_vcode.insts[1]) {
+        (Riscv32MachInst::Addi { imm: imm1, .. }, Riscv32MachInst::Addi { imm: imm2, .. }) => {
+            assert_eq!(*imm1, 42i32, "First constant should have value 42");
+            assert_eq!(*imm2, 42i32, "Second constant should have value 42");
         }
+        _ => panic!("Both should emit Addi instructions"),
     }
 
     // Note: Currently, each constant materialization creates a new VReg
@@ -418,15 +405,12 @@ block0:
     );
 
     // Verify constants are used in instructions
-    // Find ADD instruction and verify it uses constant VRegs
+    // Find ADD instruction and verify it uses VRegs from constant materialization
     for inst in &vcode.insts {
         if let crate::isa::riscv32::backend3::inst::Riscv32MachInst::Add { rs1, rs2, .. } = inst {
-            // At least one operand might be a constant VReg
-            let rs1_is_constant = vcode.constants.constants.contains_key(rs1);
-            let rs2_is_constant = vcode.constants.constants.contains_key(rs2);
-            // In this case, constants are materialized and used as VRegs
-            // The exact behavior depends on lowering strategy
-            let _ = (rs1_is_constant, rs2_is_constant);
+            // Constants are now materialized as VRegs via Addi instructions
+            // The VRegs are used in the Add instruction
+            let _ = (rs1, rs2);
         }
     }
 }

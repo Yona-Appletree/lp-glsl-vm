@@ -4,7 +4,7 @@
 //! including MachineEnv creation for regalloc2.
 
 use alloc::vec::Vec;
-use regalloc2::{MachineEnv, PReg, RegClass};
+use regalloc2::{MachineEnv, PReg, PRegSet, RegClass};
 
 /// RISC-V 32-bit ABI machine specification for regalloc2
 ///
@@ -34,6 +34,18 @@ impl Riscv32ABI {
         (10..=17)
             .map(|n| PReg::new(n, RegClass::Int))
             .collect()
+    }
+
+    /// Create a PRegSet from caller-saved registers
+    ///
+    /// This is used to represent clobbered registers for function calls.
+    pub fn caller_saved_pregset() -> PRegSet {
+        let mut set = PRegSet::default();
+        for &reg_num in Self::CALLER_SAVED_GPRS {
+            let preg = PReg::new(reg_num as usize, RegClass::Int);
+            set.add(preg);
+        }
+        set
     }
 
     /// Create a MachineEnv for RISC-V 32-bit register allocation

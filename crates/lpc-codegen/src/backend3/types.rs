@@ -149,7 +149,10 @@ impl fmt::Display for Reg {
                 write!(f, "reg{}", self.0)
             }
         } else {
-            write!(f, "vreg{}", self.0)
+            // Display virtual registers as v0, v1, etc. (0-based index)
+            // Subtract PINNED_VREGS to get the 0-based VReg index
+            let vreg_index = self.0 as usize - PINNED_VREGS;
+            write!(f, "v{}", vreg_index)
         }
     }
 }

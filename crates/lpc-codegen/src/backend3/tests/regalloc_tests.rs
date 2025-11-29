@@ -4,17 +4,9 @@
 //! for VCode and produce valid allocations and edits.
 //!
 //! **Current Status**:
-//! - ✅ `test_machine_env_creation`: Verifies MachineEnv is created correctly
-//! - ✅ `test_regalloc_no_entry_params`: Tests allocation with large constants (emits instructions)
-//! - ⏸️  Most other tests are marked `#[ignore]` because entry block parameters need to be
-//!   defined by an Args instruction. Entry block params are VRegs that are used in instructions
-//!   but never defined, which violates regalloc2's SSA requirements. Once Args instruction
-//!   support is added to the lowering phase, these tests should be enabled.
-//!
-//! **Known Issues**:
-//! - Small constants (<12 bits) are recorded but don't emit instructions, causing SSA violations.
-//!   Use large constants in tests until this is fixed.
-//! - Entry block params need Args instruction support to define them before use.
+//! - ✅ Args instruction support: Function parameters are now defined by Args instruction
+//! - ✅ Small constants: Now emit Addi instructions (SSA requirement)
+//! - ✅ All regalloc tests should now pass
 
 extern crate alloc;
 
@@ -25,11 +17,6 @@ use regalloc2::Function;
 use crate::backend3::tests::vcode_test_helpers::LowerTest;
 
 /// Test simple register allocation on a basic add function
-///
-/// NOTE: This test currently fails because entry block parameters need to be
-/// defined by an Args instruction. Entry block params are VRegs that are used
-/// but never defined, which violates regalloc2's SSA requirements.
-/// Once Args instruction support is added, this test should pass.
 #[test]
 fn test_regalloc_simple() {
     // Input: function that adds two arguments
@@ -46,10 +33,15 @@ block0(v0: i32, v1: i32):
     let vcode = test.vcode();
 
     // Run register allocation
-    let result = vcode.run_regalloc().expect("register allocation should succeed");
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed");
 
     // Verify basic properties
-    assert_eq!(result.num_spillslots, 0, "simple function should not need spill slots");
+    assert_eq!(
+        result.num_spillslots, 0,
+        "simple function should not need spill slots"
+    );
     assert!(
         !result.edits.is_empty() || result.allocs.len() > 0,
         "should have allocations or edits"
@@ -64,9 +56,6 @@ block0(v0: i32, v1: i32):
 }
 
 /// Test register allocation with multiple instructions
-///
-/// NOTE: This test currently fails because entry block parameters need to be
-/// defined by an Args instruction. See test_regalloc_simple for details.
 #[test]
 fn test_regalloc_multiple_instructions() {
     let test = LowerTest::from_lpir(
@@ -82,7 +71,9 @@ block0(v0: i32, v1: i32, v2: i32):
     );
 
     let vcode = test.vcode();
-    let result = vcode.run_regalloc().expect("register allocation should succeed");
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed");
 
     // Should have allocations for all 3 instructions (add, add, sub)
     assert!(
@@ -104,9 +95,6 @@ block0(v0: i32, v1: i32, v2: i32):
 }
 
 /// Test register allocation with register pressure (should trigger spilling)
-///
-/// NOTE: This test currently fails because entry block parameters need to be
-/// defined by an Args instruction. See test_regalloc_simple for details.
 #[test]
 fn test_regalloc_with_register_pressure() {
     // Create a function with many live values to force spilling
@@ -130,7 +118,9 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
     );
 
     let vcode = test.vcode();
-    let result = vcode.run_regalloc().expect("register allocation should succeed");
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed");
 
     // With this many live values, we should need spill slots
     // Note: regalloc2 might be smart enough to avoid spilling in some cases,
@@ -160,8 +150,8 @@ fn test_regalloc_with_branches() {
         r#"
 function %test(i32, i32) -> i32 {
 block0(v0: i32, v1: i32):
-    v2 = islt v0, v1
-    br v2, block1, block2
+    v2 = icmp slt v0, v1
+    brif v2, block1, block2
 
 block1:
     v3 = iadd v0, v1
@@ -175,7 +165,9 @@ block2:
     );
 
     let vcode = test.vcode();
-    let result = vcode.run_regalloc().expect("register allocation should succeed");
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed");
 
     // Verify allocations exist
     assert!(
@@ -209,7 +201,9 @@ block0(v0: i32, v1: i32, v2: i32):
     );
 
     let vcode = test.vcode();
-    let result = vcode.run_regalloc().expect("register allocation should succeed");
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed");
 
     // Check that we can access allocations for each instruction
     for i in 0..vcode.num_insts() {
@@ -259,10 +253,15 @@ block0:
     );
 
     let vcode = test.vcode();
-    let result = vcode.run_regalloc().expect("register allocation should succeed");
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed");
 
     // Even an empty function should produce valid output
-    assert_eq!(result.num_spillslots, 0, "empty function should not need spill slots");
+    assert_eq!(
+        result.num_spillslots, 0,
+        "empty function should not need spill slots"
+    );
 }
 
 /// Test that edits are properly sorted by program point
@@ -284,7 +283,9 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32):
     );
 
     let vcode = test.vcode();
-    let result = vcode.run_regalloc().expect("register allocation should succeed");
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed");
 
     // Verify edits are sorted by program point
     for i in 1..result.edits.len() {
@@ -295,7 +296,7 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32):
         // Compare by instruction index and position
         let prev_inst = prev_point.inst();
         let curr_inst = curr_point.inst();
-        
+
         if prev_inst.index() == curr_inst.index() {
             // Same instruction - After should come after Before
             assert!(
@@ -358,10 +359,15 @@ block0:
     );
 
     let vcode = test.vcode();
-    let result = vcode.run_regalloc().expect("register allocation should succeed");
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed");
 
     // Verify basic properties
-    assert_eq!(result.num_spillslots, 0, "simple function should not need spill slots");
+    assert_eq!(
+        result.num_spillslots, 0,
+        "simple function should not need spill slots"
+    );
     assert!(
         result.inst_alloc_offsets.len() >= vcode.num_insts(),
         "should have allocations for all instructions"
@@ -371,8 +377,9 @@ block0:
 /// Test that MachineEnv is created correctly
 #[test]
 fn test_machine_env_creation() {
+    use regalloc2::RegClass;
+
     use crate::isa::riscv32::backend3::abi::Riscv32ABI;
-    use regalloc2::{MachineEnv, RegClass};
 
     let env = Riscv32ABI::machine_env();
 
@@ -407,6 +414,67 @@ fn test_machine_env_creation() {
     }
 }
 
+/// Test that Args instruction operands have FixedReg constraints
+#[test]
+fn test_args_instruction_operands() {
+    use regalloc2::OperandConstraint;
+
+    use crate::isa::riscv32::backend3::abi::Riscv32ABI;
+
+    let test = LowerTest::from_lpir(
+        r#"
+function %test(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = iadd v0, v1
+    v4 = iadd v3, v2
+    return v4
+}
+"#,
+    );
+
+    let vcode = test.vcode();
+
+    // Find the Args instruction (should be the first instruction in entry block)
+    let entry_block = vcode.entry_block();
+    let _entry_range = vcode.block_insns(entry_block);
+    // Args instruction is always the first instruction in the entry block (index 0)
+    let first_inst = regalloc2::Inst::new(0);
+
+    // Get operands for the Args instruction
+    let operands = vcode.inst_operands(first_inst);
+
+    // Args instruction should have operands with FixedReg constraints
+    // Each function parameter should be constrained to its ABI argument register
+    let arg_regs = Riscv32ABI::arg_regs();
+    assert!(
+        !operands.is_empty(),
+        "Args instruction should have operands for function parameters"
+    );
+
+    // Verify each operand has a FixedReg constraint matching the ABI argument registers
+    for (idx, operand) in operands.iter().enumerate() {
+        if idx < arg_regs.len() {
+            match operand.constraint() {
+                OperandConstraint::FixedReg(preg) => {
+                    // preg is a PReg, arg_regs[idx] is a PReg
+                    assert_eq!(
+                        preg,
+                        arg_regs[idx],
+                        "Args operand {} should be constrained to ABI argument register {}",
+                        idx,
+                        arg_regs[idx].hw_enc()
+                    );
+                }
+                _ => panic!(
+                    "Args operand {} should have FixedReg constraint, got {:?}",
+                    idx,
+                    operand.constraint()
+                ),
+            }
+        }
+    }
+}
+
 /// Test register allocation with many blocks
 ///
 /// NOTE: This test currently fails because entry block parameters need to be
@@ -417,16 +485,16 @@ fn test_regalloc_multiple_blocks() {
         r#"
 function %test(i32, i32) -> i32 {
 block0(v0: i32, v1: i32):
-    v2 = islt v0, v1
-    br v2, block1, block2
+    v2 = icmp slt v0, v1
+    brif v2, block1, block2
 
 block1:
     v3 = iadd v0, v1
-    br block3
+    jump block3(v3)
 
 block2:
     v4 = isub v0, v1
-    br block3
+    jump block3(v4)
 
 block3(v5: i32):
     return v5
@@ -435,7 +503,9 @@ block3(v5: i32):
     );
 
     let vcode = test.vcode();
-    let result = vcode.run_regalloc().expect("register allocation should succeed");
+    let result = vcode
+        .run_regalloc()
+        .expect("register allocation should succeed");
 
     // Verify we have allocations for all blocks
     assert!(
@@ -443,4 +513,3 @@ block3(v5: i32):
         "should have allocations for all instructions across all blocks"
     );
 }
-
