@@ -135,4 +135,3 @@ mod tests {
         assert_eq!(packed_inst.expand(), Some(inst));
     }
 }
-

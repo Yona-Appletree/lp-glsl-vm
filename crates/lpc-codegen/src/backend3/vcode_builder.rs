@@ -6,7 +6,7 @@ use lpc_lpir::RelSourceLoc;
 use regalloc2::{Operand, OperandKind, OperandPos, PRegSet, RegClass};
 
 use crate::backend3::{
-    types::{BlockIndex, InsnIndex, PINNED_VREGS, Range, Ranges, VReg},
+    types::{BlockIndex, InsnIndex, Range, Ranges, VReg, PINNED_VREGS},
     vcode::{
         BlockLoweringOrder, BlockMetadata, Callee, Constant, MachInst, OperandVisitor, RelocKind,
         VCode, VCodeConstants, VCodeReloc,
@@ -523,18 +523,10 @@ impl<I: MachInst> VCodeBuilder<I> {
             fn visit_mod(&mut self, vreg: VReg, constraint: regalloc2::OperandConstraint) {
                 // regalloc2 doesn't support Mod, so we create separate Use and Def operands
                 // VReg already has the correct register class from allocation
-                let use_operand = Operand::new(
-                    vreg,
-                    constraint,
-                    OperandKind::Use,
-                    OperandPos::Early,
-                );
-                let def_operand = Operand::new(
-                    vreg,
-                    constraint,
-                    OperandKind::Def,
-                    OperandPos::Early,
-                );
+                let use_operand =
+                    Operand::new(vreg, constraint, OperandKind::Use, OperandPos::Early);
+                let def_operand =
+                    Operand::new(vreg, constraint, OperandKind::Def, OperandPos::Early);
                 self.operands.push(use_operand);
                 self.operands.push(def_operand);
             }

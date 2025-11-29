@@ -1,6 +1,7 @@
 //! Core types for backend3 (ISA-agnostic)
 
 use core::fmt;
+
 use regalloc2::{Block, Inst, PReg, RegClass};
 
 /// Number of pinned VReg indices reserved for physical registers

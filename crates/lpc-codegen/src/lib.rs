@@ -26,4 +26,3 @@ pub use isa::riscv32::{
     inst::Inst,
     regs::Gpr,
 };
-

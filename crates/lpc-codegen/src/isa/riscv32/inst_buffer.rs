@@ -115,6 +115,96 @@ impl InstBuffer {
     pub fn clear(&mut self) {
         self.instructions.clear();
     }
+
+    /// Get current code offset (in bytes)
+    pub fn cur_offset(&self) -> u32 {
+        (self.instructions.len() * 4) as u32
+    }
+
+    /// Bind a label to the current code offset
+    ///
+    /// This is called when emitting a block to mark where the label is bound.
+    /// The label is essentially a block index.
+    pub fn bind_label(&mut self, _label: u32) {
+        // For now, labels are just block indices and we track them in EmitState.
+        // This method is a placeholder for future label tracking if needed.
+    }
+
+    /// Emit a branch instruction with a label target (not yet resolved offset)
+    ///
+    /// Emits the branch with placeholder offset (0), returns instruction index for patching.
+    /// The actual offset will be patched later via `patch_branch()`.
+    pub fn emit_branch_with_label(&mut self, branch: Inst, _label: u32) -> usize {
+        // Verify it's a branch instruction
+        match &branch {
+            Inst::Beq { .. }
+            | Inst::Bne { .. }
+            | Inst::Blt { .. }
+            | Inst::Bge { .. }
+            | Inst::Jal { .. } => {}
+            _ => panic!("Not a branch instruction: {:?}", branch),
+        }
+
+        let inst_idx = self.instructions.len();
+        self.emit(branch);
+        inst_idx
+    }
+
+    /// Patch a branch instruction at the given instruction index
+    ///
+    /// Computes the offset from branch location to target and patches the instruction.
+    /// RISC-V offsets are in 2-byte units (instructions are 4 bytes, but offset is /2).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the offset is out of range for the branch type.
+    pub fn patch_branch(&mut self, inst_idx: usize, target_offset: u32, branch_type: BranchType) {
+        let branch_offset = (inst_idx * 4) as u32;
+        let delta = target_offset as i32 - branch_offset as i32;
+
+        // RISC-V offsets are in 2-byte units (instructions are 4 bytes, but offset is /2)
+        let offset_in_units = delta / 2;
+
+        // Get the instruction
+        let inst = &mut self.instructions[inst_idx];
+
+        match (inst, branch_type) {
+            // Conditional branches: 12-bit signed offset (in 2-byte units)
+            (
+                Inst::Beq { imm, .. }
+                | Inst::Bne { imm, .. }
+                | Inst::Blt { imm, .. }
+                | Inst::Bge { imm, .. },
+                BranchType::Conditional,
+            ) => {
+                assert!(
+                    offset_in_units >= -2048 && offset_in_units <= 2047,
+                    "Branch offset {} out of range for conditional branch (max ±4KB)",
+                    offset_in_units * 2
+                );
+                *imm = offset_in_units as i32;
+            }
+            // Unconditional jumps: 20-bit signed offset (in 2-byte units)
+            (Inst::Jal { imm, .. }, BranchType::Unconditional) => {
+                assert!(
+                    offset_in_units >= -524288 && offset_in_units <= 524287,
+                    "Jump offset {} out of range for unconditional jump (max ±1MB)",
+                    offset_in_units * 2
+                );
+                *imm = offset_in_units as i32;
+            }
+            _ => panic!("Mismatch between instruction type and branch type"),
+        }
+    }
+}
+
+/// Branch type for patching
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchType {
+    /// Conditional branch (BEQ, BNE, etc.) - 12-bit signed offset
+    Conditional,
+    /// Unconditional jump (JAL) - 20-bit signed offset
+    Unconditional,
 }
 
 impl Default for InstBuffer {

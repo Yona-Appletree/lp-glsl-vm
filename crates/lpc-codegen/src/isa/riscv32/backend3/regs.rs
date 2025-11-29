@@ -34,4 +34,3 @@ pub fn frame_pointer() -> Reg {
 pub fn stack_pointer() -> Reg {
     Reg::from_real_reg(PReg::new(2, RegClass::Int))
 }
-

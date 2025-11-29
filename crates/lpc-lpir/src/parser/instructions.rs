@@ -55,10 +55,7 @@ pub(crate) fn parse_arithmetic(input: &str) -> IResult<&str, InstData> {
 pub(crate) fn parse_bitwise(input: &str) -> IResult<&str, InstData> {
     let (input, result) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(tag("="), blank)(input)?;
-    let (input, op) = terminated(
-        alt((tag("iand"), tag("ior"), tag("ixor"))),
-        blank,
-    )(input)?;
+    let (input, op) = terminated(alt((tag("iand"), tag("ior"), tag("ixor"))), blank)(input)?;
     let (input, arg1) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(char(','), blank)(input)?;
     let (input, arg2) = terminated(parse_value, blank)(input)?;
@@ -87,10 +84,7 @@ pub(crate) fn parse_bitwise_unary(input: &str) -> IResult<&str, InstData> {
 pub(crate) fn parse_shift(input: &str) -> IResult<&str, InstData> {
     let (input, result) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(tag("="), blank)(input)?;
-    let (input, op) = terminated(
-        alt((tag("ishl"), tag("ishr"), tag("iashr"))),
-        blank,
-    )(input)?;
+    let (input, op) = terminated(alt((tag("ishl"), tag("ishr"), tag("iashr"))), blank)(input)?;
     let (input, arg1) = terminated(parse_value, blank)(input)?;
     let (input, _) = terminated(char(','), blank)(input)?;
     let (input, arg2) = terminated(parse_value, blank)(input)?;
@@ -283,7 +277,7 @@ pub(crate) fn parse_stackalloc(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("="), blank)(input)?;
     let (input, _) = terminated(tag("stackalloc"), blank)(input)?;
     let (input, size) = terminated(integer, blank)(input)?;
-    
+
     // Size must be non-negative and fit in u32
     if size < 0 {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -292,11 +286,8 @@ pub(crate) fn parse_stackalloc(input: &str) -> IResult<&str, InstData> {
         )));
     }
     let size_u32 = size as u32;
-    
-    Ok((
-        input,
-        InstData::stackalloc(result, size_u32),
-    ))
+
+    Ok((input, InstData::stackalloc(result, size_u32)))
 }
 
 /// Parse a jump instruction
@@ -384,7 +375,7 @@ pub(crate) fn parse_syscall(input: &str) -> IResult<&str, InstData> {
         separated_list0(terminated(char(','), blank), terminated(parse_value, blank)),
         terminated(char(')'), blank),
     )(input)?;
-    
+
     // Parse results list: comma-separated values (same format as call)
     let (input, results) = opt(map(
         tuple((
@@ -393,8 +384,11 @@ pub(crate) fn parse_syscall(input: &str) -> IResult<&str, InstData> {
         )),
         |(_, values)| values,
     ))(input)?;
-    
-    Ok((input, InstData::syscall(number as i32, args, results.unwrap_or_default())))
+
+    Ok((
+        input,
+        InstData::syscall(number as i32, args, results.unwrap_or_default()),
+    ))
 }
 
 /// Parse a load instruction
@@ -475,15 +469,15 @@ pub(crate) fn parse_instruction(input: &str) -> IResult<&str, InstData> {
         parse_trapnz,  // "trapnz v0, int_ovf" - doesn't start with value assignment
         // Instructions that start with "v0 = " come after
         // Try parse_const before parse_stackalloc before parse_load since "iconst" and "stackalloc" are more specific than "load"
-        parse_const,      // "v0 = iconst 42" or "v0 = fconst 3.14"
-        parse_stackalloc, // "v0 = stackalloc 4" - stack allocation
-        parse_load,       // "v0 = load.i32 v1" - has type suffix
-        parse_fcmp,       // "v0 = fcmp eq v1, v2" - must come before parse_comparison
-        parse_comparison, // "v0 = icmp eq v1, v2" or "v0 = icmp_eq v1, v2"
+        parse_const,         // "v0 = iconst 42" or "v0 = fconst 3.14"
+        parse_stackalloc,    // "v0 = stackalloc 4" - stack allocation
+        parse_load,          // "v0 = load.i32 v1" - has type suffix
+        parse_fcmp,          // "v0 = fcmp eq v1, v2" - must come before parse_comparison
+        parse_comparison,    // "v0 = icmp eq v1, v2" or "v0 = icmp_eq v1, v2"
         parse_bitwise_unary, // "v0 = inot v1" - unary, must come before binary bitwise
-        parse_bitwise,    // "v0 = iand v1, v2" or "v0 = ior v1, v2" or "v0 = ixor v1, v2"
-        parse_shift,      // "v0 = ishl v1, v2" or "v0 = ishr v1, v2" or "v0 = iashr v1, v2"
-        parse_arithmetic, // "v0 = iadd v1, v2"
+        parse_bitwise,       // "v0 = iand v1, v2" or "v0 = ior v1, v2" or "v0 = ixor v1, v2"
+        parse_shift,         // "v0 = ishl v1, v2" or "v0 = ishr v1, v2" or "v0 = iashr v1, v2"
+        parse_arithmetic,    // "v0 = iadd v1, v2"
     ))(input)
 }
 
@@ -813,7 +807,11 @@ mod tests {
             panic!("Expected I32 immediate");
         }
         assert_eq!(inst_data.args.len(), 2);
-        assert_eq!(inst_data.results.len(), 0, "Syscall without return value should have empty results");
+        assert_eq!(
+            inst_data.results.len(),
+            0,
+            "Syscall without return value should have empty results"
+        );
     }
 
     #[test]
@@ -829,7 +827,11 @@ mod tests {
             panic!("Expected I32 immediate");
         }
         assert_eq!(inst_data.args.len(), 2);
-        assert_eq!(inst_data.results.len(), 1, "Syscall with return value should have one result");
+        assert_eq!(
+            inst_data.results.len(),
+            1,
+            "Syscall with return value should have one result"
+        );
         assert_eq!(inst_data.results[0].index(), 2);
     }
 

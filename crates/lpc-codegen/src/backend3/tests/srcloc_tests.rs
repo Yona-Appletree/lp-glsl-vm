@@ -249,4 +249,3 @@ block0:
         "Source locations should match instructions even in minimal functions"
     );
 }
-

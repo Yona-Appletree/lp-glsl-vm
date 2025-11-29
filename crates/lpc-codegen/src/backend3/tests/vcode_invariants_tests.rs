@@ -776,7 +776,8 @@ block0(v0: i32, v1: i32):
         assert_eq!(
             params.len(),
             0,
-            "Entry block should have 0 block parameters (function params handled by Args instruction)"
+            "Entry block should have 0 block parameters (function params handled by Args \
+             instruction)"
         );
     }
 

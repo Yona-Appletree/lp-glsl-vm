@@ -10,7 +10,7 @@ extern crate alloc;
 
 use alloc::{string::String, vec, vec::Vec};
 
-use lpc_lpir::{parse_function, FunctionBuilder, Signature, Type, verify};
+use lpc_lpir::{parse_function, verify, FunctionBuilder, Signature, Type};
 
 /// Helper function to build a function, format it as text, parse it back, and compare.
 fn build_parse_roundtrip<F>(
@@ -271,4 +271,3 @@ block0:
         verify_result
     );
 }
-

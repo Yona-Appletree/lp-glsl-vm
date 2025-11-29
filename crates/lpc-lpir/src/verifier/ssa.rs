@@ -1,6 +1,11 @@
 //! SSA (Static Single Assignment) verification.
 
-use alloc::{collections::BTreeMap, collections::BTreeSet, format, string::String, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::String,
+    vec::Vec,
+};
 
 use crate::{Function, Value, VerifierError};
 
@@ -43,7 +48,7 @@ fn verify_value_definitions(function: &Function, errors: &mut Vec<VerifierError>
 /// Verify that values are only used after they are defined
 fn verify_value_uses(function: &Function, errors: &mut Vec<VerifierError>) {
     let mut definitions: BTreeMap<Value, String> = BTreeMap::new();
-    
+
     // Get entry block to check for entry block parameters
     let entry_block = function.entry_block();
     let entry_block_params: alloc::collections::BTreeSet<Value> = entry_block
@@ -62,7 +67,7 @@ fn verify_value_uses(function: &Function, errors: &mut Vec<VerifierError>) {
                             .block_data(block)
                             .map(|bd| bd.params.contains(arg))
                             .unwrap_or(false);
-                        
+
                         // Check if it's an entry block parameter (can be used anywhere)
                         let is_entry_block_param = entry_block_params.contains(arg);
 

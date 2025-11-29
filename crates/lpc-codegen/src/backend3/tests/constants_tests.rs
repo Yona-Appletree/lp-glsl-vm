@@ -62,7 +62,11 @@ fn test_materialize_inline_constant() {
     // Build VCode to check instructions
     let built_vcode = build_vcode_with_single_block(vcode);
     // Small constants now emit Addi instructions (SSA requirement)
-    assert_eq!(built_vcode.insts.len(), 1, "Small constant should emit Addi instruction");
+    assert_eq!(
+        built_vcode.insts.len(),
+        1,
+        "Small constant should emit Addi instruction"
+    );
     match &built_vcode.insts[0] {
         Riscv32MachInst::Addi { imm, .. } => assert_eq!(*imm, 42),
         _ => panic!("Should emit Addi for small constant"),
@@ -130,7 +134,11 @@ fn test_materialize_negative_constant() {
     // Build VCode to check instructions
     let built_vcode = build_vcode_with_single_block(vcode);
     // Small constants now emit Addi instructions (SSA requirement)
-    assert_eq!(built_vcode.insts.len(), 1, "Small constant should emit Addi instruction");
+    assert_eq!(
+        built_vcode.insts.len(),
+        1,
+        "Small constant should emit Addi instruction"
+    );
     match &built_vcode.insts[0] {
         Riscv32MachInst::Addi { imm, .. } => assert_eq!(*imm, -100),
         _ => panic!("Should emit Addi for small constant"),

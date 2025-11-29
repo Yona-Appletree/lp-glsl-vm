@@ -10,4 +10,3 @@ pub enum OperandKind {
     /// Modify: read-write operand (input and output)
     Modify,
 }
-

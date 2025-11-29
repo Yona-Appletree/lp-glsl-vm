@@ -220,4 +220,3 @@ mod tests {
         // But they are different types, so can't compare directly
     }
 }
-

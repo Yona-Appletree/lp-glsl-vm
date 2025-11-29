@@ -68,7 +68,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
-                        let mach_inst = Riscv32MachInst::Add { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::Add {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -80,7 +84,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
-                        let mach_inst = Riscv32MachInst::Sub { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::Sub {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -181,13 +189,13 @@ impl LowerBackend for Riscv32LowerBackend {
                 if !results.is_empty() {
                     if let Some(result_vreg) = rd_opt {
                         use crate::isa::riscv32::backend3::regs::stack_pointer;
-                        
+
                         // Round up to 4-byte alignment (RISC-V 32-bit requirement)
                         let aligned_size = ((size + 3) & !3) as i32;
-                        
+
                         // Get SP register
                         let sp_reg = stack_pointer();
-                        
+
                         // Adjust SP: addi sp, sp, -aligned_size
                         let sp_writable = Writable::new(sp_reg);
                         let adjust_inst = Riscv32MachInst::Addi {
@@ -196,16 +204,13 @@ impl LowerBackend for Riscv32LowerBackend {
                             imm: -aligned_size,
                         };
                         ctx.vcode.push(adjust_inst, srcloc);
-                        
+
                         // Materialize address: mv result, sp
                         // Use Move instruction (which is ADD with zero)
                         let rd = Writable::new(Reg::from_virtual_reg(result_vreg));
-                        let move_inst = Riscv32MachInst::Move {
-                            rd,
-                            rs: sp_reg,
-                        };
+                        let move_inst = Riscv32MachInst::Move { rd, rs: sp_reg };
                         ctx.vcode.push(move_inst, srcloc);
-                        
+
                         return true;
                     }
                 }
@@ -216,7 +221,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
-                        let mach_inst = Riscv32MachInst::Mul { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::Mul {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -228,7 +237,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
-                        let mach_inst = Riscv32MachInst::Div { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::Div {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -240,7 +253,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rd = Writable::new(Reg::from_virtual_reg(rd_vreg));
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
-                        let mach_inst = Riscv32MachInst::Rem { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::Rem {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -260,7 +277,11 @@ impl LowerBackend for Riscv32LowerBackend {
                                     // Compute diff = rs1 - rs2
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
                                     let diff = Writable::new(Reg::from_virtual_reg(temp_vreg));
-                                    let sub_inst = Riscv32MachInst::Sub { rd: diff, rs1: rs1_reg, rs2: rs2_reg };
+                                    let sub_inst = Riscv32MachInst::Sub {
+                                        rd: diff,
+                                        rs1: rs1_reg,
+                                        rs2: rs2_reg,
+                                    };
                                     ctx.vcode.push(sub_inst, srcloc);
                                     // If diff < 1 (i.e., diff == 0), result = 1, else 0
                                     let temp_reg = Reg::from_virtual_reg(temp_vreg);
@@ -276,10 +297,15 @@ impl LowerBackend for Riscv32LowerBackend {
                                     // ne: same as eq, then invert
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
                                     let diff = Writable::new(Reg::from_virtual_reg(temp_vreg));
-                                    let sub_inst = Riscv32MachInst::Sub { rd: diff, rs1: rs1_reg, rs2: rs2_reg };
+                                    let sub_inst = Riscv32MachInst::Sub {
+                                        rd: diff,
+                                        rs1: rs1_reg,
+                                        rs2: rs2_reg,
+                                    };
                                     ctx.vcode.push(sub_inst, srcloc);
                                     let temp_result = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let temp_result_writable = Writable::new(Reg::from_virtual_reg(temp_result));
+                                    let temp_result_writable =
+                                        Writable::new(Reg::from_virtual_reg(temp_result));
                                     let temp_reg = Reg::from_virtual_reg(temp_vreg);
                                     let sltiu_inst = Riscv32MachInst::Sltiu {
                                         rd: temp_result_writable,
@@ -299,14 +325,19 @@ impl LowerBackend for Riscv32LowerBackend {
                                 }
                                 IntCC::SignedLessThan => {
                                     // lt: slt directly
-                                    let slt_inst = Riscv32MachInst::Slt { rd, rs1: rs1_reg, rs2: rs2_reg };
+                                    let slt_inst = Riscv32MachInst::Slt {
+                                        rd,
+                                        rs1: rs1_reg,
+                                        rs2: rs2_reg,
+                                    };
                                     ctx.vcode.push(slt_inst, srcloc);
                                     return true;
                                 }
                                 IntCC::SignedLessThanOrEqual => {
                                     // le: slt with swapped operands, then invert
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let temp_writable = Writable::new(Reg::from_virtual_reg(temp_vreg));
+                                    let temp_writable =
+                                        Writable::new(Reg::from_virtual_reg(temp_vreg));
                                     let slt_inst = Riscv32MachInst::Slt {
                                         rd: temp_writable,
                                         rs1: rs2_reg,
@@ -335,7 +366,8 @@ impl LowerBackend for Riscv32LowerBackend {
                                 IntCC::SignedGreaterThanOrEqual => {
                                     // ge: slt, then invert
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let temp_writable = Writable::new(Reg::from_virtual_reg(temp_vreg));
+                                    let temp_writable =
+                                        Writable::new(Reg::from_virtual_reg(temp_vreg));
                                     let slt_inst = Riscv32MachInst::Slt {
                                         rd: temp_writable,
                                         rs1: rs1_reg,
@@ -353,14 +385,19 @@ impl LowerBackend for Riscv32LowerBackend {
                                 }
                                 IntCC::UnsignedLessThan => {
                                     // ult: sltu directly
-                                    let sltu_inst = Riscv32MachInst::Sltu { rd, rs1: rs1_reg, rs2: rs2_reg };
+                                    let sltu_inst = Riscv32MachInst::Sltu {
+                                        rd,
+                                        rs1: rs1_reg,
+                                        rs2: rs2_reg,
+                                    };
                                     ctx.vcode.push(sltu_inst, srcloc);
                                     return true;
                                 }
                                 IntCC::UnsignedLessThanOrEqual => {
                                     // ule: sltu with swapped operands, then invert
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let temp_writable = Writable::new(Reg::from_virtual_reg(temp_vreg));
+                                    let temp_writable =
+                                        Writable::new(Reg::from_virtual_reg(temp_vreg));
                                     let sltu_inst = Riscv32MachInst::Sltu {
                                         rd: temp_writable,
                                         rs1: rs2_reg,
@@ -389,7 +426,8 @@ impl LowerBackend for Riscv32LowerBackend {
                                 IntCC::UnsignedGreaterThanOrEqual => {
                                     // uge: sltu, then invert
                                     let temp_vreg = ctx.vcode.alloc_vreg(RegClass::Int);
-                                    let temp_writable = Writable::new(Reg::from_virtual_reg(temp_vreg));
+                                    let temp_writable =
+                                        Writable::new(Reg::from_virtual_reg(temp_vreg));
                                     let sltu_inst = Riscv32MachInst::Sltu {
                                         rd: temp_writable,
                                         rs1: rs1_reg,
@@ -524,7 +562,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
                         // TODO: Check if rs2 is a constant and use Andi if it fits in 12 bits
-                        let mach_inst = Riscv32MachInst::And { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::And {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -537,7 +579,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
                         // TODO: Check if rs2 is a constant and use Ori if it fits in 12 bits
-                        let mach_inst = Riscv32MachInst::Or { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::Or {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -550,7 +596,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
                         // TODO: Check if rs2 is a constant and use Xori if it fits in 12 bits
-                        let mach_inst = Riscv32MachInst::Xor { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::Xor {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -580,7 +630,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
                         // TODO: Check if rs2 is a constant (0-31) and use Slli if it fits in 5 bits
-                        let mach_inst = Riscv32MachInst::Sll { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::Sll {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -593,7 +647,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
                         // TODO: Check if rs2 is a constant (0-31) and use Srli if it fits in 5 bits
-                        let mach_inst = Riscv32MachInst::Srl { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::Srl {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -606,7 +664,11 @@ impl LowerBackend for Riscv32LowerBackend {
                         let rs1_reg = Reg::from_virtual_reg(rs1);
                         let rs2_reg = Reg::from_virtual_reg(rs2);
                         // TODO: Check if rs2 is a constant (0-31) and use Srai if it fits in 5 bits
-                        let mach_inst = Riscv32MachInst::Sra { rd, rs1: rs1_reg, rs2: rs2_reg };
+                        let mach_inst = Riscv32MachInst::Sra {
+                            rd,
+                            rs1: rs1_reg,
+                            rs2: rs2_reg,
+                        };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
                     }
@@ -637,7 +699,9 @@ impl LowerBackend for Riscv32LowerBackend {
     fn create_branch(&self, condition: crate::backend3::types::VReg) -> Self::MInst {
         use crate::backend3::types::Reg;
         let condition_reg = Reg::from_virtual_reg(condition);
-        Riscv32MachInst::Br { condition: condition_reg }
+        Riscv32MachInst::Br {
+            condition: condition_reg,
+        }
     }
 
     fn create_jump(&self) -> Self::MInst {
@@ -650,8 +714,14 @@ impl LowerBackend for Riscv32LowerBackend {
         entry_block: lpc_lpir::BlockEntity,
         srcloc: lpc_lpir::RelSourceLoc,
     ) {
-        use crate::backend3::types::Reg;
-        use crate::isa::riscv32::backend3::{abi::Riscv32ABI, inst::ArgPair, inst::Riscv32MachInst, regs::frame_pointer};
+        use crate::{
+            backend3::types::Reg,
+            isa::riscv32::backend3::{
+                abi::Riscv32ABI,
+                inst::{ArgPair, Riscv32MachInst},
+                regs::frame_pointer,
+            },
+        };
 
         // Get function parameters from entry block
         // Collect parameters first to avoid borrow checker issues
@@ -660,7 +730,7 @@ impl LowerBackend for Riscv32LowerBackend {
             .block_data(entry_block)
             .map(|bd| bd.params.clone())
             .unwrap_or_default();
-        
+
         if !params.is_empty() {
             // Get ABI argument registers
             let arg_regs = Riscv32ABI::arg_regs();
@@ -669,7 +739,7 @@ impl LowerBackend for Riscv32LowerBackend {
             // For parameters beyond ABI argument registers, emit LW instructions to load from stack
             let mut arg_pairs = alloc::vec::Vec::new();
             let mut stack_loads = alloc::vec::Vec::new();
-            
+
             for (idx, param_value) in params.iter().enumerate() {
                 if let Some(&vreg) = ctx.value_to_vreg().get(param_value) {
                     if let Some(&preg) = arg_regs.get(idx) {
@@ -684,10 +754,10 @@ impl LowerBackend for Riscv32LowerBackend {
                         // Stack parameters start at offset 0 from frame pointer
                         // Each parameter is 4 bytes (i32), and we skip the first 8 (in registers)
                         let stack_offset = (idx - arg_regs.len()) * 4;
-                        
+
                         let fp_reg = frame_pointer();
                         let vreg_writable = Reg::from_virtual_reg(vreg);
-                        
+
                         stack_loads.push(Riscv32MachInst::Lw {
                             rd: crate::backend3::types::Writable::new(vreg_writable),
                             rs1: fp_reg,
