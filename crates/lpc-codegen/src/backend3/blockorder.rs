@@ -79,9 +79,27 @@ pub fn compute_block_order(
     }
 
     // 6. Identify cold blocks (deferred: mark blocks unlikely to execute)
+    //
+    // Cold blocks are blocks that are unlikely to execute (e.g., error handling paths).
+    // These can be placed at the end of the function during block layout optimization
+    // to improve code locality for the hot path.
+    //
+    // TODO: Implement cold block identification in a future phase. This could use:
+    // - Profile data (if available)
+    // - Heuristics (e.g., blocks dominated by unlikely conditions)
+    // - User annotations
     let cold_blocks = BTreeSet::new();
 
     // 7. Identify indirect branch targets (deferred: track blocks that are indirect targets)
+    //
+    // Indirect branch targets are blocks that are reached via indirect branches
+    // (e.g., computed jumps, switch statements with jump tables). These blocks
+    // may require special alignment or handling during emission.
+    //
+    // TODO: Implement indirect branch target tracking in a future phase. This requires:
+    // - Analysis of branch instructions to identify indirect branches
+    // - Tracking which blocks are targets of indirect branches
+    // - Potentially marking these blocks for special alignment
     let indirect_targets = BTreeSet::new();
 
     BlockLoweringOrder {

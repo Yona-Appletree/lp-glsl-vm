@@ -133,6 +133,166 @@ impl<I: MachInst> VCodeBuilder<I> {
         self.block_metadata.push(metadata);
     }
 
+    /// Validate VCode invariants before building
+    ///
+    /// This performs comprehensive checks to ensure the VCode structure is valid:
+    /// - Block ranges cover all instructions exactly once
+    /// - Operand ranges match instruction count
+    /// - Source locations match instruction count
+    /// - Entry block is valid
+    /// - Block metadata matches block count
+    fn validate_vcode_invariants(
+        insts: &[I],
+        srclocs: &[RelSourceLoc],
+        block_ranges: &Ranges,
+        operand_ranges: &Ranges,
+        operands: &[crate::backend3::vcode::Operand],
+        block_succ_range: &Ranges,
+        block_succs: &[BlockIndex],
+        block_pred_range: &Ranges,
+        block_preds: &[BlockIndex],
+        block_params_range: &Ranges,
+        block_metadata: &[BlockMetadata],
+        entry: BlockIndex,
+        block_order: &BlockLoweringOrder,
+    ) {
+        // Check source locations match instruction count
+        assert_eq!(
+            srclocs.len(),
+            insts.len(),
+            "Source locations must match instruction count"
+        );
+
+        // Check operand ranges match instruction count
+        assert_eq!(
+            operand_ranges.len(),
+            insts.len(),
+            "Operand ranges must match instruction count"
+        );
+
+        // Check block metadata matches block count
+        assert_eq!(
+            block_metadata.len(),
+            block_ranges.len(),
+            "Block metadata must match block count"
+        );
+
+        // Check block parameter ranges match block count
+        assert_eq!(
+            block_params_range.len(),
+            block_ranges.len(),
+            "Block parameter ranges must match block count"
+        );
+
+        // Check entry block is valid
+        assert!(
+            entry.index() < block_ranges.len() as u32,
+            "Entry block index {} must be less than block count {}",
+            entry.index(),
+            block_ranges.len()
+        );
+
+        // Check block ranges cover all instructions exactly once
+        let mut total_covered = 0;
+        for i in 0..block_ranges.len() {
+            if let Some(range) = block_ranges.get(i) {
+                assert!(
+                    range.start <= range.end,
+                    "Block range {}: start {} must be <= end {}",
+                    i,
+                    range.start,
+                    range.end
+                );
+                assert!(
+                    range.end <= insts.len(),
+                    "Block range {}: end {} must be <= instruction count {}",
+                    i,
+                    range.end,
+                    insts.len()
+                );
+                total_covered += range.len();
+
+                // Check contiguity with next range
+                if i + 1 < block_ranges.len() {
+                    if let Some(next_range) = block_ranges.get(i + 1) {
+                        assert_eq!(
+                            range.end,
+                            next_range.start,
+                            "Block ranges must be contiguous: range {} ends at {}, range {} starts at {}",
+                            i,
+                            range.end,
+                            i + 1,
+                            next_range.start
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            total_covered,
+            insts.len(),
+            "Block ranges must cover all instructions exactly once (covered {}, total {})",
+            total_covered,
+            insts.len()
+        );
+
+        // Check operand ranges are valid and contiguous
+        let mut total_operands_covered = 0;
+        for i in 0..operand_ranges.len() {
+            if let Some(range) = operand_ranges.get(i) {
+                assert!(
+                    range.start <= range.end,
+                    "Operand range {}: start {} must be <= end {}",
+                    i,
+                    range.start,
+                    range.end
+                );
+                assert!(
+                    range.end <= operands.len(),
+                    "Operand range {}: end {} must be <= operand count {}",
+                    i,
+                    range.end,
+                    operands.len()
+                );
+                total_operands_covered += range.len();
+
+                // Check contiguity with next range
+                if i + 1 < operand_ranges.len() {
+                    if let Some(next_range) = operand_ranges.get(i + 1) {
+                        assert_eq!(
+                            range.end,
+                            next_range.start,
+                            "Operand ranges must be contiguous: range {} ends at {}, range {} starts at {}",
+                            i,
+                            range.end,
+                            i + 1,
+                            next_range.start
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            total_operands_covered,
+            operands.len(),
+            "Operand ranges must cover all operands exactly once (covered {}, total {})",
+            total_operands_covered,
+            operands.len()
+        );
+
+        // Check predecessor/successor ranges match block count
+        assert_eq!(
+            block_succ_range.len(),
+            block_ranges.len(),
+            "Block successor ranges must match block count"
+        );
+        assert_eq!(
+            block_pred_range.len(),
+            block_ranges.len(),
+            "Block predecessor ranges must match block count"
+        );
+    }
+
     /// Compute predecessors from successors using counting sort
     ///
     /// This implements the inverse relationship: for each block that appears
@@ -322,6 +482,23 @@ impl<I: MachInst> VCodeBuilder<I> {
                 alignment: None, // Not implemented yet
             });
         }
+
+        // Validate invariants before building VCode
+        Self::validate_vcode_invariants(
+            &self.insts,
+            &self.srclocs,
+            &block_ranges,
+            &operand_ranges,
+            &operands,
+            &block_succ_range,
+            &block_succs,
+            &block_pred_range,
+            &block_preds,
+            &self.block_params_range,
+            &block_metadata,
+            entry,
+            &block_order,
+        );
 
         VCode {
             insts: self.insts,

@@ -1097,3 +1097,171 @@ vcode {
 "#,
     );
 }
+
+/// Test lowering function with no instructions (just return)
+#[test]
+fn test_lower_empty_function() {
+    use crate::backend3::tests::vcode_test_helpers::LowerTest;
+
+    LowerTest::from_lpir(
+        r#"
+function %test() -> i32 {
+block0:
+    v1 = iconst 0
+    return v1
+}
+"#,
+    )
+    .assert_vcode(
+        r#"
+vcode {
+  entry: block0
+
+  block0:
+    return v1
+
+}
+"#,
+    );
+}
+
+/// Test lowering function with no parameters
+#[test]
+fn test_lower_no_parameters() {
+    use crate::backend3::tests::vcode_test_helpers::LowerTest;
+
+    LowerTest::from_lpir(
+        r#"
+function %test() -> i32 {
+block0:
+    v1 = iconst 42
+    return v1
+}
+"#,
+    )
+    .assert_vcode(
+        r#"
+vcode {
+  entry: block0
+
+  block0:
+    return v1
+
+}
+"#,
+    );
+}
+
+/// Test lowering function with many parameters
+#[test]
+fn test_lower_many_parameters() {
+    use crate::backend3::tests::vcode_test_helpers::LowerTest;
+
+    LowerTest::from_lpir(
+        r#"
+function %test(i32, i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32):
+    v5 = iadd v0, v1
+    return v5
+}
+"#,
+    )
+    .assert_vcode(
+        r#"
+vcode {
+  entry: block0
+
+  block0(v0, v1, v2, v3, v4):
+    add v5, v0, v1
+    return v5
+
+}
+"#,
+    );
+}
+
+/// Test lowering function with many return values
+#[test]
+fn test_lower_many_return_values() {
+    use crate::backend3::tests::vcode_test_helpers::LowerTest;
+
+    LowerTest::from_lpir(
+        r#"
+function %test(i32, i32) -> (i32, i32) {
+block0(v0: i32, v1: i32):
+    return v0, v1
+}
+"#,
+    )
+    .assert_vcode(
+        r#"
+vcode {
+  entry: block0
+
+  block0(v0, v1):
+    return v0, v1
+
+}
+"#,
+    );
+}
+
+/// Test lowering with unused values
+#[test]
+fn test_lower_unused_values() {
+    use crate::backend3::tests::vcode_test_helpers::LowerTest;
+
+    LowerTest::from_lpir(
+        r#"
+function %test(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = iadd v0, v1
+    v3 = isub v0, v1
+    return v2
+}
+"#,
+    )
+    .assert_vcode(
+        r#"
+vcode {
+  entry: block0
+
+  block0(v0, v1):
+    add v2, v0, v1
+    sub v3, v0, v1
+    return v2
+
+}
+"#,
+    );
+}
+
+/// Test lowering with values used multiple times
+#[test]
+fn test_lower_values_used_multiple_times() {
+    use crate::backend3::tests::vcode_test_helpers::LowerTest;
+
+    LowerTest::from_lpir(
+        r#"
+function %test(i32) -> i32 {
+block0(v0: i32):
+    v1 = iadd v0, v0
+    v2 = imul v0, v1
+    return v2
+}
+"#,
+    )
+    .assert_vcode(
+        r#"
+vcode {
+  entry: block0
+
+  block0(v0):
+    add v1, v0, v0
+    mul v2, v0, v1
+    return v2
+
+}
+"#,
+    );
+}

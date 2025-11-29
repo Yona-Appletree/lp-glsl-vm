@@ -91,14 +91,13 @@ vcode {
   entry: block0
 
   block0(v0):
-    br block2
-    br block1
+    brif v0, block2, block1
 
   block1:
-    br block3
+    jump block3
 
   block2:
-    br block3
+    jump block3
 
   block3:
     return v2

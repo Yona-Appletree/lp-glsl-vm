@@ -227,7 +227,7 @@ impl<I: MachInst> Lower<I> {
             .block_to_index
             .get(&block)
             .copied()
-            .unwrap_or(BlockIndex::new(0));
+            .expect("Block should be in block_to_index mapping (computed during block order computation)");
 
         // Get block parameters
         let block_params: Vec<VReg> = if let Some(block_data) = self.func.block_data(block) {

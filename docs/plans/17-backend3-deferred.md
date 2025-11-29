@@ -5,6 +5,7 @@ This document tracks features and optimizations that are **not** part of the ini
 ## Advanced Optimizations
 
 ### Branch Optimization
+
 - **Branch Threading**: Eliminate empty blocks by redirecting labels through unconditional jumps
   - When a label is bound to an unconditional jump, redirect all references to the jump's target
   - Creates "label aliases" that effectively remove empty blocks
@@ -23,6 +24,7 @@ This document tracks features and optimizations that are **not** part of the ini
   - Cleared when non-branch code is emitted
 
 ### Block Layout Optimization
+
 - **Profile-Guided Optimization**: Use execution profiles to identify hot/cold blocks
 - **Advanced Cold Block Sinking**: More sophisticated cold block placement
 - **Block Reordering**: Optimize block order based on branch probabilities
@@ -30,6 +32,7 @@ This document tracks features and optimizations that are **not** part of the ini
 ## Code Generation Features
 
 ### Out-of-Range Branch Handling
+
 - **Veneer/Island Insertion**: Handle branches that exceed ±4KB range
   - **Islands**: Code chunks inserted in the middle of emission to hold veneers
   - **Veneers**: Trampoline instructions that extend branch range (e.g., conditional branch → unconditional jump)
@@ -43,17 +46,20 @@ This document tracks features and optimizations that are **not** part of the ini
   - Process fixups during island emission
 
 ### Constant Pool
+
 - **Large Constant Storage**: Store large constants in data section
 - **PC-Relative Constant Loading**: Load constants via PC-relative addressing
 - **Constant Deduplication**: Share constants across functions
 
 ### Frame Pointer
+
 - **Optional Frame Pointer**: Use frame pointer for easier debugging
 - **Frame Pointer Optimization**: Only use FP when needed (variable-sized allocations, etc.)
 
 ## Debugging and Diagnostics
 
 ### Debug Information
+
 - **Debug Tags**: Emit debug metadata for debugging tools
   - Pre-instruction and post-instruction debug tag placement
   - Debug tag pooling for efficient storage
@@ -68,17 +74,20 @@ This document tracks features and optimizations that are **not** part of the ini
   - Useful for debugging and analysis tools
 
 ### Unwind Information
+
 - **Exception Handling**: Generate unwind info for exception handling
 - **Stack Unwinding**: Support for stack unwinding (SystemV, Windows, etc.)
 
 ## Advanced Register Allocation
 
 ### Register Allocation Optimizations
+
 - **Rematerialization**: Recompute values instead of spilling
 - **Coalescing**: Merge related virtual registers
 - **Live Range Splitting**: Split live ranges for better allocation
 
 ### Clobber Computation Optimization
+
 - **Dead Write Elimination**: The current algorithm saves all callee-saved registers that are written to, even if the value is dead (never read). Could optimize by:
   - Only saving callee-saved registers that are live across calls
   - Skipping saves for dead writes to callee-saved registers
@@ -87,16 +96,19 @@ This document tracks features and optimizations that are **not** part of the ini
 ## Other Features
 
 ### Multi-Function Compilation
+
 - **Module Compilation**: Compile multiple functions together
 - **Cross-Function Optimization**: Optimize across function boundaries
 - **Function Address Resolution**: Resolve function addresses for calls
 
 ### Performance Monitoring
+
 - **Instruction Counting**: Track instruction counts for optimization
 - **Register Pressure Analysis**: Analyze register pressure for optimization
 - **Code Size Optimization**: Optimize for code size vs. performance
 
 ### Emission Optimizations
+
 - **Edit Counting Per Block**: Count edits per block ahead of time for lookahead island emission
   - Used to estimate worst-case block size
   - Helps determine when islands are needed
@@ -105,6 +117,7 @@ This document tracks features and optimizations that are **not** part of the ini
   - Useful for fuzzing and testing edge cases
 
 ### Safepoint and Stack Map Handling
+
 - **Safepoint Detection**: Identify safepoint instructions (`is_safepoint()`)
 - **Stack Map Generation**: Generate stack maps at safepoints for GC
 - **User Stack Maps**: Handle user-provided stack map metadata
@@ -117,3 +130,13 @@ This document tracks features and optimizations that are **not** part of the ini
 - Some may require significant refactoring
 - Prioritize based on actual needs and performance requirements
 
+  // 6. Identify cold blocks (deferred: mark blocks unlikely to execute)
+  //
+  // Cold blocks are blocks that are unlikely to execute (e.g., error handling paths).
+  // These can be placed at the end of the function during block layout optimization
+  // to improve code locality for the hot path.
+  //
+  // TODO: Implement cold block identification in a future phase. This could use:
+  // - Profile data (if available)
+  // - Heuristics (e.g., blocks dominated by unlikely conditions)
+  // - User annotations
