@@ -38,4 +38,9 @@ pub mod lower_helpers {
     pub fn create_lui(rd: Writable<VReg>, imm: u32) -> Riscv32MachInst {
         Riscv32MachInst::Lui { rd, imm }
     }
+
+    /// Create a Move instruction (register copy)
+    pub fn create_move(rd: Writable<VReg>, rs: VReg) -> Riscv32MachInst {
+        Riscv32MachInst::Move { rd, rs }
+    }
 }

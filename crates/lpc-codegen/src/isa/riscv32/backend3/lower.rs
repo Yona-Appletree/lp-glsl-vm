@@ -91,4 +91,9 @@ impl LowerBackend for Riscv32LowerBackend {
 
         false
     }
+
+    fn create_move(&self, dst: crate::backend3::types::Writable<crate::backend3::types::VReg>, src: crate::backend3::types::VReg) -> Self::MInst {
+        use crate::isa::riscv32::backend3::lower_helpers;
+        lower_helpers::create_move(dst, src)
+    }
 }

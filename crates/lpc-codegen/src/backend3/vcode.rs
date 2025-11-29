@@ -144,8 +144,14 @@ pub enum LoweredBlock {
     Orig { block: lpc_lpir::BlockEntity },
     /// Edge block (for critical edges)
     Edge {
+        /// The predecessor block
         from: lpc_lpir::BlockEntity,
+        /// The successor block
         to: lpc_lpir::BlockEntity,
+        /// The index of this branch in the successor edges from `from`, following the same
+        /// indexing order as the CFG. This is used to distinguish multiple edges between
+        /// the same CLIF blocks.
+        succ_idx: u32,
     },
 }
 

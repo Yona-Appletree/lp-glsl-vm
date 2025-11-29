@@ -41,6 +41,11 @@ pub enum Riscv32MachInst {
 
     /// SW: Store word (mem[rs1 + imm] = rs2)
     Sw { rs1: VReg, rs2: VReg, imm: i32 },
+
+    /// Move: rd = rs (register copy)
+    /// This is used for phi moves in edge blocks.
+    /// On RISC-V, this is typically implemented as ADD rd, rs, x0
+    Move { rd: Writable<VReg>, rs: VReg },
 }
 
 impl MachInst for Riscv32MachInst {
@@ -76,6 +81,10 @@ impl MachInst for Riscv32MachInst {
                 collector.visit_use(*rs1, OperandConstraint::Any);
                 collector.visit_use(*rs2, OperandConstraint::Any);
                 // Immediate is handled separately
+            }
+            Riscv32MachInst::Move { rd, rs } => {
+                collector.visit_def(rd.to_reg(), OperandConstraint::Any);
+                collector.visit_use(*rs, OperandConstraint::Any);
             }
         }
     }

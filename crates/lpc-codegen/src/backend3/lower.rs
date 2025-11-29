@@ -3,7 +3,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use crate::backend3::blockorder::compute_block_order;
-use crate::backend3::types::{BlockIndex, VReg};
+use crate::backend3::types::{BlockIndex, VReg, Writable};
 use crate::backend3::vcode::{BlockLoweringOrder, Callee, MachInst, VCode};
 use crate::backend3::vcode_builder::VCodeBuilder;
 use lpc_lpir::{
@@ -33,6 +33,12 @@ pub trait LowerBackend {
         inst: InstEntity,
         srcloc: RelSourceLoc,
     ) -> bool;
+
+    /// Create a move instruction (register copy)
+    ///
+    /// This is used for phi moves in edge blocks. The backend should create
+    /// an appropriate move instruction that copies `src` to `dst`.
+    fn create_move(&self, dst: Writable<VReg>, src: VReg) -> Self::MInst;
 }
 
 /// Lowering context: converts IR to VCode
@@ -77,11 +83,11 @@ impl<I: MachInst> Lower<I> {
                 crate::backend3::vcode::LoweredBlock::Orig { block } => {
                     self.lower_block(backend, *block);
                 }
-                crate::backend3::vcode::LoweredBlock::Edge { from, to } => {
+                crate::backend3::vcode::LoweredBlock::Edge { from, to, succ_idx: _ } => {
                     // Emit phi moves for edge block
                     // Edge blocks use their position in lowered_order as their BlockIndex
                     let edge_block_idx = BlockIndex::new(idx as u32);
-                    self.lower_edge_block(edge_block_idx, *from, *to);
+                    self.lower_edge_block(backend, edge_block_idx, *from, *to);
                 }
             }
         }
@@ -148,7 +154,13 @@ impl<I: MachInst> Lower<I> {
     ///
     /// Edge blocks are synthetic blocks inserted on critical edges to handle
     /// phi value moves. They need to call start_block/end_block like regular blocks.
-    fn lower_edge_block(&mut self, edge_block_idx: BlockIndex, from: Block, to: Block) {
+    fn lower_edge_block<B: LowerBackend<MInst = I>>(
+        &mut self,
+        backend: &B,
+        edge_block_idx: BlockIndex,
+        from: Block,
+        to: Block,
+    ) {
         // Edge blocks have no parameters (they're just for moves)
         self.vcode.start_block(edge_block_idx, Vec::new());
 
@@ -164,10 +176,21 @@ impl<I: MachInst> Lower<I> {
                 for (pred_block, source_value) in sources {
                     if pred_block == from {
                         // Emit move: vreg_target = vreg_source
-                        let _target_vreg = self.value_to_vreg[param_value];
-                        let _source_vreg = self.value_to_vreg[&source_value];
-                        // TODO: Emit move instruction (will be implemented when we add move instructions)
-                        // For now, this is a placeholder - edge blocks may be empty
+                        let target_vreg = self.value_to_vreg[param_value];
+                        let source_vreg = self.value_to_vreg[&source_value];
+                        
+                        // Only emit move if source and target are different VRegs
+                        if target_vreg != source_vreg {
+                            use crate::backend3::types::Writable;
+                            
+                            // Use default source location for synthetic moves
+                            let srcloc = RelSourceLoc::default();
+                            let move_inst = backend.create_move(
+                                Writable::new(target_vreg),
+                                source_vreg,
+                            );
+                            self.vcode.push(move_inst, srcloc);
+                        }
                         break;
                     }
                 }

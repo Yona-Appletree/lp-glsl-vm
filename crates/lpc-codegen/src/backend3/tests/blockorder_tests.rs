@@ -117,7 +117,7 @@ fn test_block_order_critical_edges() {
                     found_block2 = true;
                 }
             }
-            crate::backend3::vcode::LoweredBlock::Edge { from, .. } => {
+            crate::backend3::vcode::LoweredBlock::Edge { from, succ_idx: _, .. } => {
                 // Edge blocks should come after their source blocks
                 if *from == block1 {
                     assert!(found_block1, "Edge block from block1 should come after block1");

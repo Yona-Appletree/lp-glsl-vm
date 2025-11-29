@@ -39,10 +39,10 @@ pub fn compute_block_order(
     // 2. Create edge blocks for critical edges
     let mut edge_blocks = BTreeMap::new();
     let mut next_edge_block_idx = func.block_count() as u32;
-    for (from, to) in critical_edges {
+    for (from, to, _succ_idx) in critical_edges {
         let edge_block_idx = BlockIndex::new(next_edge_block_idx);
         next_edge_block_idx += 1;
-        edge_blocks.insert((*from, *to), edge_block_idx);
+        edge_blocks.insert((*from, *to, *_succ_idx), edge_block_idx);
     }
 
     // 3. Build lowered block order (RPO)
@@ -67,7 +67,11 @@ pub fn compute_block_order(
                 let lowered_idx = BlockIndex::new(idx as u32);
                 block_to_lowered_index.insert(*block, lowered_idx);
             }
-            LoweredBlock::Edge { from: _, to: _ } => {
+            LoweredBlock::Edge {
+                from: _,
+                to: _,
+                succ_idx: _,
+            } => {
                 // Edge blocks don't map to IR blocks, but we can still track them
                 // For now, we'll skip them in the mapping
             }
@@ -96,11 +100,14 @@ pub fn compute_block_order(
 /// - The target block has multiple predecessors
 ///
 /// These edges need intermediate blocks for phi value moves.
+///
+/// Returns tuples of (from_block, to_block, succ_idx) where succ_idx is the index
+/// of this edge in the source block's successor list.
 fn detect_critical_edges(
     func: &lpc_lpir::Function,
     cfg: &ControlFlowGraph,
     block_to_index: &BTreeMap<BlockEntity, usize>,
-) -> Vec<(BlockEntity, BlockEntity)> {
+) -> Vec<(BlockEntity, BlockEntity, u32)> {
     let mut critical_edges = Vec::new();
 
     for block in func.blocks() {
@@ -114,8 +121,8 @@ fn detect_critical_edges(
             continue; // Not multiple successors
         }
 
-        // Check each successor
-        for &succ_idx in succs {
+        // Check each successor, tracking the index in the successor list
+        for (edge_idx, &succ_idx) in succs.iter().enumerate() {
             let preds = cfg.predecessors(succ_idx);
             if preds.len() > 1 {
                 // Critical edge: source has multiple succs, target has multiple preds
@@ -126,7 +133,7 @@ fn detect_critical_edges(
                     .find(|(idx, _)| *idx == succ_idx)
                     .map(|(_, block)| block);
                 if let Some(succ_block) = succ_block {
-                    critical_edges.push((block, succ_block));
+                    critical_edges.push((block, succ_block, edge_idx as u32));
                 }
             }
         }
@@ -142,8 +149,8 @@ fn detect_critical_edges(
 fn build_lowered_order(
     func: &lpc_lpir::Function,
     cfg: &ControlFlowGraph,
-    critical_edges: &[(BlockEntity, BlockEntity)],
-    _edge_blocks: &BTreeMap<(BlockEntity, BlockEntity), BlockIndex>,
+    critical_edges: &[(BlockEntity, BlockEntity, u32)],
+    _edge_blocks: &BTreeMap<(BlockEntity, BlockEntity, u32), BlockIndex>,
     _block_to_index: &BTreeMap<BlockEntity, usize>,
 ) -> Vec<LoweredBlock> {
     // Get RPO order of original blocks
@@ -166,11 +173,12 @@ fn build_lowered_order(
 
             // Insert edge blocks immediately after this block (if any)
             // This matches Cranelift's approach where edge blocks follow their source
-            for (from, to) in critical_edges {
+            for (from, to, succ_idx) in critical_edges {
                 if *from == block {
                     lowered_order.push(LoweredBlock::Edge {
                         from: *from,
                         to: *to,
+                        succ_idx: *succ_idx,
                     });
                 }
             }
@@ -184,8 +192,8 @@ fn build_lowered_order(
 fn build_lowered_succs(
     func: &lpc_lpir::Function,
     cfg: &ControlFlowGraph,
-    critical_edges: &[(BlockEntity, BlockEntity)],
-    _edge_blocks: &BTreeMap<(BlockEntity, BlockEntity), BlockIndex>,
+    critical_edges: &[(BlockEntity, BlockEntity, u32)],
+    _edge_blocks: &BTreeMap<(BlockEntity, BlockEntity, u32), BlockIndex>,
     _block_to_index: &BTreeMap<BlockEntity, usize>,
     lowered_order: &[LoweredBlock],
 ) -> Vec<Vec<BlockIndex>> {
@@ -196,19 +204,24 @@ fn build_lowered_succs(
             LoweredBlock::Orig { block } => {
                 ir_to_lowered.insert(*block, BlockIndex::new(idx as u32));
             }
-            LoweredBlock::Edge { from: _, to: _ } => {
+            LoweredBlock::Edge {
+                from: _,
+                to: _,
+                succ_idx: _,
+            } => {
                 // Edge blocks are tracked separately
             }
         }
     }
 
     // Build mapping from edge blocks to their lowered indices
-    let mut edge_to_lowered: BTreeMap<(BlockEntity, BlockEntity), BlockIndex> = BTreeMap::new();
+    let mut edge_to_lowered: BTreeMap<(BlockEntity, BlockEntity, u32), BlockIndex> =
+        BTreeMap::new();
     for (idx, lowered_block) in lowered_order.iter().enumerate() {
         match lowered_block {
             LoweredBlock::Orig { block: _ } => {}
-            LoweredBlock::Edge { from, to } => {
-                edge_to_lowered.insert((*from, *to), BlockIndex::new(idx as u32));
+            LoweredBlock::Edge { from, to, succ_idx } => {
+                edge_to_lowered.insert((*from, *to, *succ_idx), BlockIndex::new(idx as u32));
             }
         }
     }
@@ -227,8 +240,8 @@ fn build_lowered_succs(
                     .unwrap_or(0);
                 let mut succs = Vec::new();
 
-                // Get original successors
-                for &succ_idx in cfg.successors(block_idx) {
+                // Get original successors, tracking the edge index
+                for (edge_idx, &succ_idx) in cfg.successors(block_idx).iter().enumerate() {
                     let succ_block = func
                         .blocks()
                         .enumerate()
@@ -236,9 +249,11 @@ fn build_lowered_succs(
                         .map(|(_, block)| block);
 
                     if let Some(succ_block) = succ_block {
-                        // Check if this edge is critical
-                        let edge_key = (*block, succ_block);
-                        if critical_edges.contains(&edge_key) {
+                        // Check if this edge is critical by matching (from, to, succ_idx)
+                        let edge_key = (*block, succ_block, edge_idx as u32);
+                        if critical_edges.iter().any(|(f, t, s)| {
+                            *f == *block && *t == succ_block && *s == edge_idx as u32
+                        }) {
                             // Use edge block instead
                             if let Some(&edge_block_idx) = edge_to_lowered.get(&edge_key) {
                                 succs.push(edge_block_idx);
@@ -254,7 +269,11 @@ fn build_lowered_succs(
 
                 lowered_succs.push(succs);
             }
-            LoweredBlock::Edge { from: _, to } => {
+            LoweredBlock::Edge {
+                from: _,
+                to,
+                succ_idx: _,
+            } => {
                 // Edge block succeeds to the target block
                 if let Some(&target_lowered_idx) = ir_to_lowered.get(to) {
                     lowered_succs.push(vec![target_lowered_idx]);
