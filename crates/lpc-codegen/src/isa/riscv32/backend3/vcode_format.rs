@@ -1,6 +1,6 @@
 //! VCode text formatting for RISC-V 32-bit backend3
 
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
 use core::fmt;
 
 use crate::backend3::{
@@ -32,6 +32,52 @@ impl fmt::Display for Riscv32MachInst {
             }
             Riscv32MachInst::Move { rd, rs } => {
                 write!(f, "move {}, {}", rd, rs)
+            }
+            Riscv32MachInst::Return { ret_vals } => {
+                if ret_vals.is_empty() {
+                    write!(f, "return")
+                } else {
+                    write!(f, "return {}", ret_vals.iter().map(|v| format!("{}", v)).collect::<alloc::vec::Vec<_>>().join(", "))
+                }
+            }
+            Riscv32MachInst::Mul { rd, rs1, rs2 } => {
+                write!(f, "mul {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Div { rd, rs1, rs2 } => {
+                write!(f, "div {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Rem { rd, rs1, rs2 } => {
+                write!(f, "rem {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Slt { rd, rs1, rs2 } => {
+                write!(f, "slt {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Sltiu { rd, rs1, imm } => {
+                write!(f, "sltiu {}, {}, {}", rd, rs1, imm)
+            }
+            Riscv32MachInst::Sltu { rd, rs1, rs2 } => {
+                write!(f, "sltu {}, {}, {}", rd, rs1, rs2)
+            }
+            Riscv32MachInst::Xori { rd, rs1, imm } => {
+                write!(f, "xori {}, {}, {}", rd, rs1, imm)
+            }
+            Riscv32MachInst::Jal { rd, callee, args } => {
+                write!(f, "jal {}, {}({})", rd, callee, args.iter().map(|v| format!("{}", v)).collect::<alloc::vec::Vec<_>>().join(", "))
+            }
+            Riscv32MachInst::Ecall { number, args } => {
+                write!(f, "ecall {}({})", number, args.iter().map(|v| format!("{}", v)).collect::<alloc::vec::Vec<_>>().join(", "))
+            }
+            Riscv32MachInst::Ebreak => {
+                write!(f, "ebreak")
+            }
+            Riscv32MachInst::Trap { code } => {
+                write!(f, "trap {}", code)
+            }
+            Riscv32MachInst::Trapz { condition, code } => {
+                write!(f, "trapz {}, {}", condition, code)
+            }
+            Riscv32MachInst::Trapnz { condition, code } => {
+                write!(f, "trapnz {}, {}", condition, code)
             }
         }
     }

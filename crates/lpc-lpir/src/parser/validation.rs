@@ -108,17 +108,14 @@ pub fn validate_terminating_instructions(func: &Function) -> Result<(), String> 
 
         if let Some(last_inst) = insts.last() {
             if let Some(inst_data) = func.dfg.inst_data(*last_inst) {
-                match inst_data.opcode {
-                    Opcode::Return | Opcode::Jump | Opcode::Br | Opcode::Halt => {
-                        // Valid terminator
-                    }
-                    _ => {
-                        return Err(alloc::format!(
-                            "Block{} does not end with a terminating instruction \
-                             (return/jump/branch/halt)",
-                            block.index()
-                        ));
-                    }
+                if inst_data.opcode.is_terminator() {
+                    // Valid terminator
+                } else {
+                    return Err(alloc::format!(
+                        "Block{} does not end with a terminating instruction \
+                         (return/jump/branch/halt/trap)",
+                        block.index()
+                    ));
                 }
             }
         }

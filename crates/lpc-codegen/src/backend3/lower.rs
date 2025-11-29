@@ -8,7 +8,7 @@ use crate::backend3::vcode::{BlockLoweringOrder, Callee, MachInst, VCode};
 use crate::backend3::vcode_builder::VCodeBuilder;
 use lpc_lpir::{
     BlockEntity as Block, ControlFlowGraph, DominatorTree, Function,
-    InstEntity, RelSourceLoc, Value,
+    InstEntity, Opcode, RelSourceLoc, Value,
 };
 
 /// Lowering backend trait: ISA-specific instruction creation
@@ -220,21 +220,62 @@ impl<I: MachInst> Lower<I> {
         // Start block in VCode
         self.vcode.start_block(block_idx, block_params);
 
-        // Lower each instruction
+        // Lower each instruction and track branch information
         // Collect instructions first to avoid borrow checker issues
         let insts: Vec<_> = self.func.block_insts(block).collect();
+        let mut branch_info: Option<(Vec<BlockIndex>, Vec<Vec<VReg>>)> = None;
+        
         for inst in insts {
             // Get source location from IR instruction
             let ir_srcloc = self.func.srcloc(inst);
             let base_srcloc = self.func.base_srcloc();
             let rel_srcloc = RelSourceLoc::from_base_offset(base_srcloc, ir_srcloc);
             
-            // Delegate to backend for instruction creation
-            backend.lower_inst(&mut self, inst, rel_srcloc);
+            // Check if this is a branch/jump instruction
+            let func = self.func();
+            if let Some(inst_data) = func.dfg.inst_data(inst) {
+                match inst_data.opcode {
+                    Opcode::Jump | Opcode::Br => {
+                        if let Some(block_args) = &inst_data.block_args {
+                            // Extract target blocks and their arguments
+                            let mut succs = Vec::new();
+                            let mut args_per_succ = Vec::new();
+                            
+                            let value_to_vreg = self.value_to_vreg();
+                            for (target_block, args) in &block_args.targets {
+                                // Map IR block to VCode BlockIndex
+                                if let Some(&target_idx) = self.block_to_index.get(target_block) {
+                                    succs.push(target_idx);
+                                    // Convert argument Values to VRegs
+                                    let arg_vregs: Vec<VReg> = args
+                                        .iter()
+                                        .filter_map(|v| value_to_vreg.get(v).copied())
+                                        .collect();
+                                    args_per_succ.push(arg_vregs);
+                                }
+                            }
+                            
+                            branch_info = Some((succs, args_per_succ));
+                        }
+                    }
+                    _ => {
+                        // Not a branch - delegate to backend for instruction creation
+                        backend.lower_inst(&mut self, inst, rel_srcloc);
+                    }
+                }
+            } else {
+                // No instruction data - delegate to backend
+                backend.lower_inst(&mut self, inst, rel_srcloc);
+            }
         }
 
         // End block
         self.vcode.end_block();
+        
+        // Record branch arguments if we have branch information
+        if let Some((succs, args_per_succ)) = branch_info {
+            self.vcode.add_branch_args(&succs, &args_per_succ);
+        }
     }
 
     /// Get the value-to-VReg mapping (for backend use)

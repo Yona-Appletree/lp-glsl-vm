@@ -199,10 +199,81 @@ fn parse_move(input: &str) -> IResult<&str, Riscv32MachInst> {
     ))
 }
 
+/// Parse a return instruction: return or return v0, v1
+fn parse_return(input: &str) -> IResult<&str, Riscv32MachInst> {
+    let (input, _) = terminated(tag("return"), multispace0)(input)?;
+    let (input, ret_vals) = opt(separated_list0(
+        terminated(char(','), multispace0),
+        preceded(multispace0, parse_vreg),
+    ))(input)?;
+    
+    Ok((
+        input,
+        Riscv32MachInst::Return {
+            ret_vals: ret_vals.unwrap_or_default(),
+        },
+    ))
+}
+
+/// Parse a mul instruction: mul v0, v1, v2
+fn parse_mul(input: &str) -> IResult<&str, Riscv32MachInst> {
+    let (input, _) = terminated(tag("mul"), multispace1)(input)?;
+    let (input, rd) = terminated(parse_vreg, opt(char(',')))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, rs1) = terminated(parse_vreg, opt(char(',')))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, rs2) = parse_vreg(input)?;
+    Ok((
+        input,
+        Riscv32MachInst::Mul {
+            rd: Writable::new(rd),
+            rs1,
+            rs2,
+        },
+    ))
+}
+
+/// Parse a div instruction: div v0, v1, v2
+fn parse_div(input: &str) -> IResult<&str, Riscv32MachInst> {
+    let (input, _) = terminated(tag("div"), multispace1)(input)?;
+    let (input, rd) = terminated(parse_vreg, opt(char(',')))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, rs1) = terminated(parse_vreg, opt(char(',')))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, rs2) = parse_vreg(input)?;
+    Ok((
+        input,
+        Riscv32MachInst::Div {
+            rd: Writable::new(rd),
+            rs1,
+            rs2,
+        },
+    ))
+}
+
+/// Parse a rem instruction: rem v0, v1, v2
+fn parse_rem(input: &str) -> IResult<&str, Riscv32MachInst> {
+    let (input, _) = terminated(tag("rem"), multispace1)(input)?;
+    let (input, rd) = terminated(parse_vreg, opt(char(',')))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, rs1) = terminated(parse_vreg, opt(char(',')))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, rs2) = parse_vreg(input)?;
+    Ok((
+        input,
+        Riscv32MachInst::Rem {
+            rd: Writable::new(rd),
+            rs1,
+            rs2,
+        },
+    ))
+}
+
 /// Parse a single instruction
 fn parse_instruction(input: &str) -> IResult<&str, Riscv32MachInst> {
     let (input, _) = multispace0(input)?;
     alt((
+        parse_return,
         parse_move,
         parse_sw,
         parse_lw,
@@ -210,6 +281,9 @@ fn parse_instruction(input: &str) -> IResult<&str, Riscv32MachInst> {
         parse_addi,
         parse_sub,
         parse_add,
+        parse_mul,
+        parse_div,
+        parse_rem,
     ))(input)
 }
 
