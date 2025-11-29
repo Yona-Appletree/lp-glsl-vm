@@ -430,7 +430,362 @@ Source locations can be used for:
 - Debug output: Print source locations when dumping VCode
 - Future: DWARF debug info generation
 
-**See**: Main plan for emission details (`17-backend3.md`)
+**Complete Emission Implementation**:
+
+```rust
+/// Emit VCode to machine code
+impl VCode<MachInst> {
+    pub fn emit(
+        self,
+        regalloc: &regalloc2::Output,
+    ) -> InstBuffer {
+        let mut buffer = InstBuffer::new();
+
+        // 1. Reserve labels for all blocks
+        buffer.reserve_labels_for_blocks(self.num_blocks());
+
+        // 2. Register constants with buffer (if constant pool supported)
+        // This allows the buffer to handle constant references during emission
+        buffer.register_constants(&self.constants);
+
+        // 3. Compute emission order (cold blocks at end) BEFORE emission
+        let block_order = self.compute_emission_order();
+
+        // 4. Compute frame layout from regalloc results
+        let frame_layout = self.compute_frame_layout(regalloc);
+
+        // 5. Initialize emission state with ABI information
+        let mut state = EmitState::new(&self.abi);
+        state.label_offsets.resize(self.num_blocks(), UNKNOWN_LABEL_OFFSET);
+        state.frame_size = frame_layout.total_size;
+        state.clobbered_callee_saved = frame_layout.clobbered_regs.clone();
+
+        // 6. Emit blocks in final order
+        for block_idx in block_order {
+            // Call block start hook (if needed for emission state)
+            state.on_new_block();
+
+            // Emit block alignment (if needed)
+            let aligned_offset = I::align_basic_block(buffer.cur_offset());
+            while buffer.cur_offset() < aligned_offset {
+                // Emit NOPs to align (if alignment > 4 bytes)
+                let nop = I::gen_nop((aligned_offset - buffer.cur_offset()) as usize);
+                nop.emit(&mut buffer, &self.emit_info, &mut state);
+            }
+
+            // Is this the entry block? Emit prologue
+            if block_idx == self.entry {
+                buffer.start_srcloc(Default::default());
+                self.gen_prologue(&mut buffer, &mut state, &frame_layout);
+                buffer.end_srcloc();
+            }
+
+            // Bind label for this block
+            let label = MachLabel::from_block(block_idx);
+            let block_start_offset = buffer.cur_offset();
+            state.bind_label(label, block_start_offset);
+            buffer.bind_label(label);
+
+            // Resolve any pending fixups that targeted this label
+            state.resolve_pending_fixups(&mut buffer, label, block_start_offset);
+
+            // Emit block start instruction (if needed)
+            if let Some(block_start) = I::gen_block_start(
+                self.block_metadata[block_idx].is_indirect_target,
+                false, // forward edge CFI not needed for RISC-V 32
+            ) {
+                block_start.emit(&mut buffer, &self.emit_info, &mut state);
+            }
+
+            // Emit instructions and edits
+            for inst_or_edit in regalloc.block_insts_and_edits(&self, block_idx) {
+                match inst_or_edit {
+                    InstOrEdit::Inst(inst_idx) => {
+                        let inst = &self.insts[inst_idx];
+
+                        // Update source location if it changed
+                        let inst_srcloc = self.srclocs[inst_idx.index()];
+                        if state.cur_srcloc != Some(inst_srcloc) {
+                            if state.cur_srcloc.is_some() {
+                                buffer.end_srcloc();
+                            }
+                            if !inst_srcloc.is_default() {
+                                buffer.start_srcloc(inst_srcloc);
+                                state.cur_srcloc = Some(inst_srcloc);
+                            } else {
+                                state.cur_srcloc = None;
+                            }
+                        }
+
+                        // If this is a return, emit epilogue instead of return instruction
+                        if inst.is_term() == MachTerminator::Ret {
+                            self.gen_epilogue(&mut buffer, &mut state, &frame_layout);
+                            continue;
+                        }
+
+                        // Apply register allocations to operands
+                        let mut inst = inst.clone();
+                        inst.apply_allocations(&regalloc.allocs[inst_idx]);
+
+                        // Handle branches (resolve labels)
+                        if let Some(branch_info) = inst.get_branch_info() {
+                            self.emit_branch(&mut buffer, &mut state, inst, branch_info);
+                        } else {
+                            // Regular instruction - emit directly
+                            inst.emit(&mut buffer, &self.emit_info, &mut state);
+                        }
+
+                        // Handle external relocations (function calls, etc.)
+                        if let Some(reloc) = self.find_reloc(inst_idx) {
+                            state.external_relocations.push(Reloc {
+                                offset: buffer.cur_offset(),
+                                kind: reloc.kind,
+                                target: reloc.target.clone(),
+                            });
+                        }
+                    }
+                    InstOrEdit::Edit(edit) => {
+                        self.emit_edit(&mut buffer, edit, &mut state);
+                    }
+                }
+            }
+        }
+
+        // 7. Resolve any remaining forward references (should be none if order is correct)
+        state.resolve_all_pending_fixups(&mut buffer);
+
+        // 8. Fix external relocations (function calls, etc.)
+        self.fix_external_relocations(&mut buffer, &state);
+
+        buffer
+    }
+
+    fn emit_branch(
+        &self,
+        buffer: &mut InstBuffer,
+        state: &mut EmitState,
+        mut branch: MachInst,
+        branch_info: BranchInfo,
+    ) {
+        match branch_info {
+            BranchInfo::TwoDest { target_true, target_false } => {
+                // Convert two-dest branch to single-dest
+                let true_label = MachLabel::from_block(target_true);
+                let false_label = MachLabel::from_block(target_false);
+                let current_offset = buffer.cur_offset();
+
+                // Check which target is fallthrough (next block)
+                let true_offset = state.get_label_offset(true_label);
+                let false_offset = state.get_label_offset(false_label);
+
+                // Determine if one target is fallthrough
+                // (Simplified: assume false is fallthrough if it's next block)
+                // In practice, need to check block order
+                let (target_label, invert) = if false_offset == current_offset + 4 {
+                    (true_label, false)
+                } else {
+                    (false_label, true)
+                };
+
+                // Invert condition if needed
+                if invert {
+                    branch.invert_condition();
+                }
+
+                // Emit branch with label target
+                let branch_offset = buffer.cur_offset();
+                buffer.emit_branch_with_label(branch, target_label);
+
+                // Try to resolve immediately, or record fixup
+                state.resolve_or_record_fixup(
+                    buffer,
+                    branch_offset,
+                    target_label,
+                    BranchType::Conditional,
+                );
+            }
+            BranchInfo::OneDest { target } => {
+                let target_label = MachLabel::from_block(target);
+                let branch_offset = buffer.cur_offset();
+                buffer.emit_branch_with_label(branch, target_label);
+
+                state.resolve_or_record_fixup(
+                    buffer,
+                    branch_offset,
+                    target_label,
+                    BranchType::Unconditional,
+                );
+            }
+        }
+    }
+
+    fn compute_clobbers_and_function_calls(&self, regalloc: &regalloc2::Output) -> (Vec<RealReg>, FunctionCalls) {
+        // Algorithm (inspired by Cranelift):
+        // 1. Collect all registers that are written to (defs) in regalloc results
+        // 2. Add registers that are targets of moves (from edits)
+        // 3. Add explicitly clobbered registers from instruction clobber lists
+        // 4. Filter to only callee-saved registers
+        // 5. Track function call types (affects frame layout)
+
+        use regalloc2::PRegSet;
+        let mut clobbered = PRegSet::default();
+        let mut function_calls = FunctionCalls::None;
+
+        // 1. Add all registers that are targets of moves (from edits)
+        for (_, edit) in &regalloc.edits {
+            if let Edit::Move { to, .. } = edit {
+                if let Some(preg) = to.as_reg() {
+                    clobbered.add(preg);
+                }
+            }
+        }
+
+        // 2. Add all registers that are defs (written to) in instructions
+        // Also track function call types
+        for (inst_idx, range) in self.operand_ranges.iter() {
+            let operands = &self.operands[range.clone()];
+            let allocs = &regalloc.allocs[range];
+
+            // Track function calls (affects frame layout, e.g., outgoing args area)
+            function_calls.update(self.insts[inst_idx].call_type());
+
+            for (operand, alloc) in operands.iter().zip(allocs.iter()) {
+                // Only consider defs (writes)
+                if operand.kind() == OperandKind::Def {
+                    if let Some(preg) = alloc.as_reg() {
+                        clobbered.add(preg);
+                    }
+                }
+            }
+
+            // 3. Add explicitly clobbered registers from instruction clobber lists
+            if let Some(&inst_clobbered) = self.clobbers.get(&InsnIndex::new(inst_idx)) {
+                if self.insts[inst_idx].is_included_in_clobbers() {
+                    clobbered.union_from(inst_clobbered);
+                }
+            }
+        }
+
+        // 4. Filter to only callee-saved registers
+        let callee_saved = self.abi.machine_env().callee_saved_gprs();
+        let mut clobbered_callee_saved = Vec::new();
+
+        for preg in clobbered.iter() {
+            if let Some(real_reg) = preg.as_reg() {
+                if callee_saved.contains(&real_reg) {
+                    clobbered_callee_saved.push(real_reg);
+                }
+            }
+        }
+
+        // Sort for consistent ordering (affects frame layout)
+        clobbered_callee_saved.sort();
+        (clobbered_callee_saved, function_calls)
+    }
+
+    fn emit_edit(
+        &self,
+        buffer: &mut InstBuffer,
+        edit: Edit,
+        state: &mut EmitState,
+    ) {
+        match edit {
+            Edit::Move { from, to } => {
+                match (from.as_reg(), to.as_reg()) {
+                    (Some(from_reg), Some(to_reg)) => {
+                        // Reg-to-reg move
+                        buffer.emit(MachInst::Addi {
+                            rd: to_reg,
+                            rs1: from_reg,
+                            imm: 0,
+                        });
+                    }
+                    (Some(from_reg), None) => {
+                        // Spill: store to stack slot
+                        let slot = to.as_stack().unwrap();
+                        let offset = self.compute_spill_offset(slot, state);
+                        buffer.emit(MachInst::Sw {
+                            rs1: sp,
+                            rs2: from_reg,
+                            imm: offset,
+                        });
+                    }
+                    (None, Some(to_reg)) => {
+                        // Reload: load from stack slot
+                        let slot = from.as_stack().unwrap();
+                        let offset = self.compute_spill_offset(slot, state);
+                        buffer.emit(MachInst::Lw {
+                            rd: to_reg,
+                            rs1: sp,
+                            imm: offset,
+                        });
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    fn fix_external_relocations(&self, buffer: &mut InstBuffer, state: &EmitState) {
+        // Resolve external relocations (function calls, etc.)
+        for reloc in &state.external_relocations {
+            match reloc.kind {
+                RelocKind::FunctionCall => {
+                    // Look up function address
+                    let target_addr = self.resolve_function(&reloc.target);
+                    // Fix up instruction at reloc.offset
+                    buffer.fixup_call(reloc.offset, target_addr);
+                }
+                // ... other relocation types ...
+            }
+        }
+    }
+
+    fn compute_emission_order(&self) -> Vec<BlockIndex> {
+        // Start with original order
+        let mut order: Vec<BlockIndex> = (0..self.num_blocks()).collect();
+
+        // Move cold blocks to end
+        let mut cold = Vec::new();
+        let mut hot = Vec::new();
+        for (idx, block) in order.iter().enumerate() {
+            if self.block_metadata[*block].is_cold {
+                cold.push(*block);
+            } else {
+                hot.push(*block);
+            }
+        }
+
+        // Optimize hot path for fallthrough
+        // (Simple: keep original order for now, optimize later)
+
+        hot.extend(cold);
+        hot
+    }
+}
+```
+
+**Function Call Tracking**:
+
+```rust
+/// Function call type tracking (affects frame layout)
+enum FunctionCalls {
+    None,        // No function calls
+    Regular,     // Has regular function calls (affects outgoing args area)
+    TailCall,    // Has tail calls (may affect frame layout differently)
+}
+
+impl FunctionCalls {
+    fn update(&mut self, call_type: CallType) {
+        match (self, call_type) {
+            (FunctionCalls::None, CallType::Regular) => *self = FunctionCalls::Regular,
+            (FunctionCalls::None, CallType::TailCall) => *self = FunctionCalls::TailCall,
+            (FunctionCalls::Regular, CallType::TailCall) => *self = FunctionCalls::TailCall,
+            _ => {} // Already set to more general case
+        }
+    }
+}
+```
 
 ### 5. Instruction conversion (RISC-V 32-specific)
 

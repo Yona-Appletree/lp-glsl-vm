@@ -200,7 +200,43 @@ impl VCode<MachInst> {
 - Callee-saved vs caller-saved
 - ABIMachineSpec trait implementation
 
-**See**: Main plan for ABI details (`17-backend3.md`)
+**ABI Machine Spec Implementation**:
+
+```rust
+// File: crates/lpc-codegen/src/isa/riscv32/backend3/abi.rs
+
+use regalloc2::{ABIMachineSpec, ...};
+use super::inst::MachInst;
+
+/// RISC-V 32-bit ABI machine specification for regalloc2
+pub struct Riscv32ABI;
+
+impl ABIMachineSpec for Riscv32ABI {
+    type I = MachInst;
+
+    fn callee_saved_gprs() -> &'static [RealReg] {
+        // s0-s11 (x8-x9, x18-x27)
+    }
+
+    fn caller_saved_gprs() -> &'static [RealReg] {
+        // a0-a7, t0-t6 (x5-x7, x10-x17, x28-x31)
+    }
+
+    fn fixed_stack_slots() -> &'static [StackSlot] {
+        // None for now
+    }
+
+    // ... implement ABI methods ...
+}
+```
+
+**Key Features**:
+- Defines register classes
+- Specifies callee-saved vs caller-saved
+- Configures stack slots
+- Handles multi-return (return area)
+- Provides frame layout computation helpers
+- Generates prologue/epilogue sequences
 
 ### 3. Test regalloc2
 

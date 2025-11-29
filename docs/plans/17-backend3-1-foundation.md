@@ -108,12 +108,63 @@ Comparing with Cranelift's VCode, here's what we include vs. defer:
 
 **File**: `backend3/blockorder.rs`
 
-**Components**:
-- Critical edge detection
-- Reverse postorder computation
-- Basic implementation (no cold block optimization yet)
+**Purpose**: Compute block ordering and handle critical edge splitting before lowering.
 
-**See**: Main plan for BlockLoweringOrder details (`17-backend3.md`)
+**Input**: `Function` (LPIR) + `DominatorTree`
+**Output**: `BlockLoweringOrder`
+
+**Key Steps**:
+
+1. **Critical Edge Detection**: Identify edges where phi moves need to be inserted
+   - An edge is critical if the source has multiple successors AND the target has multiple predecessors
+   - These edges need intermediate blocks for phi value moves
+
+2. **Edge Block Creation**: Create intermediate blocks for critical edges
+   - Each critical edge gets an intermediate block
+   - These blocks will contain moves for phi values during lowering
+
+3. **Block Ordering**: Compute reverse postorder (RPO) traversal
+   - Ensures defs come before uses (SSA property)
+   - Optimizes for fallthrough branches
+   - Handles both original blocks and edge blocks
+
+4. **Cold Block Identification**: Mark blocks that are unlikely to execute
+   - Used later for block layout optimization
+   - Cold blocks can be moved to end of function
+
+5. **Indirect Branch Target Tracking**: Track blocks that are indirect branch targets
+   - Needed for proper block alignment
+   - May require special handling in emission
+
+**Algorithm**:
+
+```rust
+pub struct BlockLoweringOrder {
+    /// Lowered blocks in RPO order
+    lowered_order: Vec<LoweredBlock>,
+    /// Successor lists for each lowered block
+    lowered_succs: Vec<Vec<BlockIndex>>,
+    /// Mapping from IR blocks to lowered block indices
+    block_to_index: BTreeMap<Block, BlockIndex>,
+    /// Cold blocks (for layout optimization)
+    cold_blocks: BTreeSet<BlockIndex>,
+    /// Indirect branch targets
+    indirect_targets: BTreeSet<BlockIndex>,
+}
+
+enum LoweredBlock {
+    /// Original IR block
+    Orig { block: Block },
+    /// Edge block (for critical edges)
+    Edge { from: Block, to: Block },
+}
+```
+
+**Key Features**:
+- Handles critical edge splitting automatically
+- Preserves SSA ordering (defs before uses)
+- Enables later block layout optimizations
+- Tracks metadata for emission (cold, indirect targets)
 
 ### 3. Create machine instruction type (RISC-V 32-specific)
 
@@ -124,7 +175,56 @@ Comparing with Cranelift's VCode, here's what we include vs. defer:
 - Implement basic instructions (add, addi, lw, sw)
 - Implement MachInst trait for regalloc2 (operand visitor)
 
-**See**: Main plan for MachInst details (`17-backend3.md`)
+**Components**:
+- MachInst enum with VReg operands
+- Implement basic instructions (add, addi, lw, sw)
+- Implement MachInst trait for regalloc2 (operand visitor)
+
+**Example**:
+
+```rust
+// File: crates/lpc-codegen/src/isa/riscv32/backend3/inst.rs
+
+/// RISC-V 32-bit machine instruction with virtual registers
+#[derive(Debug, Clone)]
+pub enum MachInst {
+    /// ADD: rd = rs1 + rs2
+    Add { rd: Writable<VReg>, rs1: VReg, rs2: VReg },
+
+    /// ADDI: rd = rs1 + imm
+    Addi { rd: Writable<VReg>, rs1: VReg, imm: i32 },
+
+    /// LW: rd = mem[rs1 + imm]
+    Lw { rd: Writable<VReg>, rs1: VReg, imm: i32 },
+
+    /// SW: mem[rs1 + imm] = rs2
+    Sw { rs1: VReg, rs2: VReg, imm: i32 },
+
+    // ... more instructions ...
+}
+
+impl backend3::MachInst for MachInst {
+    type ABIMachineSpec = Riscv32ABI;
+
+    fn get_operands(&mut self, collector: &mut impl OperandVisitor) {
+        match self {
+            MachInst::Add { rd, rs1, rs2 } => {
+                collector.visit_def(*rd);
+                collector.visit_use(*rs1);
+                collector.visit_use(*rs2);
+            }
+            // ... handle all instruction types ...
+        }
+    }
+
+    // ... implement other MachInst trait methods ...
+}
+```
+
+**Key Features**:
+- Uses `VReg` (virtual register) instead of `Gpr` (physical register)
+- Implements `MachInst` trait for regalloc2
+- Operand visitor for regalloc2 integration
 
 ### 4. Basic lowering (ISA-agnostic)
 
@@ -173,7 +273,132 @@ For instructions created during lowering (e.g., constant materialization, phi mo
 - If they correspond to an IR instruction: use that instruction's source location
 - If they're truly synthetic (no IR equivalent): use `RelSourceLoc::default()`
 
-**See**: Main plan for Lowering details (`17-backend3.md`)
+**Lowering Implementation**:
+
+```rust
+// File: crates/lpc-codegen/src/backend3/lower.rs
+
+use crate::isa::riscv32::backend3::MachInst;
+
+/// Lowering context: converts IR to VCode
+/// Generic over MachInst trait (ISA-agnostic)
+pub struct Lower<I: MachInst> {
+    /// Function being lowered
+    func: Function,
+
+    /// VCode being built
+    vcode: VCodeBuilder<I>,
+
+    /// Value to virtual register mapping (immutable after creation)
+    /// Each IR Value maps to exactly one VReg. Created once in create_virtual_registers(),
+    /// then only read from during lowering. In SSA form, all Values (including instruction
+    /// results and block parameters) exist before lowering, so we can create VRegs upfront.
+    value_to_vreg: BTreeMap<Value, VReg>,
+
+    /// Block to block index mapping
+    block_to_index: BTreeMap<Block, BlockIndex>,
+
+    /// ABI information (ISA-specific, provided via MachInst trait)
+    abi: Callee<I::ABIMachineSpec>,
+}
+
+impl Lower {
+    /// Lower a function to VCode
+    pub fn lower(mut self, block_order: &BlockLoweringOrder) -> VCode<MachInst> {
+        // 1. Create virtual registers for all values
+        self.create_virtual_registers();
+
+        // 2. Lower blocks in computed order (not IR layout order)
+        for lowered_block in block_order.lowered_order() {
+            match lowered_block {
+                LoweredBlock::Orig { block } => {
+                    self.lower_block(block);
+                }
+                LoweredBlock::Edge { from, to } => {
+                    // Emit phi moves for edge block
+                    self.lower_edge_block(*from, *to);
+                }
+            }
+        }
+
+        // 3. Build VCode
+        self.vcode.build()
+    }
+
+    /// Lower an edge block (phi moves)
+    fn lower_edge_block(&mut self, from: Block, to: Block) {
+        // Get phi values for target block
+        let target_params = self.func.block_params(to);
+        // Get corresponding source values from predecessor
+        // (This requires tracking which values come from which predecessor)
+        // Emit moves: vreg_target = vreg_source
+        // ...
+    }
+
+    /// Create virtual registers for all values
+    /// This is called once before lowering. In SSA form, all Values already exist
+    /// in the IR (function params, block params, instruction results), so we can
+    /// create VRegs for all of them upfront. The mapping is then immutable during lowering.
+    fn create_virtual_registers(&mut self) {
+        // 1. Function parameters (entry block params)
+        for param_value in self.func.block_params(self.func.entry_block()) {
+            let vreg = self.vcode.alloc_vreg();
+            self.value_to_vreg.insert(*param_value, vreg);
+        }
+
+        // 2. Block parameters (phi nodes) - each block's params get VRegs
+        for block in self.func.blocks() {
+            for param_value in self.func.block_params(block) {
+                let vreg = self.vcode.alloc_vreg();
+                self.value_to_vreg.insert(*param_value, vreg);
+            }
+        }
+
+        // 3. Instruction results - each instruction's result Values get VRegs
+        for block in self.func.blocks() {
+            for inst in self.func.block_insts(block) {
+                let inst_data = self.func.dfg.inst_data(inst).unwrap();
+                for result_value in &inst_data.results {
+                    let vreg = self.vcode.alloc_vreg();
+                    self.value_to_vreg.insert(*result_value, vreg);
+                }
+            }
+        }
+    }
+
+    /// Lower a block
+    fn lower_block(&mut self, block: Block) {
+        // Lower each instruction
+        for inst in self.func.block_insts(block) {
+            self.lower_inst(inst);
+        }
+    }
+
+    /// Lower an instruction
+    fn lower_inst(&mut self, inst: InstEntity) {
+        let inst_data = self.func.dfg.inst_data(inst).unwrap();
+
+        match inst_data.opcode {
+            Opcode::Iadd => {
+                let rs1 = self.value_to_vreg[&inst_data.args[0]];
+                let rs2 = self.value_to_vreg[&inst_data.args[1]];
+                let rd = self.value_to_vreg[&inst_data.results[0]];
+                self.vcode.push(MachInst::Add { rd, rs1, rs2 });
+            }
+            // ... handle all opcodes ...
+        }
+    }
+}
+```
+
+**Key Features**:
+- Creates virtual registers for all IR values upfront (immutable mapping)
+- Each Value maps to exactly one VReg (1:1 relationship in SSA form)
+- Maps IR instructions to machine instructions using the Value→VReg mapping
+- Handles block parameters (phi-like values) - they are Values and get VRegs too
+- Tracks operand constraints for regalloc2
+
+**Note**: The `value_to_vreg` mapping is immutable after `create_virtual_registers()` completes. This works because in SSA form, all Values (function params, block params, instruction results including constants) exist before lowering begins. During lowering, we only read from this map to get VRegs for operands. This matches Cranelift's approach: each IR Value maps to exactly one VReg, and the mapping is established upfront before any lowering occurs.
 
 ### 5. Constant handling (ISA-agnostic)
 
@@ -292,6 +517,57 @@ impl Lower {
 - Inline constants don't require separate instructions
 - Large constants require 2 instructions (lui + addi)
 - The VReg for a constant represents the value, not a register (until regalloc assigns one)
+
+### 6. Relocation handling (ISA-agnostic)
+
+**File**: `backend3/reloc.rs`
+
+**Purpose**: Track and resolve relocations (function calls, etc.).
+
+**Relocation Types**:
+
+- **Function Call**: Direct call to function (needs address fixup)
+- **Indirect Call**: Call via register (no relocation needed)
+- **Branch**: Conditional/unconditional branch (resolved during emission)
+- **Constant Pool**: Reference to constant pool (future)
+
+**Lifecycle**:
+
+1. **During Lowering**: Record relocations in VCode
+2. **During Emission**: Record relocation positions in emission state
+3. **After Emission**: Fix up relocations with actual addresses
+
+**Implementation**:
+
+```rust
+pub enum RelocKind {
+    /// Function call (needs function address)
+    FunctionCall,
+    /// Branch target (resolved during emission)
+    Branch,
+}
+
+pub struct Reloc {
+    /// Offset in instruction buffer where relocation occurs
+    pub offset: CodeOffset,
+    /// Relocation type
+    pub kind: RelocKind,
+    /// Target identifier (function name, etc.)
+    pub target: String,
+}
+
+impl VCode {
+    fn record_reloc(&mut self, inst_idx: InsnIndex, kind: RelocKind, target: String) {
+        self.relocations.push(VCodeReloc {
+            inst_idx,
+            kind,
+            target,
+        });
+    }
+}
+```
+
+**Note**: Relocation fixup happens during emission (Phase 3). See [Phase 3](17-backend3-3-emission.md) for emission-time relocation handling.
 
 ## Testing
 
