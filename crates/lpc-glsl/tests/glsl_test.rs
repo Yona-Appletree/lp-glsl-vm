@@ -47,7 +47,7 @@ impl GlslTest {
 
             // Store function
             let func = codegen.finish();
-            
+
             // Validate generated LPIR
             if let Err(errors) = verify(&func, None) {
                 let error_msgs: Vec<String> = errors
@@ -66,7 +66,7 @@ impl GlslTest {
                     error_msgs.join("\n")
                 )));
             }
-            
+
             functions.push((func_info.name.clone(), func));
         }
 
@@ -178,7 +178,20 @@ impl GlslTest {
         let func_sig = TypeChecker::extract_function_signature(func_def)?;
 
         // Convert parameter types
-        let param_types: Vec<LpirType> = func_sig.params.iter().map(|p| p.ty.to_lpir()).collect();
+        // For out/inout parameters, use I32 (address type) instead of the value type
+        let param_types: Vec<LpirType> = func_sig
+            .params
+            .iter()
+            .map(|p| {
+                if p.qualifier.is_by_reference() {
+                    // Out/inout parameters are passed as addresses (I32)
+                    LpirType::I32
+                } else {
+                    // In parameters are passed by value
+                    p.ty.to_lpir()
+                }
+            })
+            .collect();
 
         // Convert return type
         let return_types: Vec<LpirType> = func_sig

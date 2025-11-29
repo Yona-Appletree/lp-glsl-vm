@@ -14,6 +14,8 @@ pub enum GlslError {
     TypeError(String),
     /// Code generation error
     CodeGenError(String),
+    /// Void function call used as expression (not allowed unless in expression statement)
+    VoidFunctionCall(String),
     /// Other error
     Other(String),
 }
@@ -38,6 +40,11 @@ impl GlslError {
     pub fn other(msg: impl Into<String>) -> Self {
         GlslError::Other(msg.into())
     }
+
+    /// Create a void function call error.
+    pub fn void_function_call(function_name: impl Into<String>) -> Self {
+        GlslError::VoidFunctionCall(function_name.into())
+    }
 }
 
 impl core::fmt::Display for GlslError {
@@ -46,6 +53,13 @@ impl core::fmt::Display for GlslError {
             GlslError::ParseError(msg) => write!(f, "Parse error: {}", msg),
             GlslError::TypeError(msg) => write!(f, "Type error: {}", msg),
             GlslError::CodeGenError(msg) => write!(f, "Code generation error: {}", msg),
+            GlslError::VoidFunctionCall(name) => {
+                write!(
+                    f,
+                    "Function '{}' returns void and cannot be used as an expression",
+                    name
+                )
+            }
             GlslError::Other(msg) => write!(f, "Error: {}", msg),
         }
     }

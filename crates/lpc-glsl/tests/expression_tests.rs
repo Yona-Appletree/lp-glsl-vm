@@ -319,4 +319,3 @@ fn test_unary_not() {
     "#,
     );
 }
-

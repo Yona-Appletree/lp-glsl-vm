@@ -95,4 +95,3 @@ fn test_variable_usage() {
     "#,
     );
 }
-

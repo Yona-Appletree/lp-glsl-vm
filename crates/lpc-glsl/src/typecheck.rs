@@ -169,7 +169,39 @@ impl TypeChecker {
 
         // Type check the function body
         let body_stmt = Statement::Compound(Box::new(func_def.statement.clone()));
-        self.type_check_statement(&body_stmt, expected_return)?;
+        let returns = self.type_check_statement_returns(&body_stmt, expected_return)?;
+
+        // For non-void functions, validate that all code paths return a value
+        // Note: This is a simple check - it only verifies that the function body
+        // ends with a return. More sophisticated control flow analysis would be needed
+        // to verify all paths return (e.g., if/else where both branches return).
+        // For now, we rely on the code generator to add implicit returns if needed.
+        // We'll be lenient and only check the last statement - if it's an if/else
+        // or other control flow, we assume it's valid if type checking passed.
+        if expected_return.is_some() && !returns {
+            // Check if the last statement in the body could return
+            let last_stmt = func_def.statement.statement_list.last();
+            let might_return = last_stmt
+                .map(|s| match s {
+                    Statement::Simple(simple) => {
+                        matches!(
+                            simple.as_ref(),
+                            SimpleStatement::Jump(JumpStatement::Return(_))
+                                | SimpleStatement::Selection(_)
+                        )
+                    }
+                    Statement::Compound(_) => true, // Compound statements might contain returns
+                })
+                .unwrap_or(false);
+
+            if !might_return {
+                return Err(GlslError::type_error(format!(
+                    "Function '{}' must return a value of type {}",
+                    sig.name,
+                    expected_return.unwrap()
+                )));
+            }
+        }
 
         // Pop function scope
         self.symbols.pop_scope();
@@ -204,14 +236,62 @@ impl TypeChecker {
         self.symbols.push_scope();
 
         // Type check each statement
+        // Track if we've encountered a return statement (which makes subsequent code unreachable)
+        let mut has_return = false;
         for stmt in &compound.statement_list {
-            self.type_check_statement(stmt, expected_return)?;
+            if has_return {
+                // Unreachable code after return - warn but don't error (GLSL allows this)
+                // We could add a warning here in the future
+            }
+            let returns = self.type_check_statement_returns(stmt, expected_return)?;
+            if returns {
+                has_return = true;
+            }
         }
 
         // Pop scope
         self.symbols.pop_scope();
 
         Ok(())
+    }
+
+    /// Type check a statement and return whether it returns (makes subsequent code unreachable).
+    fn type_check_statement_returns(
+        &mut self,
+        stmt: &Statement,
+        expected_return: Option<GlslType>,
+    ) -> GlslResult<bool> {
+        match stmt {
+            Statement::Simple(simple) => {
+                self.type_check_simple_statement(simple, expected_return)?;
+                // Check if this is a return statement or an if/else where both branches return
+                match simple.as_ref() {
+                    SimpleStatement::Jump(JumpStatement::Return(_)) => Ok(true),
+                    SimpleStatement::Selection(sel) => {
+                        self.selection_statement_returns(sel, expected_return)
+                    }
+                    _ => Ok(false),
+                }
+            }
+            Statement::Compound(compound) => {
+                // Push scope for the compound statement
+                self.symbols.push_scope();
+
+                // Type check each statement and track if any returns
+                let mut has_return = false;
+                for stmt in &compound.statement_list {
+                    let returns = self.type_check_statement_returns(stmt, expected_return)?;
+                    if returns {
+                        has_return = true;
+                    }
+                }
+
+                // Pop scope
+                self.symbols.pop_scope();
+
+                Ok(has_return)
+            }
+        }
     }
 
     /// Type check a simple statement.
@@ -224,7 +304,22 @@ impl TypeChecker {
             SimpleStatement::Declaration(decl) => self.type_check_declaration(decl),
             SimpleStatement::Expression(expr_stmt) => {
                 if let Some(expr) = expr_stmt {
-                    self.type_check_expr(expr)?;
+                    // Expression statements allow void expressions (function calls that return void)
+                    // So we check the expression but allow void function calls
+                    match self.type_check_expr(expr) {
+                        Ok(_) => {
+                            // Expression has a value - that's fine
+                        }
+                        Err(e) => {
+                            // Check if it's a void function call error - if so, allow it
+                            if matches!(&e, GlslError::VoidFunctionCall(_)) {
+                                // Void function call in expression statement - this is allowed
+                                // Don't return error
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -329,6 +424,27 @@ impl TypeChecker {
         }
 
         Ok(())
+    }
+
+    /// Check if a selection statement returns (both branches return).
+    fn selection_statement_returns(
+        &mut self,
+        sel: &SelectionStatement,
+        expected_return: Option<GlslType>,
+    ) -> GlslResult<bool> {
+        match &sel.rest {
+            SelectionRestStatement::Statement(true_stmt) => {
+                // If-only: check if true branch returns
+                self.type_check_statement_returns(true_stmt, expected_return)
+            }
+            SelectionRestStatement::Else(true_stmt, false_stmt) => {
+                // If/else: both branches must return
+                let true_returns = self.type_check_statement_returns(true_stmt, expected_return)?;
+                let false_returns =
+                    self.type_check_statement_returns(false_stmt, expected_return)?;
+                Ok(true_returns && false_returns)
+            }
+        }
     }
 
     /// Type check an iteration statement (for/while).
@@ -543,14 +659,26 @@ impl TypeChecker {
                     }
                 }
 
-                // Return the function's return type (or error if void)
-                sig.return_type.ok_or_else(|| {
-                    GlslError::type_error(format!("Function '{}' returns void", name))
-                })
+                // Return the function's return type (None for void)
+                // Void function calls are allowed in expression statements
+                sig.return_type
+                    .ok_or_else(|| GlslError::void_function_call(name))
             }
 
             // Assignment
             Expr::Assignment(lhs, _op, rhs) => {
+                // Assignment can only be to a variable, not arbitrary expressions
+                match lhs.as_ref() {
+                    Expr::Variable(_) => {
+                        // Valid: assignment to variable
+                    }
+                    _ => {
+                        return Err(GlslError::type_error(
+                            "Assignment can only be to a variable, not to an expression",
+                        ));
+                    }
+                }
+
                 let lhs_ty = self.type_check_expr(lhs)?;
                 let rhs_ty = self.type_check_expr(rhs)?;
                 if lhs_ty != rhs_ty {

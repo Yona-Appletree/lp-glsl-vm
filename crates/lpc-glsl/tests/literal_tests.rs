@@ -88,4 +88,3 @@ fn test_negative_int() {
     "#,
     );
 }
-

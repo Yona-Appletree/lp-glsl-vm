@@ -25,9 +25,7 @@ impl GlslType {
     /// Try to convert from GLSL AST type specifier.
     ///
     /// Returns `None` if the type is not supported in the initial implementation.
-    pub fn from_glsl_type_specifier(
-        spec: &glsl::syntax::TypeSpecifierNonArray,
-    ) -> Option<Self> {
+    pub fn from_glsl_type_specifier(spec: &glsl::syntax::TypeSpecifierNonArray) -> Option<Self> {
         match spec {
             glsl::syntax::TypeSpecifierNonArray::Int => Some(GlslType::Int),
             glsl::syntax::TypeSpecifierNonArray::Bool => Some(GlslType::Bool),
@@ -40,6 +38,14 @@ impl GlslType {
         match self {
             GlslType::Int => "int",
             GlslType::Bool => "bool",
+        }
+    }
+
+    /// Get the size of this type in bytes.
+    pub fn size_in_bytes(self) -> u32 {
+        match self {
+            GlslType::Int => 4,  // 32-bit integer
+            GlslType::Bool => 4, // Bool maps to U32 (32-bit)
         }
     }
 }
@@ -91,4 +97,3 @@ mod tests {
         assert_eq!(format!("{}", GlslType::Bool), "bool");
     }
 }
-
