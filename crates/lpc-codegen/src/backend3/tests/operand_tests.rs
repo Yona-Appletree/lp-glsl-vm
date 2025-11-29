@@ -32,6 +32,7 @@ block0(v0: i32, v1: i32):
             OperandConstraint::Reg => {}
             OperandConstraint::Stack => {}
             OperandConstraint::Reuse(_) => {}
+            OperandConstraint::Limit(_) => {}
         }
     }
 }
@@ -471,6 +472,7 @@ block0(v0: i32):
             OperandConstraint::Reg => {}
             OperandConstraint::Stack => {}
             OperandConstraint::Reuse(_) => {}
+            OperandConstraint::Limit(_) => {}
         }
     }
 
@@ -508,6 +510,7 @@ block0(v0: i32):
             }
             OperandConstraint::Stack => {}
             OperandConstraint::Reuse(_) => {}
+            OperandConstraint::Limit(_) => {}
         }
     }
 

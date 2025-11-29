@@ -287,8 +287,21 @@ impl<I: MachInst> Lower<I> {
             "Block should be in block_to_index mapping (computed during block order computation)",
         );
 
+        // Get entry block for comparison
+        let entry_block = self
+            .func
+            .entry_block()
+            .expect("function must have an entry block");
+
         // Get block parameters
-        let block_params: Vec<VReg> = if let Some(block_data) = self.func.block_data(block) {
+        // Entry block params are handled specially - they're not block params for regalloc2
+        // (they'll be defined by Args instruction or handled during emission)
+        // For regalloc2, entry block params must not be block params because they would be
+        // live-in on entry, which regalloc2 doesn't allow. They need to be defined by an instruction.
+        let block_params: Vec<VReg> = if block == entry_block {
+            // Entry block: no block params (they're function parameters, not phi nodes)
+            Vec::new()
+        } else if let Some(block_data) = self.func.block_data(block) {
             block_data
                 .params
                 .iter()

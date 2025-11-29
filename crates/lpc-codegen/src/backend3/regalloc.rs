@@ -35,7 +35,7 @@ impl<I: MachInst> RegallocFunction for VCode<I> {
             .block_ranges
             .get(block.index())
             .expect("block should exist");
-        InstRange::forward(Inst::new(range.start), Inst::new(range.end))
+        InstRange::new(Inst::new(range.start), Inst::new(range.end))
     }
 
     fn block_succs(&self, block: Block) -> &[Block] {
@@ -138,5 +138,43 @@ impl<I: MachInst> RegallocFunction for VCode<I> {
     fn allow_multiple_vreg_defs(&self) -> bool {
         // Allow multiple defs of the same VReg (needed for some backends)
         true
+    }
+}
+
+impl<I: MachInst> VCode<I> {
+    /// Run register allocation on this VCode
+    ///
+    /// This performs register allocation using regalloc2 and returns the allocation results.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if register allocation fails (e.g., invalid SSA, too many live registers).
+    pub fn run_regalloc(&self) -> Result<regalloc2::Output, regalloc2::RegAllocError> {
+        use regalloc2::{Algorithm, RegallocOptions};
+
+        // Get machine environment from ABI
+        // Note: This requires I::ABIMachineSpec to have a machine_env method
+        // For now, we'll create it directly from Riscv32ABI
+        let machine_env = self.create_machine_env();
+
+        // Use default options with Ion algorithm (the standard backtracking allocator)
+        let options = RegallocOptions {
+            verbose_log: false,
+            validate_ssa: true, // Validate SSA form before allocation
+            algorithm: Algorithm::Ion,
+        };
+
+        regalloc2::run(self, &machine_env, &options)
+    }
+
+    /// Create a MachineEnv for register allocation
+    ///
+    /// This is a helper that delegates to the ABI's machine_env method.
+    /// For RISC-V 32, this uses Riscv32ABI::machine_env().
+    fn create_machine_env(&self) -> regalloc2::MachineEnv {
+        // For now, we need to create the MachineEnv directly
+        // In the future, we could add a trait method to ABIMachineSpec
+        use crate::isa::riscv32::backend3::abi::Riscv32ABI;
+        Riscv32ABI::machine_env()
     }
 }

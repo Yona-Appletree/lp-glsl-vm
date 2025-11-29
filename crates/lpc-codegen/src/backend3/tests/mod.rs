@@ -9,6 +9,7 @@ pub mod integration_tests;
 pub mod lower_tests;
 pub mod operand_collection_completeness_tests;
 pub mod operand_tests;
+pub mod regalloc_tests;
 pub mod reloc_tests;
 pub mod srcloc_tests;
 pub mod vcode_invariants_tests;

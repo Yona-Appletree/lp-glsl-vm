@@ -3,6 +3,7 @@
 //! RISC-V 32-specific implementations for backend3.
 //! See docs/plans/17-backend3.md for the design.
 
+pub mod abi;
 pub mod inst;
 pub mod lower;
 pub mod vcode_format;
