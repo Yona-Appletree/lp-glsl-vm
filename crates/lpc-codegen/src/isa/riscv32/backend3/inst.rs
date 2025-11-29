@@ -206,6 +206,9 @@ pub enum Riscv32MachInst {
         /// Number of return values (for multi-return support)
         /// If > 2, caller must allocate return area and pass pointer in a0
         return_count: usize,
+        /// All result VRegs (for multi-return support)
+        /// First result is also in `rd` for backward compatibility
+        result_vregs: alloc::vec::Vec<Reg>,
     },
 
     /// ECALL: system call
@@ -398,8 +401,12 @@ impl MachInst for Riscv32MachInst {
                 collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
                 collector.visit_use(VReg::from(*rs1), OperandConstraint::Any);
             }
-            Riscv32MachInst::Jal { rd, args, .. } => {
-                collector.visit_def(VReg::from(rd.to_reg()), OperandConstraint::Any);
+            Riscv32MachInst::Jal { rd: _, args, result_vregs, .. } => {
+                // Visit all result VRegs as defs (not just rd)
+                for result_vreg in result_vregs.iter() {
+                    collector.visit_def(VReg::from(*result_vreg), OperandConstraint::Any);
+                }
+                // Visit args as uses
                 for arg in args.iter() {
                     collector.visit_use(VReg::from(*arg), OperandConstraint::Any);
                 }

@@ -1058,10 +1058,11 @@ impl VCode<Riscv32MachInst> {
                 return;
             }
             Riscv32MachInst::Jal {
-                rd,
+                rd: _,
                 callee,
                 args,
                 return_count,
+                result_vregs,
             } => {
                 // Function call ABI:
                 // - First 8 integer args in a0-a7 (x10-x17)
@@ -1186,11 +1187,8 @@ impl VCode<Riscv32MachInst> {
                 // Handle return values
                 if *return_count > 2 {
                     // Multi-return: first 2 values in a0-a1, rest in return area
-                    // Load return values 3+ from return area
-                    // Return area pointer is still in a0 (or we need to reload it)
-                    // Actually, after the call, a0 contains the first return value
+                    // After the call, a0 contains the first return value
                     // We need to reload the return area pointer
-                    let _return_area_size = ((return_count - 2) * 4) as i32;
                     let base_offset = (frame.setup_area_size
                         + frame.clobber_area_size
                         + frame.spill_slots_size) as i32;
@@ -1199,21 +1197,43 @@ impl VCode<Riscv32MachInst> {
                     // Reload return area pointer to t0
                     buffer.push_addi(Gpr::T0, Gpr::Sp, return_area_offset);
 
-                    // Load return values 3+ from return area
-                    // Note: This assumes the caller knows which VRegs to load into
-                    // For now, we can't load them without knowing the destination VRegs
-                    // This is a limitation - we'd need the Call instruction's results to know where to load
-                    // For now, we'll just note that return values 3+ are in the return area
+                    // Load return values 3+ from return area into their destination VRegs
+                    // result_vregs[0] and result_vregs[1] are in a0-a1, skip those
+                    for (i, &result_vreg) in result_vregs.iter().enumerate().skip(2) {
+                        let result_gpr = self.reg_to_gpr(result_vreg);
+                        let offset = ((i - 2) * 4) as i32; // Offset in return area (0, 4, 8, ...)
+                        buffer.push_lw(result_gpr, Gpr::T0, offset);
+                    }
+
+                    // Move first 2 return values from a0-a1 to their destination registers if needed
+                    if !result_vregs.is_empty() {
+                        let first_result_gpr = self.reg_to_gpr(result_vregs[0]);
+                        if first_result_gpr != Gpr::A0 {
+                            buffer.push_addi(first_result_gpr, Gpr::A0, 0);
+                        }
+                    }
+                    if result_vregs.len() > 1 {
+                        let second_result_gpr = self.reg_to_gpr(result_vregs[1]);
+                        if second_result_gpr != Gpr::A1 {
+                            buffer.push_addi(second_result_gpr, Gpr::A1, 0);
+                        }
+                    }
                 } else {
                     // Single or double return: values in a0-a1
                     // Move first return value from a0 to destination register if needed
-                    if let Some(rd_reg) = rd.to_reg().to_real_reg() {
-                        let rd_gpr = preg_to_gpr(rd_reg);
-                        if rd_gpr != Gpr::A0 {
-                            buffer.push_addi(rd_gpr, Gpr::A0, 0);
+                    if !result_vregs.is_empty() {
+                        let first_result_gpr = self.reg_to_gpr(result_vregs[0]);
+                        if first_result_gpr != Gpr::A0 {
+                            buffer.push_addi(first_result_gpr, Gpr::A0, 0);
                         }
                     }
-                    // TODO: Handle second return value (a1) if return_count == 2
+                    // Move second return value from a1 to destination register if needed
+                    if result_vregs.len() > 1 {
+                        let second_result_gpr = self.reg_to_gpr(result_vregs[1]);
+                        if second_result_gpr != Gpr::A1 {
+                            buffer.push_addi(second_result_gpr, Gpr::A1, 0);
+                        }
+                    }
                 }
                 return;
             }
@@ -2025,15 +2045,23 @@ impl ApplyAllocations for Riscv32MachInst {
                 callee: _,
                 args,
                 return_count: _,
+                result_vregs,
             } => {
-                if let Some(alloc) = allocs.get(*operand_idx) {
-                    if let Some(preg) = alloc.as_reg() {
-                        *rd = crate::backend3::types::Writable::new(
-                            crate::backend3::types::Reg::from_real_reg(preg),
-                        );
+                // Apply allocations to all result VRegs (defs come first)
+                for result_vreg in result_vregs.iter_mut() {
+                    if let Some(alloc) = allocs.get(*operand_idx) {
+                        if let Some(preg) = alloc.as_reg() {
+                            *result_vreg = crate::backend3::types::Reg::from_real_reg(preg);
+                        }
                     }
+                    *operand_idx += 1;
                 }
-                *operand_idx += 1;
+                // Update rd to match first result (for backward compatibility)
+                // If no results, rd is zero_reg and doesn't need allocation
+                if !result_vregs.is_empty() {
+                    *rd = crate::backend3::types::Writable::new(result_vregs[0]);
+                }
+                // Apply allocations to args (uses come after defs)
                 for arg in args.iter_mut() {
                     if let Some(alloc) = allocs.get(*operand_idx) {
                         if let Some(preg) = alloc.as_reg() {

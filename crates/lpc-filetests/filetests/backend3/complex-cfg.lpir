@@ -24,3 +24,18 @@ block4:
 ; - Mixed control flow
 ; The function should compile and emit correct code.
 
+; check: function %complex_cfg
+; check: # Prologue
+; sameln: addi sp, sp, -8
+; sameln: sw ra, 4(sp)
+; sameln: sw s0, 0(sp)
+; check: # First branch (block0 -> block1 or block2)
+; sameln: sub
+; sameln: sltiu
+; sameln: bne
+; check: # Second branch (block1 -> block3 or block4)
+; sameln: slt
+; sameln: bne
+; check: # Returns
+; sameln: jalr zero, ra, 0
+

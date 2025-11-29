@@ -260,4 +260,16 @@ mod tests {
         let content = include_str!("../filetests/backend3/branch-no-fallthrough.lpir");
         run_tests_from_file(content);
     }
+
+    #[test]
+    fn test_memory_operations() {
+        let content = include_str!("../filetests/backend3/memory-operations.lpir");
+        run_tests_from_file(content);
+    }
+
+    #[test]
+    fn test_multi_function() {
+        let content = include_str!("../filetests/backend3/multi-function.lpir");
+        run_tests_from_file(content);
+    }
 }

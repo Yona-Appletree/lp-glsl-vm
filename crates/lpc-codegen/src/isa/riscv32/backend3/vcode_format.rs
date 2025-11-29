@@ -112,6 +112,7 @@ impl fmt::Display for Riscv32MachInst {
                 callee,
                 args,
                 return_count: _,
+                result_vregs: _,
             } => {
                 write!(
                     f,

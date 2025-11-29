@@ -1,16 +1,65 @@
 test compile
 
-function %test_multi_return(i32, i32, i32) -> i32, i32, i32 {
-block0(v0: i32, v1: i32, v2: i32):
-    v3 = iadd v0, v1
-    v4 = isub v0, v1
-    v5 = imul v1, v2
-    return v3, v4, v5
+function %callee_multi_return(i32, i32) -> i32, i32, i32 {
+block0(v0: i32, v1: i32):
+    v2 = iadd v0, v1
+    v3 = isub v0, v1
+    v4 = imul v0, v1
+    return v2, v3, v4
+}
+
+function %caller_multi_return(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2, v3, v4 = call %callee_multi_return(v0, v1)
+    v5 = iadd v2, v4
+    return v5
 }
 
 ; This test verifies multi-return support (>2 return values).
-; The function should compile without errors.
-; Return values 1-2 should go to a0-a1.
-; Return value 3+ should be stored to return area.
-; Return area pointer should be saved in prologue.
+; Callee: Return values 1-2 should go to a0-a1.
+; Callee: Return value 3+ should be stored to return area.
+; Caller: Should load return values 3+ from return area.
+
+; check: function %callee_multi_return
+; check: # Prologue
+; sameln: addi sp, sp, -20
+; sameln: sw ra, 4(sp)
+; sameln: sw s0, 0(sp)
+; check: # Save return area pointer
+; sameln: sw a0, 8(sp)
+; check: # Compute return values
+; sameln: add
+; sameln: sub
+; sameln: mul
+; check: # Load return area pointer
+; sameln: lw
+; check: # Store to return area
+; sameln: sw
+; sameln: sw
+; check: # Move first 2 return values to a0-a1
+; sameln: addi a0,
+; sameln: addi a1,
+; check: # Epilogue
+; sameln: lw s0, 0(sp)
+; sameln: lw ra, 4(sp)
+; sameln: addi sp, sp, 20
+; sameln: jalr zero, ra, 0
+
+; check: function %caller_multi_return
+; check: # Prologue
+; sameln: addi sp, sp, -8
+; sameln: sw ra, 4(sp)
+; sameln: sw s0, 0(sp)
+; check: # Call setup - return area allocation
+; sameln: addi t0, sp,
+; sameln: addi a0, t0, 0
+; check: # Function call
+; sameln: auipc
+; sameln: addi
+; sameln: jalr ra,
+; check: # Load return value 3 from return area
+; sameln: addi t0, sp,
+; sameln: lw
+; check: # Use return values
+; sameln: add
 

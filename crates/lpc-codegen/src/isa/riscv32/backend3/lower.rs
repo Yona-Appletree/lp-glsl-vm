@@ -1,13 +1,14 @@
 //! RISC-V 32-specific lowering backend
 
-use lpc_lpir::{Immediate, InstEntity, IntCC, Opcode, RelSourceLoc};
+use lpc_lpir::{Immediate, InstEntity, IntCC, Opcode, RelSourceLoc, Value};
 use regalloc2::RegClass;
 
 use crate::{
     backend3::{
         constants::materialize_constant,
         lower::{Lower, LowerBackend},
-        types::{Reg, Writable},
+        types::{Reg, VReg, Writable},
+        vcode::MachInst,
     },
     isa::riscv32::backend3::inst::Riscv32MachInst,
 };
@@ -15,6 +16,83 @@ use crate::{
 /// RISC-V 32-bit lowering backend
 #[derive(Debug, Clone, Copy)]
 pub struct Riscv32LowerBackend;
+
+/// Extract base register and offset from an address value.
+///
+/// If the address is the result of an iadd(base, const), returns (base_vreg, offset).
+/// Otherwise, returns (address_vreg, 0).
+fn extract_address_components<I: MachInst>(
+    ctx: &Lower<I>,
+    address_value: Value,
+) -> (VReg, i32) {
+    let func = ctx.func();
+    let value_to_vreg = ctx.value_to_vreg();
+
+    // Get the VReg for the address value
+    let address_vreg = match value_to_vreg.get(&address_value) {
+        Some(&vreg) => vreg,
+        None => {
+            // Address value not found - this shouldn't happen, but return address as-is
+            // This case should be rare and indicates a bug in the IR
+            // We'll use a dummy VReg with Int class - this will cause an error later if used
+            return (VReg::new(0, RegClass::Int), 0);
+        }
+    };
+
+    // Check if this value is defined by an iadd instruction
+    if let Some(def_inst) = func.value_def(address_value) {
+        if let Some(inst_data) = func.dfg.inst_data(def_inst) {
+            if let Opcode::Iadd = inst_data.opcode {
+                // This is an iadd - check if one operand is a constant
+                if inst_data.args.len() >= 2 {
+                    let arg0 = inst_data.args[0];
+                    let arg1 = inst_data.args[1];
+
+                    // Check if arg0 is a constant
+                    if let Some(const_inst) = func.value_def(arg0) {
+                        if let Some(const_inst_data) = func.dfg.inst_data(const_inst) {
+                            if let Opcode::Iconst = const_inst_data.opcode {
+                                if let Some(imm) = &const_inst_data.imm {
+                                    let offset = match imm {
+                                        Immediate::I32(val) => *val,
+                                        Immediate::I64(val) => *val as i32,
+                                        _ => 0,
+                                    };
+                                    // arg1 is the base, arg0 is the constant
+                                    if let Some(&base_vreg) = value_to_vreg.get(&arg1) {
+                                        return (base_vreg, offset);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Check if arg1 is a constant
+                    if let Some(const_inst) = func.value_def(arg1) {
+                        if let Some(const_inst_data) = func.dfg.inst_data(const_inst) {
+                            if let Opcode::Iconst = const_inst_data.opcode {
+                                if let Some(imm) = &const_inst_data.imm {
+                                    let offset = match imm {
+                                        Immediate::I32(val) => *val,
+                                        Immediate::I64(val) => *val as i32,
+                                        _ => 0,
+                                    };
+                                    // arg0 is the base, arg1 is the constant
+                                    if let Some(&base_vreg) = value_to_vreg.get(&arg0) {
+                                        return (base_vreg, offset);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Not an iadd with constant, or couldn't extract - return address as-is with offset 0
+    (address_vreg, 0)
+}
 
 impl LowerBackend for Riscv32LowerBackend {
     type MInst = Riscv32MachInst;
@@ -141,19 +219,17 @@ impl LowerBackend for Riscv32LowerBackend {
             }
             Opcode::Load => {
                 // Load: result = mem[address]
-                // Lower to: lw result, imm(address)
-                // TODO: Currently hardcodes offset to 0. In LPIR, the address is a Value that may
-                // be the result of an iadd with a constant. Future improvement: detect if address
-                // is iadd(base, const) and extract the constant as the offset. For now, offsets
-                // should be computed during address materialization (iadd base, offset) before load/store.
+                // Lower to: lw result, imm(base)
+                // Try to extract base and offset from address if it's iadd(base, const)
                 if !results.is_empty() && args.len() >= 1 {
-                    if let (Some(address_vreg), Some(result_vreg)) = (rs1_opt, rd_opt) {
+                    if let (Some(address_value), Some(result_vreg)) = (args.get(0), rd_opt) {
+                        let (base_vreg, offset) = extract_address_components(ctx, *address_value);
                         let rd = Writable::new(Reg::from_virtual_reg(result_vreg));
-                        let rs1_reg = Reg::from_virtual_reg(address_vreg);
+                        let rs1_reg = Reg::from_virtual_reg(base_vreg);
                         let mach_inst = Riscv32MachInst::Lw {
                             rd,
                             rs1: rs1_reg,
-                            imm: 0,
+                            imm: offset,
                         };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
@@ -162,19 +238,17 @@ impl LowerBackend for Riscv32LowerBackend {
             }
             Opcode::Store => {
                 // Store: mem[address] = value
-                // Lower to: sw value, imm(address)
-                // TODO: Currently hardcodes offset to 0. In LPIR, the address is a Value that may
-                // be the result of an iadd with a constant. Future improvement: detect if address
-                // is iadd(base, const) and extract the constant as the offset. For now, offsets
-                // should be computed during address materialization (iadd base, offset) before load/store.
+                // Lower to: sw value, imm(base)
+                // Try to extract base and offset from address if it's iadd(base, const)
                 if args.len() >= 2 {
-                    if let (Some(address_vreg), Some(value_vreg)) = (rs1_opt, rs2_opt) {
-                        let rs1_reg = Reg::from_virtual_reg(address_vreg);
+                    if let (Some(address_value), Some(value_vreg)) = (args.get(0), rs2_opt) {
+                        let (base_vreg, offset) = extract_address_components(ctx, *address_value);
+                        let rs1_reg = Reg::from_virtual_reg(base_vreg);
                         let rs2_reg = Reg::from_virtual_reg(value_vreg);
                         let mach_inst = Riscv32MachInst::Sw {
                             rs1: rs1_reg,
                             rs2: rs2_reg,
-                            imm: 0,
+                            imm: offset,
                         };
                         ctx.vcode.push(mach_inst, srcloc);
                         return true;
@@ -473,20 +547,20 @@ impl LowerBackend for Riscv32LowerBackend {
                         .collect()
                 };
 
-                // Get result VReg (if any)
-                let result_vreg = if !results.is_empty() {
-                    results.get(0).and_then(|v| {
-                        let value_to_vreg = ctx.value_to_vreg();
-                        value_to_vreg.get(v).copied()
-                    })
-                } else {
-                    None
+                // Extract ALL result VRegs (for multi-return support)
+                let result_vregs: alloc::vec::Vec<Reg> = {
+                    let value_to_vreg = ctx.value_to_vreg();
+                    results
+                        .iter()
+                        .filter_map(|v| value_to_vreg.get(v).copied().map(Reg::from_virtual_reg))
+                        .collect()
                 };
 
                 // Create JAL instruction
+                // First result goes in rd (for backward compatibility)
                 // If no result, use x0 (zero register) as rd
-                let rd = if let Some(result_vreg) = result_vreg {
-                    Writable::new(Reg::from_virtual_reg(result_vreg))
+                let rd = if let Some(&first_result) = result_vregs.first() {
+                    Writable::new(first_result)
                 } else {
                     // Use zero_reg() for x0
                     use crate::isa::riscv32::backend3::regs::zero_reg;
@@ -498,6 +572,7 @@ impl LowerBackend for Riscv32LowerBackend {
                     callee: callee.clone(),
                     args: arg_vregs,
                     return_count: results.len(),
+                    result_vregs,
                 };
                 let inst_idx = ctx.vcode.push(mach_inst, srcloc);
 

@@ -13,7 +13,23 @@ block0(v0: i32):
 }
 
 ; This test verifies that relocation fixup works correctly.
-; The function should compile without errors.
 ; Function call addresses should be patched correctly.
-; Local vs external symbol resolution should work.
+; Local symbol resolution should work.
+
+; check: function %caller
+; check: # Prologue
+; sameln: addi sp, sp, -8
+; sameln: sw ra, 4(sp)
+; sameln: sw s0, 0(sp)
+; check: # Call setup
+; sameln: mv a0, a0
+; check: # Function call (AUIPC + ADDI + JALR)
+; sameln: auipc
+; sameln: addi
+; sameln: jalr ra,
+; check: # Epilogue
+; sameln: lw s0, 0(sp)
+; sameln: lw ra, 4(sp)
+; sameln: addi sp, sp, 8
+; sameln: jalr zero, ra, 0
 
