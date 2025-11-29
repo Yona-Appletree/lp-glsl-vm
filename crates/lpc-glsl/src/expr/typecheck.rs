@@ -58,9 +58,9 @@ pub fn type_check_expr(expr: &Expr, symbols: &SymbolTable) -> GlslResult<GlslTyp
             };
 
             // Look up function signature
-            let sig = symbols.lookup_function(name).ok_or_else(|| {
-                GlslError::type_error(format!("Undefined function '{}'", name))
-            })?;
+            let sig = symbols
+                .lookup_function(name)
+                .ok_or_else(|| GlslError::type_error(format!("Undefined function '{}'", name)))?;
 
             // Type check arguments
             if args.len() != sig.params.len() {
@@ -206,4 +206,3 @@ pub fn type_check_binary_op(
         _ => Err(GlslError::type_error("Unsupported binary operator")),
     }
 }
-

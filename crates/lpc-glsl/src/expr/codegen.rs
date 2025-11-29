@@ -37,17 +37,30 @@ pub fn generate_expr(ctx: &mut dyn CodeGenContext, expr: &Expr) -> GlslResult<Va
                 .set_value_type(value, Type::U32);
             Ok(value)
         }
-        Expr::UIntConst(_) | Expr::FloatConst(_) | Expr::DoubleConst(_) => {
+        Expr::FloatConst(f) => {
+            let block = ctx.current_block()?;
+            let value = ctx.builder_mut().new_value();
+            let mut block_builder = ctx.builder_mut().block_builder(block);
+            block_builder.fconst(value, *f);
+            Ok(value)
+        }
+        Expr::UIntConst(_) | Expr::DoubleConst(_) => {
             Err(GlslError::codegen("Unsupported literal type"))
         }
 
         // Variable reference
         Expr::Variable(ident) => {
             let name = ident.0.as_str();
-            ctx.variables()
-                .get(name)
-                .copied()
-                .ok_or_else(|| GlslError::codegen(format!("Undefined variable '{}'", name)))
+            // Try SSABuilder first, then fall back to legacy lookup
+            let block = ctx.current_block()?;
+            let ssa_value = ctx.ssa_builder_mut().get_value(name, block);
+            if let Some(value) = ssa_value {
+                Ok(value)
+            } else if let Some(value) = ctx.variables().get(name) {
+                Ok(*value)
+            } else {
+                Err(GlslError::codegen(format!("Undefined variable '{}'", name)))
+            }
         }
 
         // Unary operators
@@ -68,8 +81,12 @@ pub fn generate_expr(ctx: &mut dyn CodeGenContext, expr: &Expr) -> GlslResult<Va
             let rhs_value = generate_expr(ctx, rhs)?;
             // Assignment can only be to a variable (type checker should have caught this)
             if let Expr::Variable(ident) = lhs.as_ref() {
-                let name = ident.0.clone();
-                ctx.variables_mut().insert(name, rhs_value);
+                let name = ident.0.as_str();
+                let block = ctx.current_block()?;
+                // Record definition in SSABuilder
+                ctx.ssa_builder_mut().record_def(name, block, rhs_value);
+                // Also maintain legacy tracking for backward compatibility
+                ctx.variables_mut().insert(String::from(name), rhs_value);
                 Ok(rhs_value)
             } else {
                 Err(GlslError::codegen(
@@ -79,9 +96,7 @@ pub fn generate_expr(ctx: &mut dyn CodeGenContext, expr: &Expr) -> GlslResult<Va
         }
 
         // Function call
-        Expr::FunCall(fun_ident, args) => {
-            generate_function_call(ctx, fun_ident, args)
-        }
+        Expr::FunCall(fun_ident, args) => generate_function_call(ctx, fun_ident, args),
 
         // Not supported
         Expr::Ternary(_, _, _) => Err(GlslError::codegen("Ternary operator not supported")),
@@ -223,7 +238,11 @@ fn generate_function_call(
         }
         drop(block_builder);
         // Apply variable updates
+        let block = ctx.current_block()?;
         for (name, value) in var_updates {
+            // Record in SSABuilder
+            ctx.ssa_builder_mut().record_def(&name, block, value);
+            // Also maintain legacy tracking
             ctx.variables_mut().insert(name, value);
         }
     }
@@ -289,23 +308,46 @@ pub fn generate_binary_op(
 ) -> GlslResult<Value> {
     let block = ctx.current_block()?;
     let result = ctx.builder_mut().new_value();
+
+    // Check operand types
+    let left_ty = ctx.builder_mut().function().dfg.value_type(left);
+    let right_ty = ctx.builder_mut().function().dfg.value_type(right);
+
+    let is_float_op = left_ty == Some(Type::F32) && right_ty == Some(Type::F32);
+
     let mut block_builder = ctx.builder_mut().block_builder(block);
 
     match op {
         glsl::syntax::BinaryOp::Add => {
-            block_builder.iadd(result, left, right);
+            if is_float_op {
+                block_builder.fadd(result, left, right);
+            } else {
+                block_builder.iadd(result, left, right);
+            }
             Ok(result)
         }
         glsl::syntax::BinaryOp::Sub => {
-            block_builder.isub(result, left, right);
+            if is_float_op {
+                block_builder.fsub(result, left, right);
+            } else {
+                block_builder.isub(result, left, right);
+            }
             Ok(result)
         }
         glsl::syntax::BinaryOp::Mult => {
-            block_builder.imul(result, left, right);
+            if is_float_op {
+                block_builder.fmul(result, left, right);
+            } else {
+                block_builder.imul(result, left, right);
+            }
             Ok(result)
         }
         glsl::syntax::BinaryOp::Div => {
-            block_builder.idiv(result, left, right);
+            if is_float_op {
+                block_builder.fdiv(result, left, right);
+            } else {
+                block_builder.idiv(result, left, right);
+            }
             Ok(result)
         }
         glsl::syntax::BinaryOp::Mod => {
@@ -313,7 +355,12 @@ pub fn generate_binary_op(
             Ok(result)
         }
         glsl::syntax::BinaryOp::LT => {
-            block_builder.icmp_lt(result, left, right);
+            if is_float_op {
+                use lpc_lpir::FloatCC;
+                block_builder.fcmp(result, FloatCC::LessThan, left, right);
+            } else {
+                block_builder.icmp_lt(result, left, right);
+            }
             // Bool maps to u32 in LPIR
             drop(block_builder);
             ctx.builder_mut()
@@ -323,7 +370,12 @@ pub fn generate_binary_op(
             Ok(result)
         }
         glsl::syntax::BinaryOp::GT => {
-            block_builder.icmp_gt(result, left, right);
+            if is_float_op {
+                use lpc_lpir::FloatCC;
+                block_builder.fcmp(result, FloatCC::GreaterThan, left, right);
+            } else {
+                block_builder.icmp_gt(result, left, right);
+            }
             // Bool maps to u32 in LPIR
             drop(block_builder);
             ctx.builder_mut()
@@ -333,7 +385,12 @@ pub fn generate_binary_op(
             Ok(result)
         }
         glsl::syntax::BinaryOp::LTE => {
-            block_builder.icmp_le(result, left, right);
+            if is_float_op {
+                use lpc_lpir::FloatCC;
+                block_builder.fcmp(result, FloatCC::LessThanOrEqual, left, right);
+            } else {
+                block_builder.icmp_le(result, left, right);
+            }
             // Bool maps to u32 in LPIR
             drop(block_builder);
             ctx.builder_mut()
@@ -343,7 +400,12 @@ pub fn generate_binary_op(
             Ok(result)
         }
         glsl::syntax::BinaryOp::GTE => {
-            block_builder.icmp_ge(result, left, right);
+            if is_float_op {
+                use lpc_lpir::FloatCC;
+                block_builder.fcmp(result, FloatCC::GreaterThanOrEqual, left, right);
+            } else {
+                block_builder.icmp_ge(result, left, right);
+            }
             // Bool maps to u32 in LPIR
             drop(block_builder);
             ctx.builder_mut()
@@ -353,7 +415,12 @@ pub fn generate_binary_op(
             Ok(result)
         }
         glsl::syntax::BinaryOp::Equal => {
-            block_builder.icmp_eq(result, left, right);
+            if is_float_op {
+                use lpc_lpir::FloatCC;
+                block_builder.fcmp(result, FloatCC::Equal, left, right);
+            } else {
+                block_builder.icmp_eq(result, left, right);
+            }
             // Bool maps to u32 in LPIR
             drop(block_builder);
             ctx.builder_mut()
@@ -363,7 +430,12 @@ pub fn generate_binary_op(
             Ok(result)
         }
         glsl::syntax::BinaryOp::NonEqual => {
-            block_builder.icmp_ne(result, left, right);
+            if is_float_op {
+                use lpc_lpir::FloatCC;
+                block_builder.fcmp(result, FloatCC::NotEqual, left, right);
+            } else {
+                block_builder.icmp_ne(result, left, right);
+            }
             // Bool maps to u32 in LPIR
             drop(block_builder);
             ctx.builder_mut()
@@ -399,4 +471,3 @@ pub fn generate_binary_op(
         _ => Err(GlslError::codegen("Unsupported binary operator")),
     }
 }
-

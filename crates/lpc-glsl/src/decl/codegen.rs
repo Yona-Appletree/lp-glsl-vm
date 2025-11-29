@@ -34,11 +34,20 @@ pub fn generate_declaration(ctx: &mut dyn CodeGenContext, decl: &Declaration) ->
                     create_default_value(ctx, ty)?
                 };
 
+                let block = ctx.current_block()?;
+                // Record in SSABuilder
+                ctx.ssa_builder_mut().record_def(&var_name, block, value);
+                // Also maintain legacy tracking
                 ctx.variables_mut().insert(var_name.clone(), value);
-                // Track this variable in the current scope
-                if let Some(current_scope) = ctx.scope_stack_mut().last_mut() {
-                    current_scope.insert(var_name);
+                // Track this variable in the current scope (both old and new)
+                {
+                    let scope_stack = ctx.scope_stack_mut();
+                    if let Some(current_scope) = scope_stack.last_mut() {
+                        current_scope.insert(var_name.clone());
+                    }
                 }
+                // Also track in new scope stack
+                ctx.scope_stack_new_mut().declare(var_name);
             }
 
             // Declare tail variables
@@ -55,11 +64,20 @@ pub fn generate_declaration(ctx: &mut dyn CodeGenContext, decl: &Declaration) ->
                     create_default_value(ctx, ty)?
                 };
 
+                let block = ctx.current_block()?;
+                // Record in SSABuilder
+                ctx.ssa_builder_mut().record_def(&var_name, block, value);
+                // Also maintain legacy tracking
                 ctx.variables_mut().insert(var_name.clone(), value);
-                // Track this variable in the current scope
-                if let Some(current_scope) = ctx.scope_stack_mut().last_mut() {
-                    current_scope.insert(var_name);
+                // Track this variable in the current scope (both old and new)
+                {
+                    let scope_stack = ctx.scope_stack_mut();
+                    if let Some(current_scope) = scope_stack.last_mut() {
+                        current_scope.insert(var_name.clone());
+                    }
                 }
+                // Also track in new scope stack
+                ctx.scope_stack_new_mut().declare(var_name);
             }
 
             Ok(())
@@ -77,7 +95,9 @@ fn create_default_value(ctx: &mut dyn CodeGenContext, ty: GlslType) -> GlslResul
         GlslType::Int | GlslType::Bool => {
             block_builder.iconst(value, 0);
         }
+        GlslType::Float => {
+            block_builder.fconst(value, 0.0);
+        }
     }
     Ok(value)
 }
-

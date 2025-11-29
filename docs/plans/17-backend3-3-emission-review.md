@@ -10,6 +10,7 @@
 ### ✅ Implemented Components
 
 #### 1. Emission State Tracking (`isa/riscv32/backend3/emit.rs`)
+
 - ✅ `EmitState` struct with:
   - SP offset tracking
   - Label offsets mapping
@@ -22,6 +23,7 @@
 - ✅ Fixup resolution methods
 
 #### 2. Frame Layout Computation (`isa/riscv32/backend3/emit.rs`)
+
 - ✅ `FrameLayout` struct (in `abi.rs`)
 - ✅ `compute_frame_layout()` method:
   - Spill slot counting
@@ -30,6 +32,7 @@
 - ✅ `spill_slot_offset()` helper
 
 #### 3. Prologue/Epilogue Generation (`isa/riscv32/backend3/emit.rs`)
+
 - ✅ `gen_prologue()`:
   - Setup area (FP + RA save)
   - Frame size adjustment
@@ -41,6 +44,7 @@
   - Return (JALR)
 
 #### 4. Instruction Emission (`isa/riscv32/backend3/emit.rs`)
+
 - ✅ Block emission order computation (cold blocks at end)
 - ✅ Block alignment handling
 - ✅ Instruction emission with register allocation application
@@ -53,6 +57,7 @@
   - Function calls (Jal) with relocation
 
 #### 5. InstBuffer (`isa/riscv32/inst_buffer.rs`)
+
 - ✅ Structured instruction storage
 - ✅ Label binding support
 - ✅ Branch patching (`patch_branch()`)
@@ -60,6 +65,7 @@
 - ✅ Lazy encoding (`as_bytes()`)
 
 #### 6. Tests (`backend3/tests/emission_tests.rs`)
+
 - ✅ Prologue/epilogue tests
 - ✅ Instruction emission tests (arithmetic, logical, shifts, load/store)
 - ✅ Edit emission tests
@@ -70,7 +76,9 @@
 ### ⚠️ Partial Implementation / Issues
 
 #### 1. Function Call Relocation Resolution
+
 **Status**: Implemented but needs verification
+
 - ✅ Relocation recording during emission
 - ✅ `fix_external_relocations()` implemented
 - ⚠️ **Issue**: Relocation patching logic may have bugs
@@ -79,34 +87,43 @@
   - Symbol table lookup may fail silently
 
 **Action Needed**:
+
 - Add comprehensive tests for function call relocations
 - Test both local (PC-relative) and external (absolute) calls
 - Verify AUIPC/ADDI sequence is correct
 
 #### 2. Branch Fallthrough Detection
+
 **Status**: Simplified implementation
+
 - ✅ Two-dest branch conversion to single-dest
 - ⚠️ **Issue**: Fallthrough detection is simplified
   - Currently assumes false branch is fallthrough if offset matches
   - Should check actual block order instead
 
 **Action Needed**:
+
 - Improve fallthrough detection using block order
 - Add tests for various branch patterns
 
 #### 3. Conditional Trap Emission
+
 **Status**: Implemented but patching may be incorrect
+
 - ✅ Trapz/Trapnz emission with conditional branches
 - ⚠️ **Issue**: Branch patching for skip offset may be wrong
   - Uses `buffer.cur_offset()` which may not be correct
   - Should compute offset relative to branch instruction
 
 **Action Needed**:
+
 - Fix trap conditional branch patching
 - Add tests verifying trap emission correctness
 
 #### 4. System Call Emission
+
 **Status**: Basic implementation
+
 - ✅ Ecall instruction emission
 - ✅ Argument/return value handling
 - ⚠️ **Issue**: Syscall number handling is TODO
@@ -114,11 +131,14 @@
   - TODO comment: "Handle case where number is in a register"
 
 **Action Needed**:
+
 - Implement syscall number in register case
 - Add tests for syscall emission
 
 #### 5. Source Location Tracking
+
 **Status**: Implemented but not fully utilized
+
 - ✅ Source location ranges tracked in InstBuffer
 - ✅ Source location updates during emission
 - ⚠️ **Issue**: Not used for debugging/error reporting yet
@@ -126,33 +146,42 @@
   - Could be used for debug info generation (future)
 
 **Action Needed**:
+
 - Use source locations in error messages
 - Consider debug info generation (deferred)
 
 ### ❌ Missing / Not Implemented
 
 #### 1. Out-of-Range Branch Handling
+
 **Status**: Not implemented (deferred per plan)
+
 - ❌ Island/veneer insertion for branches > ±4KB
 - ❌ Deadline tracking for forward branches
 - **Current**: Panics if branch offset exceeds range
 
 **Action Needed**:
+
 - Implement island insertion (deferred feature)
 - For now: Add validation/error messages for out-of-range branches
 
 #### 2. Advanced Branch Optimization
+
 **Status**: Not implemented (deferred per plan)
+
 - ❌ Branch threading (eliminate empty blocks)
 - ❌ Latest-branches tracking
 - ❌ Conditional branch inversion optimization
 - ❌ Unnecessary jump elimination
 
 **Action Needed**:
+
 - Deferred (as per plan)
 
 #### 3. Function Call Tests
+
 **Status**: Test stub exists but not implemented
+
 - ❌ `test_emit_function_call()` is empty
 - ❌ No tests for:
   - Argument passing (registers + stack)
@@ -161,19 +190,25 @@
   - Multiple function calls
 
 **Action Needed**:
+
 - Implement comprehensive function call tests
 - Test with symbol table resolution
 
 #### 4. System Call Tests
+
 **Status**: Test stub exists but not implemented
+
 - ❌ `test_emit_syscall()` is empty
 - ❌ No tests for syscall emission
 
 **Action Needed**:
+
 - Implement syscall emission tests
 
 #### 5. Frame Layout Edge Cases
+
 **Status**: Basic implementation, edge cases not tested
+
 - ❌ No tests for:
   - Large frame sizes
   - Many callee-saved registers
@@ -182,11 +217,14 @@
   - Frame size alignment requirements
 
 **Action Needed**:
+
 - Add tests for frame layout edge cases
 - Verify frame size calculations are correct
 
 #### 6. Edit Emission Edge Cases
+
 **Status**: Basic implementation, edge cases not tested
+
 - ❌ No tests for:
   - Multiple spills/reloads in sequence
   - Spills/reloads with different slot indices
@@ -194,26 +232,33 @@
   - Edit ordering correctness
 
 **Action Needed**:
+
 - Add tests for edit emission edge cases
 - Verify edit ordering matches regalloc output
 
 #### 7. Block Alignment
+
 **Status**: Implemented but not tested
+
 - ✅ Block alignment handling in emission
 - ❌ No tests for alignment requirements
 - ❌ No tests for alignment padding correctness
 
 **Action Needed**:
+
 - Add tests for block alignment
 - Verify padding instructions are correct
 
 #### 8. Error Handling
+
 **Status**: Basic, may panic in edge cases
+
 - ⚠️ Some edge cases may panic instead of returning errors
 - ⚠️ Unresolved labels panic (should be caught earlier)
 - ⚠️ Invalid allocations panic (should be validated)
 
 **Action Needed**:
+
 - Add validation/error handling for edge cases
 - Return errors instead of panicking where possible
 
@@ -222,9 +267,11 @@
 ### Priority 1: Critical Fixes and Tests
 
 #### 1.1 Fix Conditional Trap Branch Patching
+
 **File**: `isa/riscv32/backend3/emit.rs`
 **Issue**: Trap conditional branch patching uses wrong offset
 **Fix**:
+
 ```rust
 // Current (wrong):
 let skip_offset = buffer.cur_offset();
@@ -239,8 +286,10 @@ buffer.patch_branch(branch_inst_idx, skip_offset, BranchType::Conditional);
 **Tests**: Add tests verifying trap emission correctness
 
 #### 1.2 Implement Function Call Tests
+
 **File**: `backend3/tests/emission_tests.rs`
 **Tasks**:
+
 - Test function call with register arguments (a0-a7)
 - Test function call with stack arguments (>8 args)
 - Test function call return value handling
@@ -252,17 +301,21 @@ buffer.patch_branch(branch_inst_idx, skip_offset, BranchType::Conditional);
 **Reference**: Use Cranelift's function call tests as reference
 
 #### 1.3 Implement System Call Tests
+
 **File**: `backend3/tests/emission_tests.rs`
 **Tasks**:
+
 - Test syscall with constant number
 - Test syscall with register number (when implemented)
 - Test syscall argument passing
 - Test syscall return value handling
 
 #### 1.4 Fix Branch Fallthrough Detection
+
 **File**: `isa/riscv32/backend3/emit.rs`
 **Issue**: Simplified fallthrough detection
 **Fix**: Use block order to determine fallthrough
+
 ```rust
 fn determine_fallthrough(
     &self,
@@ -274,7 +327,7 @@ fn determine_fallthrough(
     // Find current block index in order
     let current_idx = block_order.iter().position(|&b| b == current_block)?;
     let next_block = block_order.get(current_idx + 1)?;
-    
+
     if *next_block == target_false {
         (target_true, false) // False is fallthrough, branch to true
     } else {
@@ -288,32 +341,40 @@ fn determine_fallthrough(
 ### Priority 2: Test Coverage Expansion
 
 #### 2.1 Frame Layout Edge Case Tests
+
 **File**: `backend3/tests/emission_tests.rs`
 **Tests**:
+
 - `test_frame_layout_large_frame()` - Test with many spill slots
 - `test_frame_layout_many_callee_saved()` - Test with many clobbered registers
 - `test_frame_layout_large_outgoing_args()` - Test with many stack arguments
 - `test_frame_layout_alignment()` - Test frame size alignment
 
 #### 2.2 Edit Emission Edge Case Tests
+
 **File**: `backend3/tests/emission_tests.rs`
 **Tests**:
+
 - `test_edit_multiple_spills()` - Test multiple spills in sequence
 - `test_edit_multiple_reloads()` - Test multiple reloads in sequence
 - `test_edit_spill_reload_ordering()` - Test edit ordering correctness
 - `test_edit_many_reg_moves()` - Test many register moves
 
 #### 2.3 Block Alignment Tests
+
 **File**: `backend3/tests/emission_tests.rs`
 **Tests**:
+
 - `test_block_alignment_4_bytes()` - Test 4-byte alignment
 - `test_block_alignment_8_bytes()` - Test 8-byte alignment
 - `test_block_alignment_16_bytes()` - Test 16-byte alignment
 - `test_block_alignment_padding()` - Verify padding instructions
 
 #### 2.4 Branch Pattern Tests
+
 **File**: `backend3/tests/emission_tests.rs`
 **Tests**:
+
 - `test_branch_fallthrough_true()` - Test true branch is fallthrough
 - `test_branch_fallthrough_false()` - Test false branch is fallthrough
 - `test_branch_no_fallthrough()` - Test neither branch is fallthrough
@@ -324,17 +385,21 @@ fn determine_fallthrough(
 ### Priority 3: Improvements and Edge Cases
 
 #### 3.1 Improve Error Handling
+
 **File**: `isa/riscv32/backend3/emit.rs`
 **Tasks**:
+
 - Add validation for unresolved labels before final fixup resolution
 - Add validation for invalid register allocations
 - Return errors instead of panicking where possible
 - Add error messages with source locations
 
 #### 3.2 Implement Syscall Number in Register
+
 **File**: `isa/riscv32/backend3/emit.rs`
 **Issue**: TODO for syscall number in register
 **Fix**: Handle case where syscall number is in a register
+
 ```rust
 match number {
     SyscallNumber::Constant(n) => {
@@ -352,15 +417,19 @@ match number {
 **Tests**: Add test for syscall number in register
 
 #### 3.3 Add Out-of-Range Branch Validation
+
 **File**: `isa/riscv32/backend3/emit.rs`
 **Tasks**:
+
 - Add validation for branch offset ranges
 - Return error instead of panic for out-of-range branches
 - Add helpful error message with branch distance
 
 #### 3.4 Improve Source Location Usage
+
 **File**: `isa/riscv32/backend3/emit.rs`
 **Tasks**:
+
 - Use source locations in error messages
 - Add source location to panic messages
 - Consider debug info generation (deferred)
@@ -368,17 +437,20 @@ match number {
 ### Priority 4: Deferred Features (Future)
 
 #### 4.1 Out-of-Range Branch Handling
+
 - Island/veneer insertion
 - Deadline tracking
 - Support for functions > 4KB
 
 #### 4.2 Advanced Branch Optimization
+
 - Branch threading
 - Latest-branches tracking
 - Conditional branch inversion
 - Unnecessary jump elimination
 
 #### 4.3 Debug Information
+
 - Value label ranges
 - Debug tags
 - CFG metadata
@@ -389,12 +461,15 @@ match number {
 ### Test Categories
 
 #### Unit Tests (Emission Components)
+
 1. **EmitState Tests**
+
    - Label binding and resolution
    - Fixup recording and resolution
    - Source location tracking
 
 2. **FrameLayout Tests**
+
    - Frame size computation
    - Spill slot offset calculation
    - Clobbered register detection
@@ -406,19 +481,23 @@ match number {
    - Callee-saved register handling
 
 #### Integration Tests (End-to-End)
+
 1. **Simple Function Tests**
+
    - Single block functions
    - Multiple block functions
    - Functions with branches
    - Functions with loops
 
 2. **Function Call Tests**
+
    - Direct calls (local)
    - Indirect calls (external)
    - Calls with many arguments
    - Calls with return values
 
 3. **System Call Tests**
+
    - Syscall emission
    - Syscall argument handling
    - Syscall return value handling
@@ -432,6 +511,7 @@ match number {
 ### Test Format
 
 Following the plan document's guidelines:
+
 - **Input**: Textual LPIR format for clarity
 - **Expected Output**: Assembler format showing expected machine code
 - **Verification**: Check instruction sequences, not just success
@@ -449,17 +529,17 @@ fn test_function_call_with_stack_args() {
             return v10
         }
     "#;
-    
+
     let test = LowerTest::from_lpir(lpir_text);
     let vcode = test.vcode();
     let regalloc = vcode.run_regalloc().expect("regalloc should succeed");
-    
+
     // Create symbol table with other function
     let mut symtab = SymbolTable::new();
     symtab.add_local(Symbol::local("other"), 0x1000);
-    
+
     let buffer = vcode.emit(&regalloc, Some(&mut symtab), Some("test"));
-    
+
     // Expected: assembler format
     // Verify:
     // 1. First 8 args in a0-a7
@@ -475,6 +555,7 @@ fn test_function_call_with_stack_args() {
 ### Cranelift RISC-V 64 Emission (`wasmtime/cranelift/codegen/src/isa/riscv64`)
 
 Key differences and similarities:
+
 - **Similar**: Label-based emission, forward reference handling
 - **Similar**: Frame layout computation
 - **Similar**: Prologue/epilogue generation
@@ -483,6 +564,7 @@ Key differences and similarities:
 - **Different**: Cranelift has island insertion, we defer it
 
 ### Key Files to Reference
+
 - `inst/emit.rs` - Instruction emission
 - `abi.rs` - Frame layout and ABI helpers
 - `buffer.rs` - MachBuffer with EmitState (if exists)
@@ -490,6 +572,7 @@ Key differences and similarities:
 ## Success Criteria
 
 ### Phase 3 Completion Checklist
+
 - [x] Can emit prologue/epilogue
 - [x] Can emit instructions with allocated registers
 - [x] Can emit edits (moves, spills, reloads)
@@ -500,6 +583,7 @@ Key differences and similarities:
 - [ ] Edge cases handled gracefully (needs tests)
 
 ### Test Coverage Goals
+
 - [ ] 80%+ code coverage for emission module
 - [ ] All instruction types tested
 - [ ] All edit types tested
@@ -511,17 +595,20 @@ Key differences and similarities:
 ## Next Steps
 
 1. **Immediate** (Priority 1):
+
    - Fix conditional trap branch patching
    - Implement function call tests
    - Implement system call tests
    - Fix branch fallthrough detection
 
 2. **Short-term** (Priority 2):
+
    - Expand test coverage
    - Add edge case tests
    - Add block alignment tests
 
 3. **Medium-term** (Priority 3):
+
    - Improve error handling
    - Implement syscall number in register
    - Add out-of-range branch validation
@@ -529,4 +616,3 @@ Key differences and similarities:
 4. **Long-term** (Priority 4):
    - Implement deferred features (islands, optimizations)
    - Add debug info generation
-

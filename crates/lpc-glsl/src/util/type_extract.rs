@@ -13,4 +13,3 @@ pub fn extract_type_from_fully_specified(
 pub fn extract_type_from_specifier(ty: &glsl::syntax::TypeSpecifier) -> Option<GlslType> {
     GlslType::from_glsl_type_specifier(&ty.ty)
 }
-

@@ -11,6 +11,8 @@ pub enum GlslType {
     Int,
     /// Boolean type (maps to U32 in LPIR: 0 = false, 1 = true)
     Bool,
+    /// 32-bit floating point
+    Float,
 }
 
 impl GlslType {
@@ -19,6 +21,7 @@ impl GlslType {
         match self {
             GlslType::Int => LpirType::I32,
             GlslType::Bool => LpirType::U32,
+            GlslType::Float => LpirType::F32,
         }
     }
 
@@ -29,6 +32,7 @@ impl GlslType {
         match spec {
             glsl::syntax::TypeSpecifierNonArray::Int => Some(GlslType::Int),
             glsl::syntax::TypeSpecifierNonArray::Bool => Some(GlslType::Bool),
+            glsl::syntax::TypeSpecifierNonArray::Float => Some(GlslType::Float),
             _ => None, // Not supported in initial implementation
         }
     }
@@ -38,14 +42,16 @@ impl GlslType {
         match self {
             GlslType::Int => "int",
             GlslType::Bool => "bool",
+            GlslType::Float => "float",
         }
     }
 
     /// Get the size of this type in bytes.
     pub fn size_in_bytes(self) -> u32 {
         match self {
-            GlslType::Int => 4,  // 32-bit integer
-            GlslType::Bool => 4, // Bool maps to U32 (32-bit)
+            GlslType::Int => 4,   // 32-bit integer
+            GlslType::Bool => 4,  // Bool maps to U32 (32-bit)
+            GlslType::Float => 4, // 32-bit floating point
         }
     }
 }
@@ -78,10 +84,10 @@ mod tests {
             GlslType::from_glsl_type_specifier(&glsl::syntax::TypeSpecifierNonArray::Bool),
             Some(GlslType::Bool)
         );
-        // Unsupported types should return None
+        // Float is now supported
         assert_eq!(
             GlslType::from_glsl_type_specifier(&glsl::syntax::TypeSpecifierNonArray::Float),
-            None
+            Some(GlslType::Float)
         );
     }
 

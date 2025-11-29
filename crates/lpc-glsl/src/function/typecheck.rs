@@ -92,8 +92,9 @@ impl TypeChecker {
                     glsl::syntax::Statement::Simple(simple) => {
                         matches!(
                             simple.as_ref(),
-                            glsl::syntax::SimpleStatement::Jump(glsl::syntax::JumpStatement::Return(_))
-                                | glsl::syntax::SimpleStatement::Selection(_)
+                            glsl::syntax::SimpleStatement::Jump(
+                                glsl::syntax::JumpStatement::Return(_)
+                            ) | glsl::syntax::SimpleStatement::Selection(_)
                         )
                     }
                     glsl::syntax::Statement::Compound(_) => true, // Compound statements might contain returns
@@ -189,4 +190,3 @@ fn extract_parameter_qualifier(
     }
     ParameterQualifier::default() // Default to 'in'
 }
-

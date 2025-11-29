@@ -204,4 +204,3 @@ pub fn type_check_jump_statement(
         JumpStatement::Discard => Err(GlslError::type_error("Discard not supported")),
     }
 }
-

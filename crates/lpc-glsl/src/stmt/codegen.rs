@@ -5,7 +5,9 @@ use alloc::{collections::BTreeSet, vec::Vec};
 use glsl::syntax::{CompoundStatement, SimpleStatement, Statement};
 
 use crate::{
-    control::codegen::{generate_iteration_statement, generate_jump_statement, generate_selection_statement},
+    control::codegen::{
+        generate_iteration_statement, generate_jump_statement, generate_selection_statement,
+    },
     decl::codegen::generate_declaration,
     error::{GlslError, GlslResult},
     expr::codegen::generate_expr,
@@ -25,37 +27,24 @@ pub fn generate_compound_statement(
     ctx: &mut dyn CodeGenContext,
     compound: &CompoundStatement,
 ) -> GlslResult<()> {
-    // Push new scope - need access to scope_stack
-    // This requires extending CodeGenContext or accessing CodeGen directly
-    // For now, we'll need to add scope_stack access to the trait
-    // Actually, let's make this work by having CodeGen pass itself
-    // But that won't work with the trait...
-    
-    // Let me check how scope_stack is used - it's only in CodeGen
-    // So we need to either:
-    // 1. Add scope_stack methods to CodeGenContext
-    // 2. Make generate_compound_statement take &mut CodeGen directly
-    
-    // For now, let's add scope_stack to the trait
-    // Actually, let me check the actual usage pattern first
-    
-    // Looking at the code, scope_stack is only used in compound statements
-    // So I can add it to CodeGenContext trait
-    
-    // Push new scope
+    // Push new scope (both old and new for migration compatibility)
     ctx.scope_stack_mut().push(BTreeSet::new());
+    ctx.scope_stack_new_mut().push();
 
     // Generate each statement
     for stmt in &compound.statement_list {
         generate_statement(ctx, stmt)?;
     }
 
-    // Pop scope: remove only variables declared in this scope
+    // Pop legacy scope: remove only variables declared in this scope
     if let Some(scope_vars) = ctx.scope_stack_mut().pop() {
         for var_name in scope_vars {
             ctx.variables_mut().remove(&var_name);
         }
     }
+
+    // Pop new scope stack
+    ctx.scope_stack_new_mut().pop();
 
     Ok(())
 }
@@ -98,4 +87,3 @@ pub fn generate_simple_statement(
         SimpleStatement::CaseLabel(_) => Err(GlslError::codegen("Case labels not supported")),
     }
 }
-

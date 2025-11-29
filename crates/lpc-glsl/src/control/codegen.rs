@@ -1,6 +1,12 @@
 //! Code generation for GLSL control flow constructs.
 
-use alloc::{collections::BTreeMap, collections::BTreeSet, format, string::String, vec, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::String,
+    vec,
+    vec::Vec,
+};
 
 use glsl::syntax::{IterationStatement, JumpStatement, SelectionRestStatement, SelectionStatement};
 use lpc_lpir::{BlockEntity, Type, Value};
@@ -128,7 +134,8 @@ pub fn generate_selection_statement(
 
             // Set phi parameter types in block data
             if !phi_params.is_empty() {
-                if let Some(block_data) = ctx.builder_mut().function_mut().block_data_mut(merge_block)
+                if let Some(block_data) =
+                    ctx.builder_mut().function_mut().block_data_mut(merge_block)
                 {
                     block_data.param_types = phi_param_types.clone();
                 }
@@ -136,19 +143,37 @@ pub fn generate_selection_statement(
 
             if !true_ends_with_return_or_halt {
                 // Collect values from true branch for phi nodes
+                // Use SSABuilder to get values at the jump source block to ensure dominance
                 let mut true_values = Vec::new();
+                let jump_source_block = if true_end_block != true_block {
+                    true_end_block
+                } else {
+                    true_block
+                };
                 for var_name in &phi_var_names {
-                    if let Some(val) = true_end_vars.get(var_name) {
-                        true_values.push(*val);
+                    // Try to get a dominating value first (if dominance is computed)
+                    let val = if let Some(dom_val) = ctx
+                        .ssa_builder_mut()
+                        .get_dominating_value(var_name, jump_source_block)
+                    {
+                        // Found a value that dominates - use it
+                        dom_val
+                    } else if let Some(val) = true_end_vars.get(var_name) {
+                        // Fallback: use value from variables map
+                        *val
                     } else if let Some(val) = pre_if_vars.get(var_name) {
                         // Variable wasn't modified in true branch, use pre-if value
-                        true_values.push(*val);
+                        *val
                     } else {
                         return Err(GlslError::codegen(format!(
                             "Variable '{}' not found for phi node",
                             var_name
                         )));
-                    }
+                    };
+                    // Record this value in SSABuilder at the jump source block
+                    ctx.ssa_builder_mut()
+                        .record_def(var_name, jump_source_block, val);
+                    true_values.push(val);
                 }
 
                 // Need to jump to merge block from wherever we ended up
@@ -173,17 +198,29 @@ pub fn generate_selection_statement(
                 }
             }
 
-            // Collect values from false branch for phi nodes - use pre-if state
+            // Collect values from false branch for phi nodes
+            // Use the value from pre-if vars (false branch is empty, so no changes)
             let mut false_values = Vec::new();
             for var_name in &phi_var_names {
-                if let Some(val) = pre_if_vars.get(var_name) {
-                    false_values.push(*val);
+                // Try to get a dominating value first (if dominance is computed)
+                let val = if let Some(dom_val) = ctx
+                    .ssa_builder_mut()
+                    .get_dominating_value(var_name, false_block)
+                {
+                    // Found a value that dominates - use it
+                    dom_val
+                } else if let Some(val) = pre_if_vars.get(var_name) {
+                    // Fallback: use pre-if value (false branch is empty)
+                    *val
                 } else {
                     return Err(GlslError::codegen(format!(
                         "Variable '{}' not found for phi node",
                         var_name
                     )));
-                }
+                };
+                // Record this value in SSABuilder at the false block
+                ctx.ssa_builder_mut().record_def(var_name, false_block, val);
+                false_values.push(val);
             }
 
             // False branch is empty - jump directly to merge block
@@ -197,9 +234,13 @@ pub fn generate_selection_statement(
             drop(false_block_builder);
 
             // Update variables map to use phi parameters
+            // Also record phi parameters in SSABuilder as definitions in the merge block
             for (var_name, phi_idx) in &var_to_phi_idx {
-                ctx.variables_mut()
-                    .insert(var_name.clone(), phi_params[*phi_idx]);
+                let phi_value = phi_params[*phi_idx];
+                ctx.variables_mut().insert(var_name.clone(), phi_value);
+                // Record phi parameter as a definition in the merge block
+                ctx.ssa_builder_mut()
+                    .record_def(var_name, merge_block, phi_value);
             }
 
             // Continue in merge block
@@ -308,13 +349,32 @@ pub fn generate_selection_statement(
 
                 if !true_ends_with_return_or_halt {
                     // Collect values from true branch for phi nodes
+                    // Use SSABuilder to get values at the jump source block to ensure dominance
                     let mut true_values = Vec::new();
+                    let jump_source_block = if true_end_block != true_block {
+                        true_end_block
+                    } else {
+                        true_block
+                    };
                     for var_name in &phi_var_names {
-                        if let Some(val) = true_end_vars.get(var_name) {
-                            true_values.push(*val);
+                        // Get value defined at the jump source block (for phi node)
+                        // First try SSABuilder to get value defined in this block
+                        let val = if let Some(val) = ctx
+                            .ssa_builder_mut()
+                            .get_value_in_block(var_name, jump_source_block)
+                        {
+                            Some(val)
+                        } else if let Some(val) = true_end_vars.get(var_name) {
+                            // Fallback: use value from variables map
+                            Some(*val)
                         } else if let Some(val) = pre_if_vars.get(var_name) {
                             // Variable wasn't modified in true branch, use pre-if value
-                            true_values.push(*val);
+                            Some(*val)
+                        } else {
+                            None
+                        };
+                        if let Some(val) = val {
+                            true_values.push(val);
                         } else {
                             return Err(GlslError::codegen(format!(
                                 "Variable '{}' not found for phi node",
@@ -345,25 +405,37 @@ pub fn generate_selection_statement(
 
                 if !false_ends_with_return_or_halt {
                     // Collect values from false branch for phi nodes
+                    // Use SSABuilder to get values at the jump source block to ensure dominance
                     let mut false_values = Vec::new();
+                    let jump_source_block = if false_end_block != false_block {
+                        false_end_block
+                    } else {
+                        false_block
+                    };
                     for var_name in &phi_var_names {
-                        if let Some(val) = false_end_vars.get(var_name) {
-                            false_values.push(*val);
+                        // Use the value from the variables map at the end of the branch
+                        let val = if let Some(val) = false_end_vars.get(var_name) {
+                            *val
                         } else if let Some(val) = pre_if_vars.get(var_name) {
                             // Variable wasn't modified in false branch, use pre-if value
-                            false_values.push(*val);
+                            *val
                         } else {
                             return Err(GlslError::codegen(format!(
                                 "Variable '{}' not found for phi node",
                                 var_name
                             )));
-                        }
+                        };
+                        // Record this value in SSABuilder at the jump source block
+                        ctx.ssa_builder_mut()
+                            .record_def(var_name, jump_source_block, val);
+                        false_values.push(val);
                     }
 
                     // Need to jump to merge block from wherever we ended up
                     if false_end_block != false_block {
                         ctx.restore_variables(false_end_vars.clone());
-                        let mut end_block_builder = ctx.builder_mut().block_builder(false_end_block);
+                        let mut end_block_builder =
+                            ctx.builder_mut().block_builder(false_end_block);
                         if phi_params.is_empty() {
                             end_block_builder.jump(merge_block, &Vec::new());
                         } else {
@@ -381,9 +453,13 @@ pub fn generate_selection_statement(
                 }
 
                 // Update variables map to use phi parameters
+                // Also record phi parameters in SSABuilder as definitions in the merge block
                 for (var_name, phi_idx) in &var_to_phi_idx {
-                    ctx.variables_mut()
-                        .insert(var_name.clone(), phi_params[*phi_idx]);
+                    let phi_value = phi_params[*phi_idx];
+                    ctx.variables_mut().insert(var_name.clone(), phi_value);
+                    // Record phi parameter as a definition in the merge block
+                    ctx.ssa_builder_mut()
+                        .record_def(var_name, merge_block, phi_value);
                 }
 
                 // Continue in merge block
@@ -426,7 +502,8 @@ pub fn generate_iteration_statement(
             for var_name in &cond_vars {
                 if let Some(initial_val) = pre_loop_vars.get(var_name) {
                     // Get the type of the initial value
-                    let var_type = ctx.builder_mut()
+                    let var_type = ctx
+                        .builder_mut()
                         .function_mut()
                         .dfg
                         .value_type(*initial_val)
@@ -465,9 +542,13 @@ pub fn generate_iteration_statement(
             }
 
             // Update variables map to use phi parameters
+            // Also record phi parameters in SSABuilder as definitions in the loop header
             for (var_name, phi_idx) in &var_to_phi_idx {
-                ctx.variables_mut()
-                    .insert(var_name.clone(), phi_params[*phi_idx]);
+                let phi_value = phi_params[*phi_idx];
+                ctx.variables_mut().insert(var_name.clone(), phi_value);
+                // Record phi parameter as a definition in the loop header
+                ctx.ssa_builder_mut()
+                    .record_def(var_name, loop_header, phi_value);
             }
 
             // Jump from entry to loop header with initial values
@@ -497,13 +578,7 @@ pub fn generate_iteration_statement(
 
             // Branch: if condition, go to body, else exit
             let mut loop_header_builder = ctx.builder_mut().block_builder(loop_header);
-            loop_header_builder.br(
-                cond_value,
-                body_block,
-                &Vec::new(),
-                exit_block,
-                &Vec::new(),
-            );
+            loop_header_builder.br(cond_value, body_block, &Vec::new(), exit_block, &Vec::new());
             drop(loop_header_builder);
 
             // Generate body
@@ -565,7 +640,8 @@ pub fn generate_iteration_statement(
             for var_name in &cond_vars {
                 if let Some(initial_val) = pre_loop_vars.get(var_name) {
                     // Get the type of the initial value
-                    let var_type = ctx.builder_mut()
+                    let var_type = ctx
+                        .builder_mut()
                         .function_mut()
                         .dfg
                         .value_type(*initial_val)
@@ -596,16 +672,21 @@ pub fn generate_iteration_statement(
 
             // Set phi parameter types in block data
             if !phi_params.is_empty() {
-                if let Some(block_data) = ctx.builder_mut().function_mut().block_data_mut(body_block)
+                if let Some(block_data) =
+                    ctx.builder_mut().function_mut().block_data_mut(body_block)
                 {
                     block_data.param_types = phi_param_types.clone();
                 }
             }
 
             // Update variables map to use phi parameters
+            // Also record phi parameters in SSABuilder as definitions in the body block
             for (var_name, phi_idx) in &var_to_phi_idx {
-                ctx.variables_mut()
-                    .insert(var_name.clone(), phi_params[*phi_idx]);
+                let phi_value = phi_params[*phi_idx];
+                ctx.variables_mut().insert(var_name.clone(), phi_value);
+                // Record phi parameter as a definition in the body block
+                ctx.ssa_builder_mut()
+                    .record_def(var_name, body_block, phi_value);
             }
 
             // Collect initial values for phi nodes
@@ -744,7 +825,8 @@ pub fn generate_iteration_statement(
             // Now get types (need mutable access to builder)
             let mut var_info: Vec<(String, Value, Type)> = Vec::new();
             for (var_name, initial_val) in &var_values {
-                let var_type = ctx.builder_mut()
+                let var_type = ctx
+                    .builder_mut()
                     .function_mut()
                     .dfg
                     .value_type(*initial_val)
@@ -777,16 +859,21 @@ pub fn generate_iteration_statement(
 
             // Set phi parameter types in block data
             if !phi_params.is_empty() {
-                if let Some(block_data) = ctx.builder_mut().function_mut().block_data_mut(cond_block)
+                if let Some(block_data) =
+                    ctx.builder_mut().function_mut().block_data_mut(cond_block)
                 {
                     block_data.param_types = phi_param_types.clone();
                 }
             }
 
             // Update variables map to use phi parameters
+            // Also record phi parameters in SSABuilder as definitions in the condition block
             for (var_name, phi_idx) in &var_to_phi_idx {
-                ctx.variables_mut()
-                    .insert(var_name.clone(), phi_params[*phi_idx]);
+                let phi_value = phi_params[*phi_idx];
+                ctx.variables_mut().insert(var_name.clone(), phi_value);
+                // Record phi parameter as a definition in the condition block
+                ctx.ssa_builder_mut()
+                    .record_def(var_name, cond_block, phi_value);
             }
 
             // Collect initial values for phi nodes

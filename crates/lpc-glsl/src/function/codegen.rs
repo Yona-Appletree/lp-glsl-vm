@@ -1,11 +1,19 @@
 //! Code generation for function-level constructs.
 
-use alloc::{boxed::Box, collections::BTreeMap, collections::BTreeSet, format, string::String, vec, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::String,
+    vec,
+    vec::Vec,
+};
 
 use glsl::syntax::FunctionDefinition;
 use lpc_lpir::{BlockEntity, Function, FunctionBuilder, Opcode, Signature, Type, Value};
 
 use crate::{
+    codegen::{CodeGenBuilder, LoopStack, SSABuilder, ScopeStack},
     decl::codegen::generate_declaration,
     error::{GlslError, GlslResult},
     expr::codegen::generate_expr,
@@ -30,6 +38,16 @@ pub trait CodeGenContext {
     fn clone_variables(&self) -> BTreeMap<String, Value>;
     /// Restore variables map from a clone.
     fn restore_variables(&mut self, vars: BTreeMap<String, Value>);
+
+    // New methods for accessing new abstractions
+    /// Get a CodeGenBuilder for the current block.
+    fn codegen_builder(&mut self) -> GlslResult<CodeGenBuilder>;
+    /// Get the SSA builder.
+    fn ssa_builder_mut(&mut self) -> &mut SSABuilder;
+    /// Get the loop stack.
+    fn loop_stack_mut(&mut self) -> &mut LoopStack;
+    /// Get the new scope stack.
+    fn scope_stack_new_mut(&mut self) -> &mut ScopeStack;
 }
 
 /// Code generator context.
@@ -45,7 +63,14 @@ pub struct CodeGen {
     /// Symbol table for function lookups
     symbols: SymbolTable,
     /// Scope stack: each entry is a set of variable names declared in that scope
+    /// (Legacy - will be replaced by scope_stack_new)
     scope_stack: Vec<BTreeSet<String>>,
+    /// New scope stack with RAII support
+    scope_stack_new: ScopeStack,
+    /// SSA builder for proper SSA construction
+    ssa_builder: SSABuilder,
+    /// Loop stack for tracking nested loops
+    loop_stack: LoopStack,
     /// Out/inout parameter tracking: variable name -> (address_param, type)
     out_inout_params: BTreeMap<String, (Value, GlslType)>,
 }
@@ -105,6 +130,46 @@ impl CodeGenContext for CodeGen {
     fn restore_variables(&mut self, vars: BTreeMap<String, Value>) {
         self.variables = vars;
     }
+
+    fn codegen_builder(&mut self) -> GlslResult<CodeGenBuilder> {
+        let block = self.current_block()?;
+        Ok(CodeGenBuilder::new(block, &mut self.builder))
+    }
+
+    fn ssa_builder_mut(&mut self) -> &mut SSABuilder {
+        &mut self.ssa_builder
+    }
+
+    fn loop_stack_mut(&mut self) -> &mut LoopStack {
+        &mut self.loop_stack
+    }
+
+    fn scope_stack_new_mut(&mut self) -> &mut ScopeStack {
+        &mut self.scope_stack_new
+    }
+}
+
+impl CodeGen {
+    /// Record a variable definition in the current block.
+    pub fn record_variable_def(&mut self, var: &str, value: Value) -> GlslResult<()> {
+        let block = self.current_block()?;
+        self.ssa_builder.record_def(var, block, value);
+        // Also maintain legacy tracking for backward compatibility
+        self.variables.insert(String::from(var), value);
+        Ok(())
+    }
+
+    /// Get a variable value using SSABuilder with fallback.
+    pub fn get_variable_value(&mut self, var: &str) -> GlslResult<Value> {
+        let block = self.current_block()?;
+        if let Some(value) = self.ssa_builder.get_value(var, block) {
+            Ok(value)
+        } else if let Some(value) = self.variables.get(var) {
+            Ok(*value)
+        } else {
+            Err(GlslError::codegen(format!("Undefined variable '{}'", var)))
+        }
+    }
 }
 
 impl CodeGen {
@@ -117,6 +182,9 @@ impl CodeGen {
             variables: BTreeMap::new(),
             symbols: SymbolTable::new(),
             scope_stack: Vec::new(),
+            scope_stack_new: ScopeStack::new(),
+            ssa_builder: SSABuilder::new(),
+            loop_stack: LoopStack::new(),
             out_inout_params: BTreeMap::new(),
         }
     }
@@ -233,6 +301,12 @@ impl CodeGen {
         let body_stmt = glsl::syntax::Statement::Compound(Box::new(func_def.statement.clone()));
         generate_statement(self, &body_stmt)?;
 
+        // Compute dominance tree for SSABuilder (for dominance-aware value lookup)
+        // This allows SSABuilder to find values that dominate merge points
+        // We can do this during codegen now that FunctionBuilder exposes function()
+        let function = self.builder.function();
+        self.ssa_builder.compute_dominance(function);
+
         // Check if function ends with a return statement
         // If not, add an implicit return (required for LPIR)
         let current_block = self.current_block()?;
@@ -269,9 +343,10 @@ impl CodeGen {
             GlslType::Int | GlslType::Bool => {
                 block_builder.iconst(value, 0);
             }
+            GlslType::Float => {
+                block_builder.fconst(value, 0.0);
+            }
         }
         Ok(value)
     }
-
 }
-

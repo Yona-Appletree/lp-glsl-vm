@@ -5,7 +5,9 @@ use alloc::{boxed::Box, vec::Vec};
 use glsl::syntax::{CompoundStatement, JumpStatement, SimpleStatement, Statement};
 
 use crate::{
-    control::typecheck::{type_check_iteration_statement, type_check_jump_statement, type_check_selection_statement},
+    control::typecheck::{
+        type_check_iteration_statement, type_check_jump_statement, type_check_selection_statement,
+    },
     decl::typecheck::type_check_declaration,
     error::{GlslError, GlslResult},
     expr::typecheck::type_check_expr,
@@ -23,9 +25,7 @@ pub fn type_check_statement(
     expected_return: Option<GlslType>,
 ) -> GlslResult<()> {
     match stmt {
-        Statement::Simple(simple) => {
-            type_check_simple_statement(symbols, simple, expected_return)
-        }
+        Statement::Simple(simple) => type_check_simple_statement(symbols, simple, expected_return),
         Statement::Compound(compound) => {
             type_check_compound_statement(symbols, compound, expected_return)
         }
@@ -74,7 +74,11 @@ pub fn type_check_statement_returns(
             match simple.as_ref() {
                 SimpleStatement::Jump(JumpStatement::Return(_)) => Ok(true),
                 SimpleStatement::Selection(sel) => {
-                    crate::control::typecheck::selection_statement_returns(symbols, sel, expected_return)
+                    crate::control::typecheck::selection_statement_returns(
+                        symbols,
+                        sel,
+                        expected_return,
+                    )
                 }
                 _ => Ok(false),
             }
@@ -137,9 +141,6 @@ pub fn type_check_simple_statement(
         }
         SimpleStatement::Jump(jump) => type_check_jump_statement(symbols, jump, expected_return),
         SimpleStatement::Switch(_) => Err(GlslError::type_error("Switch not supported")),
-        SimpleStatement::CaseLabel(_) => {
-            Err(GlslError::type_error("Case labels not supported"))
-        }
+        SimpleStatement::CaseLabel(_) => Err(GlslError::type_error("Case labels not supported")),
     }
 }
-

@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+mod codegen;
 mod control;
 mod decl;
 mod error;
@@ -20,8 +21,10 @@ mod types;
 mod util;
 
 pub use error::{GlslError, GlslResult};
-pub use function::codegen::CodeGen;
-pub use function::typecheck::{extract_function_signature, TypeChecker};
+pub use function::{
+    codegen::CodeGen,
+    typecheck::{extract_function_signature, TypeChecker},
+};
 pub use parser::{parse_glsl, FunctionInfo};
 pub use symbols::{FunctionSignature, Parameter, ParameterQualifier, SymbolTable, Variable};
 pub use types::GlslType;

@@ -74,4 +74,3 @@ fn type_check_initializer(
         }
     }
 }
-

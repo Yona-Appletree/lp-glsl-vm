@@ -2,7 +2,9 @@
 
 use alloc::{collections::BTreeSet, string::String};
 
-use glsl::syntax::{Expr, ForInitStatement, IterationStatement, SelectionRestStatement, SimpleStatement, Statement};
+use glsl::syntax::{
+    Expr, ForInitStatement, IterationStatement, SelectionRestStatement, SimpleStatement, Statement,
+};
 
 /// Find all variable names referenced in an expression.
 pub fn find_variable_references(expr: &Expr) -> BTreeSet<String> {
@@ -128,4 +130,3 @@ pub fn find_variable_references_in_statement(stmt: &Statement) -> BTreeSet<Strin
     }
     vars
 }
-
