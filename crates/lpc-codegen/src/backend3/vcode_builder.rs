@@ -3,12 +3,13 @@
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
 use lpc_lpir::RelSourceLoc;
+use regalloc2::{Operand, OperandKind as RegallocOperandKind, OperandPos, PRegSet, RegClass, VReg};
 
 use crate::backend3::{
-    types::{BlockIndex, InsnIndex, Range, Ranges, VReg},
+    types::{BlockIndex, InsnIndex, Range, Ranges, VReg as OurVReg},
     vcode::{
-        BlockLoweringOrder, BlockMetadata, Callee, Constant, MachInst, RelocKind, VCode,
-        VCodeConstants, VCodeReloc,
+        BlockLoweringOrder, BlockMetadata, Callee, Constant, MachInst, OperandConstraint,
+        OperandKind, RegClass as OurRegClass, RelocKind, VCode, VCodeConstants, VCodeReloc,
     },
 };
 
@@ -18,8 +19,8 @@ pub struct VCodeBuilder<I: MachInst> {
     insts: Vec<I>,
     /// Source locations (parallel to insts)
     srclocs: Vec<RelSourceLoc>,
-    /// Constants
-    constants: BTreeMap<VReg, Constant>,
+    /// Constants (indexed by our internal VReg)
+    constants: BTreeMap<OurVReg, Constant>,
     /// Relocations
     relocations: Vec<VCodeReloc>,
     /// Block metadata
@@ -30,11 +31,11 @@ pub struct VCodeBuilder<I: MachInst> {
     current_block: Option<BlockIndex>,
     /// Block instruction ranges (start index for each block)
     block_starts: Vec<usize>,
-    /// Block parameter VRegs
+    /// Block parameter VRegs (stored as regalloc2::VReg)
     block_params: Vec<VReg>,
     /// Block parameter ranges
     block_params_range: Ranges,
-    /// Branch block arguments
+    /// Branch block arguments (stored as regalloc2::VReg)
     branch_block_args: Vec<VReg>,
     /// Branch block arg ranges
     branch_block_arg_range: Ranges,
@@ -66,8 +67,11 @@ impl<I: MachInst> VCodeBuilder<I> {
     }
 
     /// Allocate a new virtual register
-    pub fn alloc_vreg(&mut self) -> VReg {
-        let vreg = VReg::new(self.next_vreg);
+    ///
+    /// Returns our internal VReg type, which will be converted to regalloc2::VReg
+    /// during operand collection or when storing in block_params/branch_args.
+    pub fn alloc_vreg(&mut self) -> OurVReg {
+        let vreg = OurVReg::new(self.next_vreg);
         self.next_vreg += 1;
         vreg
     }
@@ -79,7 +83,7 @@ impl<I: MachInst> VCodeBuilder<I> {
     }
 
     /// Record a constant for a virtual register
-    pub fn record_constant(&mut self, vreg: VReg, constant: Constant) {
+    pub fn record_constant(&mut self, vreg: OurVReg, constant: Constant) {
         self.constants.insert(vreg, constant);
     }
 
@@ -93,14 +97,22 @@ impl<I: MachInst> VCodeBuilder<I> {
     }
 
     /// Start a new block
-    pub fn start_block(&mut self, block_idx: BlockIndex, params: Vec<VReg>) {
+    ///
+    /// `params` are our internal VRegs, which will be converted to regalloc2::VReg
+    /// when stored. Default register class is Int (GPR) for RISC-V 32.
+    pub fn start_block(&mut self, block_idx: BlockIndex, params: Vec<OurVReg>) {
         self.current_block = Some(block_idx);
         let start_inst = self.insts.len();
         self.block_starts.push(start_inst);
 
-        // Record block parameters
+        // Record block parameters, converting OurVReg to regalloc2::VReg
         let param_start = self.block_params.len();
-        self.block_params.extend(params.iter().copied());
+        for vreg in params {
+            // Convert our VReg to regalloc2::VReg
+            // Default to Int register class (GPR) for RISC-V 32
+            let regalloc_vreg = VReg::new(vreg.index() as usize, RegClass::Int);
+            self.block_params.push(regalloc_vreg);
+        }
         let param_end = self.block_params.len();
         self.block_params_range
             .push(Range::new(param_start, param_end));
@@ -117,16 +129,17 @@ impl<I: MachInst> VCodeBuilder<I> {
     /// for each successor of the block that was just ended.
     ///
     /// `block_idx` is the BlockIndex of the block these branch args belong to.
+    /// `args_per_succ` contains our internal VRegs, which will be converted to regalloc2::VReg.
     pub fn add_branch_args(
         &mut self,
         block_idx: BlockIndex,
         succs: &[BlockIndex],
-        args_per_succ: &[Vec<VReg>],
+        args_per_succ: &[Vec<OurVReg>],
     ) {
         assert_eq!(succs.len(), args_per_succ.len());
 
         // Ensure branch_block_arg_succ_range is large enough
-        let block_idx_usize = block_idx.index() as usize;
+        let block_idx_usize = block_idx.index();
         while self.branch_block_arg_succ_range.len() <= block_idx_usize {
             // Push empty range for blocks without branch args
             self.branch_block_arg_succ_range.push(Range::new(0, 0));
@@ -134,19 +147,25 @@ impl<I: MachInst> VCodeBuilder<I> {
 
         // Record where we start adding ranges for this block's successors
         let succ_start = self.branch_block_arg_range.len();
-        
-        // Add argument ranges for each successor
+
+        // Add argument ranges for each successor, converting OurVReg to regalloc2::VReg
         for args in args_per_succ {
             let arg_start = self.branch_block_args.len();
-            self.branch_block_args.extend(args.iter().copied());
+            for vreg in args {
+                // Convert our VReg to regalloc2::VReg
+                // Default to Int register class (GPR) for RISC-V 32
+                let regalloc_vreg = VReg::new(vreg.index() as usize, RegClass::Int);
+                self.branch_block_args.push(regalloc_vreg);
+            }
             let arg_end = self.branch_block_args.len();
             self.branch_block_arg_range
                 .push(Range::new(arg_start, arg_end));
         }
-        
+
         // Record the range in branch_block_arg_range that corresponds to this block's successors
         let succ_end = self.branch_block_arg_range.len();
-        self.branch_block_arg_succ_range.set(block_idx_usize, Range::new(succ_start, succ_end));
+        self.branch_block_arg_succ_range
+            .set(block_idx_usize, Range::new(succ_start, succ_end));
     }
 
     /// Add block metadata
@@ -173,7 +192,7 @@ impl<I: MachInst> VCodeBuilder<I> {
         srclocs: &[RelSourceLoc],
         block_ranges: &Ranges,
         operand_ranges: &Ranges,
-        operands: &[crate::backend3::vcode::Operand],
+        operands: &[Operand],
         block_succ_range: &Ranges,
         block_succs: &[BlockIndex],
         block_pred_range: &Ranges,
@@ -216,7 +235,7 @@ impl<I: MachInst> VCodeBuilder<I> {
 
         // Check entry block is valid
         assert!(
-            entry.index() < block_ranges.len() as u32,
+            entry.index() < block_ranges.len(),
             "Entry block index {} must be less than block count {}",
             entry.index(),
             block_ranges.len()
@@ -370,46 +389,48 @@ impl<I: MachInst> VCodeBuilder<I> {
                     let arg_succ_start = arg_succ_range.start;
                     let arg_succ_end = arg_succ_range.end;
 
-                // Each successor should have a corresponding argument range
-                assert_eq!(
-                    arg_succ_end - arg_succ_start,
-                    succs.len(),
-                    "Block {}: branch argument successor range count {} must match successor \
-                     count {}",
-                    block_idx,
-                    arg_succ_end - arg_succ_start,
-                    succs.len()
-                );
+                    // Each successor should have a corresponding argument range
+                    assert_eq!(
+                        arg_succ_end - arg_succ_start,
+                        succs.len(),
+                        "Block {}: branch argument successor range count {} must match successor \
+                         count {}",
+                        block_idx,
+                        arg_succ_end - arg_succ_start,
+                        succs.len()
+                    );
 
-                // Check each successor's arguments match its parameter count
-                for (succ_idx, &succ_block) in succs.iter().enumerate() {
-                    let succ_block_idx = succ_block.index() as usize;
+                    // Check each successor's arguments match its parameter count
+                    for (succ_idx, &succ_block) in succs.iter().enumerate() {
+                        let succ_block_idx = succ_block.index() as usize;
 
-                    // Get argument range for this successor
-                    if let Some(arg_range) =
-                        branch_block_arg_range.get(arg_succ_start + succ_idx)
-                    {
-                        let arg_count = arg_range.len();
+                        // Get argument range for this successor
+                        if let Some(arg_range) =
+                            branch_block_arg_range.get(arg_succ_start + succ_idx)
+                        {
+                            let arg_count = arg_range.len();
 
-                        // Get parameter count for target block
-                        if let Some(param_range) = block_params_range.get(succ_block_idx) {
-                            let param_count = param_range.len();
+                            // Get parameter count for target block
+                            if let Some(param_range) = block_params_range.get(succ_block_idx) {
+                                let param_count = param_range.len();
 
-                            assert_eq!(
-                                arg_count, param_count,
-                                "Block {} -> Block {}: branch argument count {} must match \
-                                 target block parameter count {}",
-                                block_idx, succ_block_idx, arg_count, param_count
-                            );
+                                assert_eq!(
+                                    arg_count, param_count,
+                                    "Block {} -> Block {}: branch argument count {} must match \
+                                     target block parameter count {}",
+                                    block_idx, succ_block_idx, arg_count, param_count
+                                );
+                            }
                         }
                     }
-                }
                 } else {
                     // Block has successors but no branch args recorded - this is an error
                     // It means a Br/Jump instruction didn't record branch args
                     panic!(
-                        "Block {} has {} successors but no branch arguments recorded (missing Br/Jump branch args)",
-                        block_idx, succs.len()
+                        "Block {} has {} successors but no branch arguments recorded (missing \
+                         Br/Jump branch args)",
+                        block_idx,
+                        succs.len()
                     );
                 }
             }
@@ -420,7 +441,7 @@ impl<I: MachInst> VCodeBuilder<I> {
     fn validate_branch_targets(block_succs: &[BlockIndex], num_blocks: usize) {
         for &target in block_succs {
             assert!(
-                target.index() < num_blocks as u32,
+                target.index() < num_blocks,
                 "Branch target block {} must be less than block count {}",
                 target.index(),
                 num_blocks
@@ -439,9 +460,9 @@ impl<I: MachInst> VCodeBuilder<I> {
     ) -> (Ranges, Vec<BlockIndex>) {
         // Step 1: Count how many times each block appears as a successor
         let mut starts = Vec::with_capacity(num_blocks);
-        starts.resize(num_blocks, 0u32);
+        starts.resize(num_blocks, 0usize);
         for succ in block_succs {
-            let idx = succ.index() as usize;
+            let idx = succ.index();
             if idx < starts.len() {
                 starts[idx] += 1;
             }
@@ -462,9 +483,9 @@ impl<I: MachInst> VCodeBuilder<I> {
         let mut block_preds = Vec::with_capacity(end);
         block_preds.resize(end, BlockIndex::new(0));
         for (pred_idx, range) in block_succ_range.iter().enumerate() {
-            let pred = BlockIndex::new(pred_idx as u32);
+            let pred = BlockIndex::new(pred_idx);
             for succ in &block_succs[range.start..range.end] {
-                let succ_idx = succ.index() as usize;
+                let succ_idx = succ.index();
                 if succ_idx < starts.len() {
                     let pos = &mut starts[succ_idx];
                     if (*pos as usize) < block_preds.len() {
@@ -481,55 +502,27 @@ impl<I: MachInst> VCodeBuilder<I> {
     /// Collect operands from all instructions
     ///
     /// This iterates over all instructions, calls `get_operands()` on each,
-    /// and builds flat arrays for regalloc2.
-    fn collect_operands(
-        insts: &[I],
-    ) -> (
-        Vec<crate::backend3::vcode::Operand>,
-        Ranges,
-        BTreeMap<InsnIndex, crate::backend3::vcode::PRegSet>,
-    ) {
-        use crate::backend3::vcode::{Operand, OperandKind, OperandVisitor};
+    /// and converts our internal types to regalloc2 types.
+    fn collect_operands(insts: &[I]) -> (Vec<Operand>, Ranges, BTreeMap<InsnIndex, PRegSet>) {
+        use crate::backend3::vcode::OperandVisitor;
 
         struct OperandCollector {
-            operands: Vec<Operand>,
+            operands: Vec<(OurVReg, OperandConstraint, OperandKind)>,
         }
 
         impl OperandVisitor for OperandCollector {
-            fn visit_use(
-                &mut self,
-                vreg: VReg,
-                constraint: crate::backend3::vcode::OperandConstraint,
-            ) {
-                self.operands.push(Operand {
-                    vreg,
-                    constraint,
-                    kind: OperandKind::Use,
-                });
+            fn visit_use(&mut self, vreg: OurVReg, constraint: OperandConstraint) {
+                self.operands.push((vreg, constraint, OperandKind::Use));
             }
 
-            fn visit_def(
-                &mut self,
-                vreg: VReg,
-                constraint: crate::backend3::vcode::OperandConstraint,
-            ) {
-                self.operands.push(Operand {
-                    vreg,
-                    constraint,
-                    kind: OperandKind::Def,
-                });
+            fn visit_def(&mut self, vreg: OurVReg, constraint: OperandConstraint) {
+                self.operands.push((vreg, constraint, OperandKind::Def));
             }
 
-            fn visit_mod(
-                &mut self,
-                vreg: VReg,
-                constraint: crate::backend3::vcode::OperandConstraint,
-            ) {
-                self.operands.push(Operand {
-                    vreg,
-                    constraint,
-                    kind: OperandKind::Mod,
-                });
+            fn visit_mod(&mut self, vreg: OurVReg, constraint: OperandConstraint) {
+                // regalloc2 doesn't support Mod, so we create separate Use and Def operands
+                self.operands.push((vreg, constraint, OperandKind::Use));
+                self.operands.push((vreg, constraint, OperandKind::Def));
             }
         }
 
@@ -546,15 +539,59 @@ impl<I: MachInst> VCodeBuilder<I> {
             let mut inst_clone = inst.clone();
             inst_clone.get_operands(&mut collector);
 
-            // Record operand range for this instruction
+            // Convert collected operands to regalloc2 types
             let start = operands.len();
-            operands.append(&mut collector.operands);
+            for (vreg, constraint, kind) in collector.operands {
+                // Determine register class from constraint or default to Int
+                let regclass = match constraint {
+                    OperandConstraint::RegClass(OurRegClass::Gpr) => RegClass::Int,
+                    OperandConstraint::RegClass(OurRegClass::Fpr) => RegClass::Float,
+                    _ => RegClass::Int, // Default to Int for RISC-V 32
+                };
+
+                // Convert our VReg to regalloc2::VReg
+                let regalloc_vreg = VReg::new(vreg.index() as usize, regclass);
+
+                // Convert our OperandConstraint to regalloc2::OperandConstraint
+                let regalloc_constraint = match constraint {
+                    OperandConstraint::Any => regalloc2::OperandConstraint::Any,
+                    OperandConstraint::Fixed(_reg) => {
+                        // TODO: Convert u32 to PReg properly for FixedReg
+                        // For now, use Any as placeholder
+                        regalloc2::OperandConstraint::Any
+                    }
+                    OperandConstraint::RegClass(_) => regalloc2::OperandConstraint::Reg,
+                };
+
+                // Convert our OperandKind to regalloc2::OperandKind
+                let regalloc_kind = match kind {
+                    OperandKind::Use => RegallocOperandKind::Use,
+                    OperandKind::Def => RegallocOperandKind::Def,
+                    OperandKind::Mod => {
+                        // Should not happen here since Mod is split above
+                        RegallocOperandKind::Use
+                    }
+                };
+
+                // Create regalloc2::Operand
+                let regalloc_operand = Operand::new(
+                    regalloc_vreg,
+                    regalloc_constraint,
+                    regalloc_kind,
+                    OperandPos::Early, // Default to Early position
+                );
+
+                operands.push(regalloc_operand);
+            }
             let end = operands.len();
             operand_ranges.push(Range::new(start, end));
 
-            // Collect clobbers
+            // Collect clobbers - convert our PRegSet to regalloc2::PRegSet
             if let Some(clobber_set) = inst_clone.get_clobbers() {
-                clobbers.insert(InsnIndex::new(idx as u32), clobber_set);
+                let mut regalloc_clobbers = PRegSet::empty();
+                // TODO: Properly convert BTreeSet<u32> to PRegSet
+                // For now, leave empty as placeholder
+                clobbers.insert(InsnIndex::new(idx), regalloc_clobbers);
             }
         }
 
@@ -608,7 +645,7 @@ impl<I: MachInst> VCodeBuilder<I> {
         // Build block metadata from block_order
         let mut block_metadata = Vec::new();
         for (idx, _lowered_block) in block_order.lowered_order.iter().enumerate() {
-            let block_idx = BlockIndex::new(idx as u32);
+            let block_idx = BlockIndex::new(idx);
             let cold = block_order.cold_blocks.contains(&block_idx);
             let indirect_target = block_order.indirect_targets.contains(&block_idx);
 
@@ -675,6 +712,7 @@ impl<I: MachInst> VCodeBuilder<I> {
             block_metadata,
             relocations: self.relocations,
             srclocs: self.srclocs,
+            num_vregs: self.next_vreg as usize,
         }
     }
 }

@@ -63,8 +63,9 @@ use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use core::fmt;
 
 use lpc_lpir::RelSourceLoc;
+use regalloc2::{Operand, VReg};
 
-use crate::backend3::types::{BlockIndex, InsnIndex, Ranges, VReg};
+use crate::backend3::types::{BlockIndex, InsnIndex, Ranges, VReg as OurVReg};
 
 /// Virtual-register code: machine instructions with virtual registers
 ///
@@ -76,8 +77,7 @@ pub struct VCode<I: MachInst> {
     pub insts: Vec<I>,
 
     /// Operands: flat array for regalloc2
-    /// Each operand has: (vreg, constraint, kind)
-    /// This will be populated during operand collection
+    /// This is populated during operand collection with regalloc2::Operand
     pub operands: Vec<Operand>,
 
     /// Operand ranges: per-instruction ranges in operands array
@@ -93,10 +93,10 @@ pub struct VCode<I: MachInst> {
     pub block_pred_range: Ranges,     // Per-block predecessor ranges
     pub block_preds: Vec<BlockIndex>, // Predecessors (flat array)
     pub block_params_range: Ranges,   // Per-block parameter ranges
-    pub block_params: Vec<VReg>,      // Block parameter VRegs (flat array)
+    pub block_params: Vec<VReg>,      // Block parameter VRegs (flat array, regalloc2::VReg)
 
     /// Branch arguments (values passed to blocks)
-    pub branch_block_args: Vec<VReg>,
+    pub branch_block_args: Vec<VReg>, // regalloc2::VReg
     pub branch_block_arg_range: Ranges,
     pub branch_block_arg_succ_range: Ranges,
 
@@ -128,18 +128,15 @@ pub struct VCode<I: MachInst> {
     /// Source locations for each instruction (for debugging)
     /// One RelSourceLoc per instruction, parallel to `insts` array
     pub srclocs: Vec<RelSourceLoc>,
+
+    /// Number of virtual registers allocated
+    /// This is the maximum VReg index + 1, used by regalloc2
+    pub num_vregs: usize,
 }
 
-/// Operand information for regalloc2
-#[derive(Debug, Clone)]
-pub struct Operand {
-    /// Virtual register
-    pub vreg: VReg,
-    /// Operand constraint (fixed, any, etc.)
-    pub constraint: OperandConstraint,
-    /// Operand kind (use, def, etc.)
-    pub kind: OperandKind,
-}
+// Note: We now use regalloc2::Operand directly instead of our own Operand struct
+// The conversion from our VReg/OperandConstraint/OperandKind happens during
+// operand collection in VCodeBuilder::collect_operands()
 
 /// Operand constraint for register allocation
 ///
@@ -151,7 +148,7 @@ pub struct Operand {
 /// ```rust,ignore
 /// # // Note: This is a conceptual example. In actual code, use:
 /// # // use lpc_codegen::backend3::vcode::{OperandConstraint, RegClass};
-/// 
+///
 /// // Any register is acceptable
 /// OperandConstraint::Any
 ///
@@ -220,9 +217,9 @@ pub trait PReg: Copy + Clone + PartialEq + Eq + core::hash::Hash + fmt::Debug {}
 
 /// Physical register set
 ///
-/// Note: For now, we use a generic representation. ISA-specific code will
-/// provide concrete implementations.
-pub type PRegSet = alloc::collections::BTreeSet<u32>; // Placeholder: will be ISA-specific
+/// We use regalloc2's PRegSet directly. During lowering, we use a placeholder
+/// (BTreeSet<u32>) which is converted to regalloc2::PRegSet during operand collection.
+pub type PRegSet = regalloc2::PRegSet;
 
 /// Register class: category of registers for an operand
 ///
@@ -292,8 +289,9 @@ pub struct Callee<ABI> {
 /// VCode constants
 #[derive(Debug, Clone)]
 pub struct VCodeConstants {
-    /// Constant values indexed by VReg
-    pub constants: BTreeMap<VReg, Constant>,
+    /// Constant values indexed by our VReg (used during lowering)
+    /// Note: This maps our internal VReg to constants, not regalloc2::VReg
+    pub constants: BTreeMap<OurVReg, Constant>,
 }
 
 /// Constant representation
@@ -338,6 +336,22 @@ pub enum RelocKind {
     Branch,
 }
 
+/// Terminator kind for machine instructions
+///
+/// This distinguishes between different types of terminator instructions,
+/// which is needed for control flow analysis during register allocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MachTerminator {
+    /// Return instruction (function exit)
+    Ret,
+    /// Return from call instruction
+    RetCall,
+    /// Branch instruction (conditional or unconditional)
+    Branch,
+    /// Not a terminator (normal instruction)
+    None,
+}
+
 /// MachInst trait: Machine instruction interface for regalloc2
 ///
 /// This trait must be implemented by ISA-specific machine instruction types.
@@ -363,18 +377,30 @@ pub trait MachInst: Clone + fmt::Debug {
     fn get_clobbers(&self) -> Option<PRegSet> {
         None
     }
+
+    /// Check if this instruction is a terminator and what kind
+    ///
+    /// Returns the terminator kind, or `MachTerminator::None` if this is
+    /// a normal instruction. This is used by regalloc2 for control flow analysis.
+    fn is_term(&self) -> MachTerminator {
+        MachTerminator::None
+    }
 }
 
 /// Operand visitor trait for collecting operands
+///
+/// This trait is used during lowering to collect operands from machine instructions.
+/// The visitor receives our internal VReg type and OperandConstraint, which are
+/// later converted to regalloc2 types during operand collection.
 pub trait OperandVisitor {
     /// Visit a use (read) operand
-    fn visit_use(&mut self, vreg: VReg, constraint: OperandConstraint);
+    fn visit_use(&mut self, vreg: OurVReg, constraint: OperandConstraint);
 
     /// Visit a def (write) operand
-    fn visit_def(&mut self, vreg: VReg, constraint: OperandConstraint);
+    fn visit_def(&mut self, vreg: OurVReg, constraint: OperandConstraint);
 
     /// Visit a mod (read-write) operand
-    fn visit_mod(&mut self, vreg: VReg, constraint: OperandConstraint);
+    fn visit_mod(&mut self, vreg: OurVReg, constraint: OperandConstraint);
 }
 
 impl<I: MachInst> VCode<I> {
@@ -410,6 +436,15 @@ impl<I: MachInst> VCode<I> {
             block_metadata: Vec::new(),
             relocations: Vec::new(),
             srclocs: Vec::new(),
+            num_vregs: 0,
         }
+    }
+
+    /// Get the number of virtual registers
+    ///
+    /// This returns the total number of VRegs allocated, which is needed
+    /// for regalloc2 to know the VReg index space.
+    pub fn num_vregs(&self) -> usize {
+        self.num_vregs
     }
 }

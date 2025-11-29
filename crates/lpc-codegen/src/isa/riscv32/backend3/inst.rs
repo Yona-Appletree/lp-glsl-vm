@@ -2,7 +2,7 @@
 
 use crate::backend3::{
     types::{VReg, Writable},
-    vcode::{MachInst, OperandConstraint, OperandVisitor, PRegSet},
+    vcode::{MachInst, MachTerminator, OperandConstraint, OperandVisitor, PRegSet},
 };
 
 /// RISC-V 32-bit machine instruction with virtual registers
@@ -264,6 +264,18 @@ impl MachInst for Riscv32MachInst {
         }
     }
 
+    fn is_term(&self) -> MachTerminator {
+        match self {
+            Riscv32MachInst::Return { .. } => MachTerminator::Ret,
+            Riscv32MachInst::Br { .. } | Riscv32MachInst::Jump => MachTerminator::Branch,
+            Riscv32MachInst::Trap { .. }
+            | Riscv32MachInst::Trapz { .. }
+            | Riscv32MachInst::Trapnz { .. }
+            | Riscv32MachInst::Ebreak => MachTerminator::Ret, // Traps terminate execution
+            _ => MachTerminator::None,
+        }
+    }
+
     /// Get clobbered registers (for function calls, etc.)
     ///
     /// Returns None if no explicit clobbers, or Some(set) if there are clobbers.
@@ -274,25 +286,9 @@ impl MachInst for Riscv32MachInst {
                 // Function calls clobber caller-saved registers
                 // RISC-V 32 calling convention (System V ABI):
                 // Caller-saved: t0-t6 (x5-x7, x28-x31), a0-a7 (x10-x17)
-                // Note: PRegSet is currently BTreeSet<u32> as a placeholder.
-                // When proper PRegSet is implemented (from regalloc2), this should
-                // return the actual caller-saved register set from the ABI.
-                use alloc::collections::BTreeSet;
-                let mut clobbers = BTreeSet::new();
-                // Placeholder: mark caller-saved registers
-                // t0-t6: x5-x7, x28-x31
-                clobbers.insert(5); // t0
-                clobbers.insert(6); // t1
-                clobbers.insert(7); // t2
-                clobbers.insert(28); // t3
-                clobbers.insert(29); // t4
-                clobbers.insert(30); // t5
-                clobbers.insert(31); // t6
-                                     // a0-a7: x10-x17
-                for i in 10..=17 {
-                    clobbers.insert(i);
-                }
-                Some(clobbers)
+                // TODO: Properly convert to regalloc2::PRegSet
+                // For now, return None - clobbers will be handled by ABI
+                None
             }
             _ => None,
         }

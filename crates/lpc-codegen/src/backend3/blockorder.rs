@@ -38,7 +38,7 @@ pub fn compute_block_order(
 
     // 2. Create edge blocks for critical edges
     let mut edge_blocks = BTreeMap::new();
-    let mut next_edge_block_idx = func.block_count() as u32;
+    let mut next_edge_block_idx = func.block_count();
     for (from, to, _succ_idx) in critical_edges {
         let edge_block_idx = BlockIndex::new(next_edge_block_idx);
         next_edge_block_idx += 1;
@@ -64,7 +64,7 @@ pub fn compute_block_order(
     for (idx, lowered_block) in lowered_order.iter().enumerate() {
         match lowered_block {
             LoweredBlock::Orig { block } => {
-                let lowered_idx = BlockIndex::new(idx as u32);
+                let lowered_idx = BlockIndex::new(idx);
                 block_to_lowered_index.insert(*block, lowered_idx);
             }
             LoweredBlock::Edge {
@@ -223,7 +223,7 @@ fn build_lowered_succs(
     for (idx, lowered_block) in lowered_order.iter().enumerate() {
         match lowered_block {
             LoweredBlock::Orig { block } => {
-                ir_to_lowered.insert(*block, BlockIndex::new(idx as u32));
+                ir_to_lowered.insert(*block, BlockIndex::new(idx));
             }
             LoweredBlock::Edge {
                 from: _,
@@ -242,7 +242,7 @@ fn build_lowered_succs(
         match lowered_block {
             LoweredBlock::Orig { block: _ } => {}
             LoweredBlock::Edge { from, to, succ_idx } => {
-                edge_to_lowered.insert((*from, *to, *succ_idx), BlockIndex::new(idx as u32));
+                edge_to_lowered.insert((*from, *to, *succ_idx), BlockIndex::new(idx));
             }
         }
     }
@@ -353,7 +353,7 @@ fn identify_cold_blocks(
             for (lowered_idx, lowered_block) in lowered_order.iter().enumerate() {
                 match lowered_block {
                     LoweredBlock::Orig { block: orig_block } if *orig_block == block => {
-                        cold_blocks.insert(BlockIndex::new(lowered_idx as u32));
+                        cold_blocks.insert(BlockIndex::new(lowered_idx));
                         break;
                     }
                     _ => {}

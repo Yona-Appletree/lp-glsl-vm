@@ -10,5 +10,6 @@ description = "RISC-V 32-bit instruction encoder"
 [dependencies]
 nom = { version = "7", default-features = false, features = ["alloc"] }
 lpc-lpir = { path = "../lpc-lpir" }
+regalloc2 = { version = "0.8", default-features = false }
 
 [dev-dependencies]

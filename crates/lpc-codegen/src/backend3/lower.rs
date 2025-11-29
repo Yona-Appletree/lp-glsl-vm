@@ -110,7 +110,7 @@ impl<I: MachInst> Lower<I> {
                 } => {
                     // Emit phi moves for edge block
                     // Edge blocks use their position in lowered_order as their BlockIndex
-                    let edge_block_idx = BlockIndex::new(idx as u32);
+                    let edge_block_idx = BlockIndex::new(idx);
                     self.lower_edge_block(backend, edge_block_idx, *from, *to, block_order, idx);
                 }
             }

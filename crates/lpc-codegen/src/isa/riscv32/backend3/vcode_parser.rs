@@ -46,7 +46,7 @@ fn parse_block_index(input: &str) -> IResult<&str, BlockIndex> {
             let num = s[5..]
                 .parse::<u32>()
                 .map_err(|_| format!("Invalid block number: {}", s))?;
-            Ok(BlockIndex::new(num))
+            Ok(BlockIndex::new(num as usize))
         },
     )(input)
 }
@@ -487,7 +487,7 @@ fn build_vcode(
 
                 // Add to block order
                 block_order.lowered_order.push(LoweredBlock::Orig {
-                    block: lpc_lpir::BlockEntity::new(block_idx.index()),
+                    block: lpc_lpir::BlockEntity::new(block_idx.index() as u32),
                 });
                 block_order.lowered_succs.push(succs);
             }
@@ -498,7 +498,7 @@ fn build_vcode(
                 branches,
             } => {
                 // Edge blocks are handled similarly but marked as edge blocks
-                let edge_block_idx = BlockIndex::new(block_order.lowered_order.len() as u32);
+                let edge_block_idx = BlockIndex::new(block_order.lowered_order.len());
                 builder.start_block(edge_block_idx, Vec::new());
 
                 let srcloc = RelSourceLoc::new(0);
@@ -518,8 +518,8 @@ fn build_vcode(
                 builder.add_branch_args(edge_block_idx, &succs, &args_per_succ);
 
                 block_order.lowered_order.push(LoweredBlock::Edge {
-                    from: lpc_lpir::BlockEntity::new(from.index()),
-                    to: lpc_lpir::BlockEntity::new(to.index()),
+                    from: lpc_lpir::BlockEntity::new(from.index() as u32),
+                    to: lpc_lpir::BlockEntity::new(to.index() as u32),
                     succ_idx: 0, // Simplified - would need proper tracking
                 });
                 block_order.lowered_succs.push(succs);

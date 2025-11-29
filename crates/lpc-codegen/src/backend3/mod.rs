@@ -6,6 +6,7 @@
 pub mod blockorder;
 pub mod constants;
 pub mod lower;
+pub mod regalloc;
 pub mod reloc;
 pub mod types;
 pub mod vcode;

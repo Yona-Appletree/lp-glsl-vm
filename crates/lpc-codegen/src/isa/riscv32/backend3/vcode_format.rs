@@ -5,7 +5,7 @@ use core::fmt;
 
 use crate::{
     backend3::{
-        types::{BlockIndex, Range, VReg},
+        types::{BlockIndex, Range},
         vcode::{LoweredBlock, VCode},
     },
     isa::riscv32::backend3::inst::Riscv32MachInst,
@@ -124,7 +124,7 @@ impl fmt::Display for Riscv32MachInst {
 impl VCode<Riscv32MachInst> {
     /// Format a BlockIndex with edge block information if applicable
     fn format_block_index(&self, block_idx: BlockIndex) -> alloc::string::String {
-        let idx = block_idx.index() as usize;
+        let idx = block_idx.index();
         if idx < self.block_order.lowered_order.len() {
             match &self.block_order.lowered_order[idx] {
                 LoweredBlock::Edge { from, to, .. } => {
@@ -149,7 +149,7 @@ impl fmt::Display for VCode<Riscv32MachInst> {
 
         // Iterate through blocks in lowering order
         for (block_idx, lowered_block) in self.block_order.lowered_order.iter().enumerate() {
-            let block_index = BlockIndex::new(block_idx as u32);
+            let block_index = BlockIndex::new(block_idx);
 
             // Format block header
             match lowered_block {
@@ -159,13 +159,13 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                         .block_params_range
                         .get(block_idx)
                         .unwrap_or_else(|| Range::new(0, 0));
-                    let params: Vec<VReg> =
+                    let params: Vec<regalloc2::VReg> =
                         self.block_params[param_range.start..param_range.end].to_vec();
 
                     if params.is_empty() {
-                        write!(f, "  {}:\n", block_index)?;
+                        write!(f, "  block{}:\n", block_index.index())?;
                     } else {
-                        write!(f, "  {}(", block_index)?;
+                        write!(f, "  block{}(", block_index.index())?;
                         for (i, param) in params.iter().enumerate() {
                             if i > 0 {
                                 write!(f, ", ")?;
@@ -254,7 +254,7 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                             None
                         };
 
-                        let args: Vec<VReg> = if let Some(arg_range) = arg_range {
+                        let args: Vec<regalloc2::VReg> = if let Some(arg_range) = arg_range {
                             self.branch_block_args[arg_range.start..arg_range.end].to_vec()
                         } else {
                             Vec::new()
@@ -290,7 +290,7 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                         None
                     };
 
-                    let args: Vec<VReg> = if let Some(arg_range) = arg_range {
+                    let args: Vec<regalloc2::VReg> = if let Some(arg_range) = arg_range {
                         self.branch_block_args[arg_range.start..arg_range.end].to_vec()
                     } else {
                         Vec::new()
@@ -318,7 +318,7 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                             None
                         };
 
-                        let args: Vec<VReg> = if let Some(arg_range) = arg_range {
+                        let args: Vec<regalloc2::VReg> = if let Some(arg_range) = arg_range {
                             self.branch_block_args[arg_range.start..arg_range.end].to_vec()
                         } else {
                             Vec::new()

@@ -1,6 +1,7 @@
 //! Core types for backend3 (ISA-agnostic)
 
 use core::fmt;
+use regalloc2::{Block, Inst};
 
 /// Virtual register identifier
 ///
@@ -28,48 +29,16 @@ impl fmt::Display for VReg {
 }
 
 /// Block index in VCode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct BlockIndex(u32);
-
-impl BlockIndex {
-    /// Create a new block index
-    pub fn new(index: u32) -> Self {
-        BlockIndex(index)
-    }
-
-    /// Get the index value
-    pub fn index(self) -> u32 {
-        self.0
-    }
-}
-
-impl fmt::Display for BlockIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "block{}", self.0)
-    }
-}
+///
+/// This is a type alias for regalloc2::Block to ensure compatibility
+/// with regalloc2's Function trait.
+pub type BlockIndex = Block;
 
 /// Instruction index in VCode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct InsnIndex(u32);
-
-impl InsnIndex {
-    /// Create a new instruction index
-    pub fn new(index: u32) -> Self {
-        InsnIndex(index)
-    }
-
-    /// Get the index value
-    pub fn index(self) -> u32 {
-        self.0
-    }
-}
-
-impl fmt::Display for InsnIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "inst{}", self.0)
-    }
-}
+///
+/// This is a type alias for regalloc2::Inst to ensure compatibility
+/// with regalloc2's Function trait.
+pub type InsnIndex = Inst;
 
 /// Code offset (for relocations)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
