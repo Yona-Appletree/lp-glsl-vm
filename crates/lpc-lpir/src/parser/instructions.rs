@@ -337,7 +337,8 @@ pub(crate) fn parse_store(input: &str) -> IResult<&str, InstData> {
 pub(crate) fn parse_return(input: &str) -> IResult<&str, InstData> {
     let (input, _) = terminated(tag("return"), blank)(input)?;
     // Parse comma-separated values (CLIF format)
-    let (input, values) = separated_list0(terminated(char(','), blank), terminated(parse_value, blank))(input)?;
+    let (input, values) =
+        separated_list0(terminated(char(','), blank), terminated(parse_value, blank))(input)?;
     Ok((input, InstData::return_(values)))
 }
 

@@ -2,13 +2,16 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use crate::backend3::blockorder::compute_block_order;
-use crate::backend3::types::{BlockIndex, VReg, Writable};
-use crate::backend3::vcode::{BlockLoweringOrder, Callee, MachInst, VCode};
-use crate::backend3::vcode_builder::VCodeBuilder;
 use lpc_lpir::{
-    BlockEntity as Block, ControlFlowGraph, DominatorTree, Function,
-    InstEntity, Opcode, RelSourceLoc, Value,
+    BlockEntity as Block, ControlFlowGraph, DominatorTree, Function, InstEntity, Opcode,
+    RelSourceLoc, Value,
+};
+
+use crate::backend3::{
+    blockorder::compute_block_order,
+    types::{BlockIndex, VReg, Writable},
+    vcode::{BlockLoweringOrder, Callee, MachInst, VCode},
+    vcode_builder::VCodeBuilder,
 };
 
 /// Lowering backend trait: ISA-specific instruction creation
@@ -39,6 +42,18 @@ pub trait LowerBackend {
     /// This is used for phi moves in edge blocks. The backend should create
     /// an appropriate move instruction that copies `src` to `dst`.
     fn create_move(&self, dst: Writable<VReg>, src: VReg) -> Self::MInst;
+
+    /// Create a conditional branch instruction
+    ///
+    /// This creates a placeholder branch instruction that records the condition
+    /// operand. The actual branch targets are stored in VCode branch metadata.
+    fn create_branch(&self, condition: VReg) -> Self::MInst;
+
+    /// Create an unconditional jump instruction
+    ///
+    /// This creates a placeholder jump instruction. The actual jump targets
+    /// are stored in VCode branch metadata.
+    fn create_jump(&self) -> Self::MInst;
 }
 
 /// Lowering context: converts IR to VCode
@@ -70,7 +85,6 @@ impl<I: MachInst> Lower<I> {
         backend: &B,
         block_order: &BlockLoweringOrder,
     ) -> VCode<I> {
-
         // 1. Create virtual registers for all values
         self.create_virtual_registers();
 
@@ -83,7 +97,11 @@ impl<I: MachInst> Lower<I> {
                 crate::backend3::vcode::LoweredBlock::Orig { block } => {
                     self.lower_block(backend, *block);
                 }
-                crate::backend3::vcode::LoweredBlock::Edge { from, to, succ_idx: _ } => {
+                crate::backend3::vcode::LoweredBlock::Edge {
+                    from,
+                    to,
+                    succ_idx: _,
+                } => {
                     // Emit phi moves for edge block
                     // Edge blocks use their position in lowered_order as their BlockIndex
                     let edge_block_idx = BlockIndex::new(idx as u32);
@@ -94,7 +112,10 @@ impl<I: MachInst> Lower<I> {
 
         // 4. Build VCode
         // Find entry block index - entry block must be in block_to_index
-        let entry_block = self.func.entry_block().expect("function must have an entry block");
+        let entry_block = self
+            .func
+            .entry_block()
+            .expect("function must have an entry block");
         let entry = block_order
             .block_to_index
             .get(&entry_block)
@@ -178,17 +199,15 @@ impl<I: MachInst> Lower<I> {
                         // Emit move: vreg_target = vreg_source
                         let target_vreg = self.value_to_vreg[param_value];
                         let source_vreg = self.value_to_vreg[&source_value];
-                        
+
                         // Only emit move if source and target are different VRegs
                         if target_vreg != source_vreg {
                             use crate::backend3::types::Writable;
-                            
+
                             // Use default source location for synthetic moves
                             let srcloc = RelSourceLoc::default();
-                            let move_inst = backend.create_move(
-                                Writable::new(target_vreg),
-                                source_vreg,
-                            );
+                            let move_inst =
+                                backend.create_move(Writable::new(target_vreg), source_vreg);
                             self.vcode.push(move_inst, srcloc);
                         }
                         break;
@@ -204,7 +223,11 @@ impl<I: MachInst> Lower<I> {
     /// Lower a block
     fn lower_block<B: LowerBackend<MInst = I>>(mut self: &mut Self, backend: &B, block: Block) {
         // Get block index for VCode
-        let block_idx = self.block_to_index.get(&block).copied().unwrap_or(BlockIndex::new(0));
+        let block_idx = self
+            .block_to_index
+            .get(&block)
+            .copied()
+            .unwrap_or(BlockIndex::new(0));
 
         // Get block parameters
         let block_params: Vec<VReg> = if let Some(block_data) = self.func.block_data(block) {
@@ -224,54 +247,103 @@ impl<I: MachInst> Lower<I> {
         // Collect instructions first to avoid borrow checker issues
         let insts: Vec<_> = self.func.block_insts(block).collect();
         let mut branch_info: Option<(Vec<BlockIndex>, Vec<Vec<VReg>>)> = None;
-        
+
         for inst in insts {
             // Get source location from IR instruction
             let ir_srcloc = self.func.srcloc(inst);
             let base_srcloc = self.func.base_srcloc();
             let rel_srcloc = RelSourceLoc::from_base_offset(base_srcloc, ir_srcloc);
-            
+
             // Check if this is a branch/jump instruction
-            let func = self.func();
-            if let Some(inst_data) = func.dfg.inst_data(inst) {
-                match inst_data.opcode {
-                    Opcode::Jump | Opcode::Br => {
-                        if let Some(block_args) = &inst_data.block_args {
-                            // Extract target blocks and their arguments
-                            let mut succs = Vec::new();
-                            let mut args_per_succ = Vec::new();
-                            
-                            let value_to_vreg = self.value_to_vreg();
-                            for (target_block, args) in &block_args.targets {
-                                // Map IR block to VCode BlockIndex
-                                if let Some(&target_idx) = self.block_to_index.get(target_block) {
-                                    succs.push(target_idx);
-                                    // Convert argument Values to VRegs
-                                    let arg_vregs: Vec<VReg> = args
-                                        .iter()
-                                        .filter_map(|v| value_to_vreg.get(v).copied())
-                                        .collect();
-                                    args_per_succ.push(arg_vregs);
-                                }
-                            }
-                            
-                            branch_info = Some((succs, args_per_succ));
-                        }
+            // Get inst_data first and drop func() borrow before using vcode
+            let (opcode, args, block_args_opt) = {
+                let func = self.func();
+                if let Some(inst_data) = func.dfg.inst_data(inst) {
+                    (
+                        inst_data.opcode.clone(),
+                        inst_data.args.clone(),
+                        inst_data.block_args.clone(),
+                    )
+                } else {
+                    // No instruction data - delegate to backend
+                    backend.lower_inst(&mut self, inst, rel_srcloc);
+                    continue;
+                }
+            };
+
+            match opcode {
+                Opcode::Br => {
+                    // Extract condition VReg from args[0]
+                    let condition_vreg = {
+                        let value_to_vreg = self.value_to_vreg();
+                        args.get(0).and_then(|v| value_to_vreg.get(v).copied())
+                    };
+
+                    if let Some(condition) = condition_vreg {
+                        // Create Br instruction with condition operand
+                        let br_inst = backend.create_branch(condition);
+                        self.vcode.push(br_inst, rel_srcloc);
                     }
-                    _ => {
-                        // Not a branch - delegate to backend for instruction creation
-                        backend.lower_inst(&mut self, inst, rel_srcloc);
+
+                    // Extract target blocks and their arguments
+                    if let Some(block_args) = &block_args_opt {
+                        let mut succs = Vec::new();
+                        let mut args_per_succ = Vec::new();
+
+                        let value_to_vreg = self.value_to_vreg();
+                        for (target_block, args) in &block_args.targets {
+                            // Map IR block to VCode BlockIndex
+                            if let Some(&target_idx) = self.block_to_index.get(target_block) {
+                                succs.push(target_idx);
+                                // Convert argument Values to VRegs
+                                let arg_vregs: Vec<VReg> = args
+                                    .iter()
+                                    .filter_map(|v| value_to_vreg.get(v).copied())
+                                    .collect();
+                                args_per_succ.push(arg_vregs);
+                            }
+                        }
+
+                        branch_info = Some((succs, args_per_succ));
                     }
                 }
-            } else {
-                // No instruction data - delegate to backend
-                backend.lower_inst(&mut self, inst, rel_srcloc);
+                Opcode::Jump => {
+                    // Create Jump instruction (unconditional)
+                    let jump_inst = backend.create_jump();
+                    self.vcode.push(jump_inst, rel_srcloc);
+
+                    // Extract target blocks and their arguments
+                    if let Some(block_args) = &block_args_opt {
+                        let mut succs = Vec::new();
+                        let mut args_per_succ = Vec::new();
+
+                        let value_to_vreg = self.value_to_vreg();
+                        for (target_block, args) in &block_args.targets {
+                            // Map IR block to VCode BlockIndex
+                            if let Some(&target_idx) = self.block_to_index.get(target_block) {
+                                succs.push(target_idx);
+                                // Convert argument Values to VRegs
+                                let arg_vregs: Vec<VReg> = args
+                                    .iter()
+                                    .filter_map(|v| value_to_vreg.get(v).copied())
+                                    .collect();
+                                args_per_succ.push(arg_vregs);
+                            }
+                        }
+
+                        branch_info = Some((succs, args_per_succ));
+                    }
+                }
+                _ => {
+                    // Not a branch - delegate to backend for instruction creation
+                    backend.lower_inst(&mut self, inst, rel_srcloc);
+                }
             }
         }
 
         // End block
         self.vcode.end_block();
-        
+
         // Record branch arguments if we have branch information
         if let Some((succs, args_per_succ)) = branch_info {
             self.vcode.add_branch_args(&succs, &args_per_succ);
@@ -323,4 +395,3 @@ where
     // Lower the function
     lower.lower(backend, &block_order)
 }
-

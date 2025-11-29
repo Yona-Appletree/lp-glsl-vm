@@ -2,11 +2,19 @@
 
 extern crate alloc;
 
-use alloc::{collections::BTreeMap, collections::BTreeSet, vec::Vec};
-use crate::backend3::types::{BlockIndex, VReg};
-use crate::backend3::vcode::{BlockLoweringOrder, Callee};
-use crate::backend3::vcode_builder::VCodeBuilder;
-use crate::isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32MachInst};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
+
+use crate::{
+    backend3::{
+        types::{BlockIndex, VReg},
+        vcode::{BlockLoweringOrder, Callee},
+        vcode_builder::VCodeBuilder,
+    },
+    isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32MachInst},
+};
 
 #[test]
 fn test_vcode_builder_new() {
@@ -30,7 +38,7 @@ fn test_vcode_builder_start_block() {
     let params = alloc::vec![VReg::new(1), VReg::new(2)];
     builder.start_block(block_idx, params.clone());
     builder.end_block();
-    
+
     // Build and check that block parameters were recorded
     let entry = BlockIndex::new(0);
     let block_order = BlockLoweringOrder {
@@ -56,12 +64,9 @@ fn test_vcode_builder_build() {
         cold_blocks: BTreeSet::new(),
         indirect_targets: BTreeSet::new(),
     };
-    let abi = Callee {
-        abi: Riscv32ABI,
-    };
-    
+    let abi = Callee { abi: Riscv32ABI };
+
     let vcode = builder.build(entry, block_order, abi);
     assert_eq!(vcode.insts.len(), 0);
     assert_eq!(vcode.entry, entry);
 }
-

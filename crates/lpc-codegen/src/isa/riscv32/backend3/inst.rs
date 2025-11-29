@@ -118,9 +118,7 @@ pub enum Riscv32MachInst {
     Ebreak,
 
     /// TRAP: unconditional trap with trap code
-    Trap {
-        code: lpc_lpir::TrapCode,
-    },
+    Trap { code: lpc_lpir::TrapCode },
 
     /// TRAPZ: trap if condition is zero
     Trapz {
@@ -133,6 +131,14 @@ pub enum Riscv32MachInst {
         condition: VReg,
         code: lpc_lpir::TrapCode,
     },
+
+    /// BR: conditional branch
+    /// The condition VReg is checked, and branch targets/successors are stored in VCode branch metadata
+    Br { condition: VReg },
+
+    /// JUMP: unconditional jump
+    /// Branch targets/successors are stored in VCode branch metadata
+    Jump,
 }
 
 impl MachInst for Riscv32MachInst {
@@ -234,6 +240,12 @@ impl MachInst for Riscv32MachInst {
             }
             Riscv32MachInst::Trapnz { condition, .. } => {
                 collector.visit_use(*condition, OperandConstraint::Any);
+            }
+            Riscv32MachInst::Br { condition } => {
+                collector.visit_use(*condition, OperandConstraint::Any);
+            }
+            Riscv32MachInst::Jump => {
+                // No operands (unconditional)
             }
         }
     }

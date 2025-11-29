@@ -335,8 +335,10 @@ fn gpr_name(num: u8) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::super::{encode::*, regs::Gpr};
+    use super::{
+        super::{encode::*, regs::Gpr},
+        *,
+    };
 
     #[test]
     fn test_disassemble_add() {

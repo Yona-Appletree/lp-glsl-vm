@@ -202,40 +202,39 @@ block4(v6: i32):
     );
 
     // Verify VCode structure - includes edge blocks with move instructions for phi values
+    // NOTE: Conditional branches now create Br instructions with condition operands
+    // Edge blocks don't create jump instructions - they just contain moves and branch metadata
     test.assert_vcode(
         r#"
 vcode {
   entry: block0
 
   block0(v0):
-    br block4
-    br block1
+    brif v0, block4, block1
 
   block1:
     add v6, v0, v7
-    br block2
-    br block3(v6)
+    brif v0, block2_edge_2_3, block3_edge_2_4(v6)
 
-  edge block2 -> block3:
+  block2_edge_2_3:
     move v1, v6
-    br block8(v6)
+    jump block8(v6)
 
-  edge block2 -> block4:
+  block3_edge_2_4:
     move v2, v6
-    br block7
+    jump block7
 
   block4:
     add v4, v0, v8
-    br block5
-    br block6
+    brif v0, block5_edge_1_3, block6_edge_1_4
 
-  edge block1 -> block3:
+  block5_edge_1_3:
     move v1, v4
-    br block8
+    jump block8
 
-  edge block1 -> block4:
+  block6_edge_1_4:
     move v2, v4
-    br block7
+    jump block7
 
   block7(v2):
     return v2
@@ -472,7 +471,7 @@ vcode {
   entry: block0
 
   block0(v0):
-    br block1(v0)
+    jump block1(v0)
 
   block1(v1):
     return v1
@@ -510,8 +509,7 @@ vcode {
   block0(v0):
     sub v6, v0, v5
     sltiu v4, v6, 1
-    br block2(v0)
-    br block1(v0)
+    brif v4, block2(v0), block1(v0)
 
   block1(v2):
     return v2
@@ -685,7 +683,7 @@ vcode {
   entry: block0
 
   block0:
-    br block1
+    jump block1
 
   block1:
     return v1
@@ -725,8 +723,7 @@ vcode {
   block0(v0):
     sub v6, v0, v5
     sltiu v2, v6, 1
-    br block2
-    br block1
+    brif v2, block2, block1
 
   block1:
     return v7
@@ -768,8 +765,7 @@ vcode {
   block0(v0):
     sub v6, v0, v5
     sltiu v3, v6, 1
-    br block2
-    br block1(v0)
+    brif v3, block2, block1(v0)
 
   block1(v1):
     return v1

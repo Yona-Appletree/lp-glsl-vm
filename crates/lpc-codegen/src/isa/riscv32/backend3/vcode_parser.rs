@@ -2,6 +2,7 @@
 
 use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
 
+use lpc_lpir::RelSourceLoc;
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while1},
@@ -12,20 +13,22 @@ use nom::{
     IResult,
 };
 
-use crate::backend3::{
-    types::{BlockIndex, Range, Ranges, VReg, Writable},
-    vcode::{BlockLoweringOrder, Callee, LoweredBlock, VCode},
-    vcode_builder::VCodeBuilder,
+use crate::{
+    backend3::{
+        types::{BlockIndex, Range, Ranges, VReg, Writable},
+        vcode::{BlockLoweringOrder, Callee, LoweredBlock, VCode},
+        vcode_builder::VCodeBuilder,
+    },
+    isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32MachInst},
 };
-use crate::isa::riscv32::backend3::inst::{Riscv32ABI, Riscv32MachInst};
-use lpc_lpir::RelSourceLoc;
 
 /// Parse a VReg identifier (e.g., "v0", "v1")
 fn parse_vreg(input: &str) -> IResult<&str, VReg> {
     map_res(
         recognize(pair(char('v'), take_while1(|c: char| c.is_ascii_digit()))),
         |s: &str| -> Result<VReg, alloc::string::String> {
-            let num = s[1..].parse::<u32>()
+            let num = s[1..]
+                .parse::<u32>()
                 .map_err(|_| format!("Invalid VReg number: {}", s))?;
             Ok(VReg::new(num))
         },
@@ -35,9 +38,13 @@ fn parse_vreg(input: &str) -> IResult<&str, VReg> {
 /// Parse a BlockIndex identifier (e.g., "block0", "block1")
 fn parse_block_index(input: &str) -> IResult<&str, BlockIndex> {
     map_res(
-        recognize(pair(tag("block"), take_while1(|c: char| c.is_ascii_digit()))),
+        recognize(pair(
+            tag("block"),
+            take_while1(|c: char| c.is_ascii_digit()),
+        )),
         |s: &str| -> Result<BlockIndex, alloc::string::String> {
-            let num = s[5..].parse::<u32>()
+            let num = s[5..]
+                .parse::<u32>()
                 .map_err(|_| format!("Invalid block number: {}", s))?;
             Ok(BlockIndex::new(num))
         },
@@ -66,8 +73,14 @@ fn parse_immediate(input: &str) -> IResult<&str, i32> {
         ),
         // Decimal: 123 or -123
         map_res(
-            recognize(pair(opt(char('-')), take_while1(|c: char| c.is_ascii_digit()))),
-            |s: &str| s.parse::<i32>().map_err(|_| format!("Invalid number: {}", s)),
+            recognize(pair(
+                opt(char('-')),
+                take_while1(|c: char| c.is_ascii_digit()),
+            )),
+            |s: &str| {
+                s.parse::<i32>()
+                    .map_err(|_| format!("Invalid number: {}", s))
+            },
         ),
     ))(input)
 }
@@ -177,10 +190,7 @@ fn parse_sw(input: &str) -> IResult<&str, Riscv32MachInst> {
         char(')'),
     )(input)?;
 
-    Ok((
-        input,
-        Riscv32MachInst::Sw { rs1, rs2, imm },
-    ))
+    Ok((input, Riscv32MachInst::Sw { rs1, rs2, imm }))
 }
 
 /// Parse a Move instruction: move v0, v1
@@ -206,13 +216,28 @@ fn parse_return(input: &str) -> IResult<&str, Riscv32MachInst> {
         terminated(char(','), multispace0),
         preceded(multispace0, parse_vreg),
     ))(input)?;
-    
+
     Ok((
         input,
         Riscv32MachInst::Return {
             ret_vals: ret_vals.unwrap_or_default(),
         },
     ))
+}
+
+/// Parse a br instruction: brif v0
+fn parse_br(input: &str) -> IResult<&str, Riscv32MachInst> {
+    let (input, _) = terminated(tag("brif"), multispace1)(input)?;
+    let (input, condition) = parse_vreg(input)?;
+
+    Ok((input, Riscv32MachInst::Br { condition }))
+}
+
+/// Parse a jump instruction: jump
+fn parse_jump(input: &str) -> IResult<&str, Riscv32MachInst> {
+    let (input, _) = terminated(tag("jump"), multispace0)(input)?;
+
+    Ok((input, Riscv32MachInst::Jump))
 }
 
 /// Parse a mul instruction: mul v0, v1, v2
@@ -274,6 +299,8 @@ fn parse_instruction(input: &str) -> IResult<&str, Riscv32MachInst> {
     let (input, _) = multispace0(input)?;
     alt((
         parse_return,
+        parse_jump,
+        parse_br,
         parse_move,
         parse_sw,
         parse_lw,
@@ -335,14 +362,10 @@ fn parse_block(input: &str) -> IResult<&str, ParsedBlock> {
     if is_edge.is_some() {
         let (input, (from, to)) = parse_edge_block_header(input)?;
         let (input, _) = multispace0(input)?;
-        let (input, insts) = separated_list0(
-            multispace1,
-            terminated(parse_instruction, opt(multispace0)),
-        )(input)?;
-        let (input, branches) = separated_list0(
-            multispace1,
-            terminated(parse_branch, opt(multispace0)),
-        )(input)?;
+        let (input, insts) =
+            separated_list0(multispace1, terminated(parse_instruction, opt(multispace0)))(input)?;
+        let (input, branches) =
+            separated_list0(multispace1, terminated(parse_branch, opt(multispace0)))(input)?;
 
         Ok((
             input,
@@ -356,14 +379,10 @@ fn parse_block(input: &str) -> IResult<&str, ParsedBlock> {
     } else {
         let (input, (block_idx, params)) = parse_block_header(input)?;
         let (input, _) = multispace0(input)?;
-        let (input, insts) = separated_list0(
-            multispace1,
-            terminated(parse_instruction, opt(multispace0)),
-        )(input)?;
-        let (input, branches) = separated_list0(
-            multispace1,
-            terminated(parse_branch, opt(multispace0)),
-        )(input)?;
+        let (input, insts) =
+            separated_list0(multispace1, terminated(parse_instruction, opt(multispace0)))(input)?;
+        let (input, branches) =
+            separated_list0(multispace1, terminated(parse_branch, opt(multispace0)))(input)?;
 
         Ok((
             input,
@@ -404,10 +423,7 @@ pub fn parse_vcode(text: &str) -> Result<VCode<Riscv32MachInst>, String> {
         multispace1,
         parse_block_index,
         multispace0,
-        separated_list0(
-            multispace1,
-            terminated(parse_block, opt(multispace0)),
-        ),
+        separated_list0(multispace1, terminated(parse_block, opt(multispace0))),
         multispace0,
         char('}'),
         multispace0,
@@ -513,4 +529,3 @@ fn build_vcode(
     let abi = Callee { abi: Riscv32ABI };
     Ok(builder.build(entry, block_order, abi))
 }
-

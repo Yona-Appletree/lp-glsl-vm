@@ -1,5 +1,5 @@
 //! Test for hardware fib version (no syscall, just return)
-//! 
+//!
 //! DISABLED: Uses old backend functions
 //! TODO: Re-enable when backend3 is implemented
 

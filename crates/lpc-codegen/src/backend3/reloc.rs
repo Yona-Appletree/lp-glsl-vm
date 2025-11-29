@@ -2,8 +2,10 @@
 
 use alloc::string::String;
 
-use crate::backend3::types::InsnIndex;
-use crate::backend3::vcode::{RelocKind, VCodeReloc};
+use crate::backend3::{
+    types::InsnIndex,
+    vcode::{RelocKind, VCodeReloc},
+};
 
 /// Record a relocation in VCode
 pub fn record_reloc(
@@ -18,4 +20,3 @@ pub fn record_reloc(
         target,
     });
 }
-

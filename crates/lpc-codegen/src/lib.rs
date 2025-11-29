@@ -14,16 +14,17 @@ pub mod emu;
 mod isa;
 
 // Re-export modules from isa::riscv32
-pub use isa::riscv32::asm_parser::{assemble_code, assemble_instruction};
-pub use isa::riscv32::decode::{decode_instruction, DecodedFields};
-pub use isa::riscv32::disasm::{disassemble_code, disassemble_code_with_labels, disassemble_instruction};
-pub use isa::riscv32::encode::*;
-pub use isa::riscv32::inst::Inst;
-pub use isa::riscv32::regs::Gpr;
-
 // Re-export emu items for convenience
 pub use emu::{
     EmulatorError, LogLevel, MemoryAccessKind, Riscv32Emulator, StepResult, SyscallInfo,
+};
+pub use isa::riscv32::{
+    asm_parser::{assemble_code, assemble_instruction},
+    decode::{decode_instruction, DecodedFields},
+    disasm::{disassemble_code, disassemble_code_with_labels, disassemble_instruction},
+    encode::*,
+    inst::Inst,
+    regs::Gpr,
 };
 
 // Old backend removed - see isa/riscv32/backend_old/ for reference

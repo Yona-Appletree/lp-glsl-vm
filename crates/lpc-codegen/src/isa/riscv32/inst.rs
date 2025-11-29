@@ -101,8 +101,7 @@ impl Inst {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::super::regs::Gpr;
+    use super::{super::regs::Gpr, *};
 
     #[test]
     fn test_inst_encode_add() {

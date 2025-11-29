@@ -9,8 +9,8 @@ extern crate alloc;
 
 use alloc::string::String;
 
-use lpc_lpir::parse_module;
 use lpc_codegen::{compile_module_to_insts, generate_elf};
+use lpc_lpir::parse_module;
 
 /// Result of JIT compilation
 pub struct JitResult {

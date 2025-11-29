@@ -3,11 +3,13 @@
 use alloc::{format, vec::Vec};
 use core::fmt;
 
-use crate::backend3::{
-    types::{BlockIndex, Range, VReg},
-    vcode::{LoweredBlock, VCode},
+use crate::{
+    backend3::{
+        types::{BlockIndex, Range, VReg},
+        vcode::{LoweredBlock, VCode},
+    },
+    isa::riscv32::backend3::inst::Riscv32MachInst,
 };
-use crate::isa::riscv32::backend3::inst::Riscv32MachInst;
 
 impl fmt::Display for Riscv32MachInst {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -37,7 +39,15 @@ impl fmt::Display for Riscv32MachInst {
                 if ret_vals.is_empty() {
                     write!(f, "return")
                 } else {
-                    write!(f, "return {}", ret_vals.iter().map(|v| format!("{}", v)).collect::<alloc::vec::Vec<_>>().join(", "))
+                    write!(
+                        f,
+                        "return {}",
+                        ret_vals
+                            .iter()
+                            .map(|v| format!("{}", v))
+                            .collect::<alloc::vec::Vec<_>>()
+                            .join(", ")
+                    )
                 }
             }
             Riscv32MachInst::Mul { rd, rs1, rs2 } => {
@@ -62,10 +72,27 @@ impl fmt::Display for Riscv32MachInst {
                 write!(f, "xori {}, {}, {}", rd, rs1, imm)
             }
             Riscv32MachInst::Jal { rd, callee, args } => {
-                write!(f, "jal {}, {}({})", rd, callee, args.iter().map(|v| format!("{}", v)).collect::<alloc::vec::Vec<_>>().join(", "))
+                write!(
+                    f,
+                    "jal {}, {}({})",
+                    rd,
+                    callee,
+                    args.iter()
+                        .map(|v| format!("{}", v))
+                        .collect::<alloc::vec::Vec<_>>()
+                        .join(", ")
+                )
             }
             Riscv32MachInst::Ecall { number, args } => {
-                write!(f, "ecall {}({})", number, args.iter().map(|v| format!("{}", v)).collect::<alloc::vec::Vec<_>>().join(", "))
+                write!(
+                    f,
+                    "ecall {}({})",
+                    number,
+                    args.iter()
+                        .map(|v| format!("{}", v))
+                        .collect::<alloc::vec::Vec<_>>()
+                        .join(", ")
+                )
             }
             Riscv32MachInst::Ebreak => {
                 write!(f, "ebreak")
@@ -79,6 +106,32 @@ impl fmt::Display for Riscv32MachInst {
             Riscv32MachInst::Trapnz { condition, code } => {
                 write!(f, "trapnz {}, {}", condition, code)
             }
+            Riscv32MachInst::Br { condition } => {
+                write!(f, "brif {}", condition)
+            }
+            Riscv32MachInst::Jump => {
+                write!(f, "jump")
+            }
+        }
+    }
+}
+
+impl VCode<Riscv32MachInst> {
+    /// Format a BlockIndex with edge block information if applicable
+    fn format_block_index(&self, block_idx: BlockIndex) -> alloc::string::String {
+        let idx = block_idx.index() as usize;
+        if idx < self.block_order.lowered_order.len() {
+            match &self.block_order.lowered_order[idx] {
+                LoweredBlock::Edge { from, to, .. } => {
+                    // Format as block5_edge_1_3 (where 1 and 3 are IR block indices)
+                    format!("block{}_edge_{}_{}", idx, from.index(), to.index())
+                }
+                LoweredBlock::Orig { .. } => {
+                    format!("block{}", idx)
+                }
+            }
+        } else {
+            format!("block{}", idx)
         }
     }
 }
@@ -86,7 +139,7 @@ impl fmt::Display for Riscv32MachInst {
 impl fmt::Display for VCode<Riscv32MachInst> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "vcode {{")?;
-        writeln!(f, "  entry: {}", self.entry)?;
+        writeln!(f, "  entry: {}", self.format_block_index(self.entry))?;
         writeln!(f)?;
 
         // Iterate through blocks in lowering order
@@ -101,8 +154,8 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                         .block_params_range
                         .get(block_idx)
                         .unwrap_or_else(|| Range::new(0, 0));
-                    let params: Vec<VReg> = self.block_params[param_range.start..param_range.end]
-                        .to_vec();
+                    let params: Vec<VReg> =
+                        self.block_params[param_range.start..param_range.end].to_vec();
 
                     if params.is_empty() {
                         write!(f, "  {}:\n", block_index)?;
@@ -118,10 +171,8 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                     }
                 }
                 LoweredBlock::Edge { from, to, .. } => {
-                    // For edge blocks, format as edge block
-                    // Note: from and to are IR block entities, not VCode block indices
-                    // We'll format them as-is for now
-                    write!(f, "  edge {} -> {}:\n", from, to)?;
+                    // For edge blocks, format with descriptive name
+                    write!(f, "  {}:\n", self.format_block_index(block_index))?;
                 }
             }
 
@@ -131,20 +182,49 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                 .get(block_idx)
                 .unwrap_or_else(|| Range::new(0, 0));
 
-            // Format instructions in this block
-            for inst_idx in inst_range.start..inst_range.end {
-                let inst = &self.insts[inst_idx];
-                writeln!(f, "    {}", inst)?;
-            }
-
-            // Format successors and branch arguments
+            // Get successors and branch arguments
             let succ_range = self
                 .block_succ_range
                 .get(block_idx)
                 .unwrap_or_else(|| Range::new(0, 0));
-            let succs: Vec<BlockIndex> = self.block_succs[succ_range.start..succ_range.end]
-                .to_vec();
+            let succs: Vec<BlockIndex> =
+                self.block_succs[succ_range.start..succ_range.end].to_vec();
 
+            // Check if last instruction is a branch/jump
+            let last_inst_is_branch = if !inst_range.is_empty() && !succs.is_empty() {
+                let last_inst_idx = inst_range.end - 1;
+                matches!(
+                    &self.insts[last_inst_idx],
+                    Riscv32MachInst::Br { .. } | Riscv32MachInst::Jump
+                )
+            } else {
+                false
+            };
+
+            // Format instructions in this block
+            for inst_idx in inst_range.start..inst_range.end {
+                let inst = &self.insts[inst_idx];
+                let is_last = inst_idx == inst_range.end - 1;
+
+                // If this is the last instruction and it's a branch, format it with successors
+                if is_last && last_inst_is_branch {
+                    match inst {
+                        Riscv32MachInst::Br { condition } => {
+                            write!(f, "    brif {}", condition)?;
+                        }
+                        Riscv32MachInst::Jump => {
+                            write!(f, "    jump")?;
+                        }
+                        _ => {
+                            writeln!(f, "    {}", inst)?;
+                        }
+                    }
+                } else {
+                    writeln!(f, "    {}", inst)?;
+                }
+            }
+
+            // Format successors and branch arguments
             if !succs.is_empty() {
                 // Get branch argument ranges for this block's successors
                 let branch_arg_succ_range = self
@@ -152,35 +232,111 @@ impl fmt::Display for VCode<Riscv32MachInst> {
                     .get(block_idx)
                     .unwrap_or_else(|| Range::new(0, 0));
 
-                // For each successor, get its branch arguments
-                for (succ_idx, succ) in succs.iter().enumerate() {
-                    // The branch_arg_succ_range tells us which entries in branch_block_arg_range
-                    // correspond to this block's successors
-                    let arg_range_idx = branch_arg_succ_range.start + succ_idx;
+                // Check if this is an edge block (edge blocks always jump to their target)
+                let is_edge_block = matches!(
+                    lowered_block,
+                    LoweredBlock::Edge { .. }
+                );
+
+                // If last instruction was a branch, format successors on the same line
+                if last_inst_is_branch {
+                    // Check if it's a jump (single successor) or brif (multiple successors)
+                    let is_jump = matches!(
+                        &self.insts[inst_range.end - 1],
+                        Riscv32MachInst::Jump
+                    );
+
+                    for (succ_idx, succ) in succs.iter().enumerate() {
+                        // Get branch arguments for this successor
+                        let arg_range_idx = branch_arg_succ_range.start + succ_idx;
+                        let arg_range = if arg_range_idx < self.branch_block_arg_range.len() {
+                            self.branch_block_arg_range.get(arg_range_idx)
+                        } else {
+                            None
+                        };
+
+                        let args: Vec<VReg> = if let Some(arg_range) = arg_range {
+                            self.branch_block_args[arg_range.start..arg_range.end].to_vec()
+                        } else {
+                            Vec::new()
+                        };
+
+                        // For jump: no comma (just "jump block1")
+                        // For brif: comma after condition, then comma-separated targets
+                        if succ_idx > 0 || !is_jump {
+                            write!(f, ", ")?;
+                        } else {
+                            write!(f, " ")?;
+                        }
+                        write!(f, "{}", self.format_block_index(*succ))?;
+                        if !args.is_empty() {
+                            write!(f, "(")?;
+                            for (i, arg) in args.iter().enumerate() {
+                                if i > 0 {
+                                    write!(f, ", ")?;
+                                }
+                                write!(f, "{}", arg)?;
+                            }
+                            write!(f, ")")?;
+                        }
+                    }
+                    writeln!(f)?;
+                } else if is_edge_block && succs.len() == 1 {
+                    // Edge blocks with single successor: format as "jump blockX"
+                    let succ = &succs[0];
+                    let arg_range_idx = branch_arg_succ_range.start;
                     let arg_range = if arg_range_idx < self.branch_block_arg_range.len() {
                         self.branch_block_arg_range.get(arg_range_idx)
                     } else {
                         None
                     };
 
-                    // Get branch arguments for this successor
                     let args: Vec<VReg> = if let Some(arg_range) = arg_range {
                         self.branch_block_args[arg_range.start..arg_range.end].to_vec()
                     } else {
                         Vec::new()
                     };
 
-                    if args.is_empty() {
-                        writeln!(f, "    br {}", succ)?;
-                    } else {
-                        write!(f, "    br {}(", succ)?;
+                    write!(f, "    jump {}", self.format_block_index(*succ))?;
+                    if !args.is_empty() {
+                        write!(f, "(")?;
                         for (i, arg) in args.iter().enumerate() {
                             if i > 0 {
                                 write!(f, ", ")?;
                             }
                             write!(f, "{}", arg)?;
                         }
-                        writeln!(f, ")")?;
+                        write!(f, ")")?;
+                    }
+                    writeln!(f)?;
+                } else {
+                    // Format successors separately (for blocks without branch instructions)
+                    for (succ_idx, succ) in succs.iter().enumerate() {
+                        let arg_range_idx = branch_arg_succ_range.start + succ_idx;
+                        let arg_range = if arg_range_idx < self.branch_block_arg_range.len() {
+                            self.branch_block_arg_range.get(arg_range_idx)
+                        } else {
+                            None
+                        };
+
+                        let args: Vec<VReg> = if let Some(arg_range) = arg_range {
+                            self.branch_block_args[arg_range.start..arg_range.end].to_vec()
+                        } else {
+                            Vec::new()
+                        };
+
+                        if args.is_empty() {
+                            writeln!(f, "    br {}", self.format_block_index(*succ))?;
+                        } else {
+                            write!(f, "    br {}(", self.format_block_index(*succ))?;
+                            for (i, arg) in args.iter().enumerate() {
+                                if i > 0 {
+                                    write!(f, ", ")?;
+                                }
+                                write!(f, "{}", arg)?;
+                            }
+                            writeln!(f, ")")?;
+                        }
                     }
                 }
             }
@@ -192,4 +348,3 @@ impl fmt::Display for VCode<Riscv32MachInst> {
         Ok(())
     }
 }
-
