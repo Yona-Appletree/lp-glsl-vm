@@ -11,5 +11,9 @@ description = "GLSL frontend compiler for LPIR"
 glsl = { git = "https://github.com/Yona-Appletree/glsl-parser.git", branch = "feature/no_std", default-features = false }
 lpc-lpir = { path = "../lpc-lpir" }
 
+[features]
+default = []
+std = []
+
 [dev-dependencies]
 

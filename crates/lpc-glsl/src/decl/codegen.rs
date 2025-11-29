@@ -35,10 +35,20 @@ pub fn generate_declaration(ctx: &mut dyn CodeGenContext, decl: &Declaration) ->
                 };
 
                 let block = ctx.current_block()?;
+                crate::debug!(
+                    "[DECL] Declaring variable '{}' in block {:?}, value={:?}",
+                    var_name,
+                    block,
+                    value
+                );
                 // Record in SSABuilder
                 ctx.ssa_builder_mut().record_def(&var_name, block, value);
                 // Also maintain legacy tracking
                 ctx.variables_mut().insert(var_name.clone(), value);
+                crate::debug!(
+                    "[DECL] Variable '{}' recorded and inserted into variables map",
+                    var_name
+                );
                 // Track this variable in the current scope (both old and new)
                 {
                     let scope_stack = ctx.scope_stack_mut();
@@ -65,10 +75,20 @@ pub fn generate_declaration(ctx: &mut dyn CodeGenContext, decl: &Declaration) ->
                 };
 
                 let block = ctx.current_block()?;
+                crate::debug!(
+                    "[DECL] Declaring variable '{}' in block {:?}, value={:?}",
+                    var_name,
+                    block,
+                    value
+                );
                 // Record in SSABuilder
                 ctx.ssa_builder_mut().record_def(&var_name, block, value);
                 // Also maintain legacy tracking
                 ctx.variables_mut().insert(var_name.clone(), value);
+                crate::debug!(
+                    "[DECL] Variable '{}' recorded and inserted into variables map",
+                    var_name
+                );
                 // Track this variable in the current scope (both old and new)
                 {
                     let scope_stack = ctx.scope_stack_mut();

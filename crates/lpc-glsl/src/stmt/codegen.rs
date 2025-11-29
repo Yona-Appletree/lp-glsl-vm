@@ -32,7 +32,30 @@ pub fn generate_compound_statement(
     ctx.scope_stack_new_mut().push();
 
     // Generate each statement
+    // Skip unreachable code after a terminator (return, etc.)
     for stmt in &compound.statement_list {
+        // Check if current block has a terminator before generating next statement
+        let current_block = ctx.current_block()?;
+        let has_terminator = {
+            let func = ctx.builder().function();
+            let insts: Vec<_> = func.block_insts(current_block).collect();
+            if let Some(last_inst) = insts.last() {
+                if let Some(inst_data) = func.dfg.inst_data(*last_inst) {
+                    inst_data.opcode.is_terminator()
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+        
+        if has_terminator {
+            // Current block ends with a terminator - subsequent statements are unreachable
+            // Skip them (GLSL allows unreachable code, but we don't generate it)
+            break;
+        }
+        
         generate_statement(ctx, stmt)?;
     }
 

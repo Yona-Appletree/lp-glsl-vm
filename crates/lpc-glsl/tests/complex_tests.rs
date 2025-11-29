@@ -1,4 +1,5 @@
 //! Tests for complex scenarios: factorial, fibonacci, nested control flow
+#![cfg(feature = "std")]
 
 mod glsl_test;
 use glsl_test::GlslTest;

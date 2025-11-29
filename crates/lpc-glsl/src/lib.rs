@@ -4,9 +4,28 @@
 //! performs type checking, and generates LPIR (Low-level Program
 //! Intermediate Representation).
 
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
+
+#[cfg(feature = "std")]
+extern crate std;
+
+/// Debug macro that prints when std feature is enabled.
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "std")]
+        {
+            eprintln!($($arg)*);
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            // No-op when std is not available
+            let _ = core::format_args!($($arg)*);
+        }
+    };
+}
 
 mod codegen;
 mod control;

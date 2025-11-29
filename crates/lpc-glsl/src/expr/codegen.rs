@@ -53,8 +53,23 @@ pub fn generate_expr(ctx: &mut dyn CodeGenContext, expr: &Expr) -> GlslResult<Va
             let name = ident.0.as_str();
             // Use lazy SSA construction to get the correct value
             let block = ctx.current_block()?;
-            ctx.get_ssa_value(name, block)?
-                .ok_or_else(|| GlslError::codegen(format!("Undefined variable '{}'", name)))
+        crate::debug!("[EXPR] Reading variable '{}' in block {:?}", name, block);
+            let result = ctx.get_ssa_value(name, block)?;
+            if result.is_none() {
+        crate::debug!("[EXPR] Variable '{}' not found in block {:?}", name, block);
+                // For 'i', get debug info
+                if name == "i" {
+                    let blocks: Vec<_> = {
+                        use crate::codegen::SSABuilder;
+                        let ssa_ptr: *const SSABuilder = ctx.ssa_builder_mut() as *const SSABuilder;
+                        unsafe { (*ssa_ptr).debug_get_blocks_for_var("i") }
+                    };
+        crate::debug!("[EXPR] Variable 'i' available in blocks: {:?}", blocks);
+                }
+            } else {
+        crate::debug!("[EXPR] Variable '{}' found in block {:?}, value={:?}", name, block, result);
+            }
+            result.ok_or_else(|| GlslError::codegen(format!("Undefined variable '{}'", name)))
         }
 
         // Unary operators
