@@ -173,13 +173,26 @@ For the initial implementation, we keep it simple:
 2. **Fallthrough Optimization**: Handled by block emission order (cold blocks at end)
 3. **No Empty Block Elimination**: Deferred (see deferred features)
 4. **No Branch Threading**: Deferred (see deferred features)
+5. **No Latest-Branches Tracking**: Deferred (see deferred features)
 
-**Future Optimizations** (Deferred):
+**Future Optimizations** (Deferred - see `17-backend3-deferred.md`):
 
 - **Empty Block Elimination**: Remove blocks that only contain unconditional branches
 - **Branch Threading**: Redirect labels through unconditional jumps
+  - When a label is bound to an unconditional jump, create a label alias
+  - All references to the label are redirected to the jump's target
+  - Effectively removes empty blocks that only contain jumps
 - **Unnecessary Jump Elimination**: Remove jumps to immediately following blocks
+  - Detect when branch target is bound to fallthrough location
+  - Remove branch instruction entirely
 - **Branch Inversion**: Optimize condition inversion based on branch probabilities
+  - Track "latest branches" (contiguous branches at buffer tail)
+  - When conditional + unconditional pair is detected, invert condition if beneficial
+  - Requires tracking both normal and inverted forms of conditional branches
+- **Latest Branches Tracking**: Track contiguous branches at buffer tail for optimization
+  - Enables branch editing by truncating buffer
+  - Cleared when non-branch code is emitted
+  - Used for advanced peephole optimizations
 
 **Branch Range Validation**:
 
@@ -187,6 +200,25 @@ For the initial implementation, we keep it simple:
 - Unconditional jumps: ±1MB (20-bit signed offset × 2 bytes)
 - Currently assuming functions < 4KB
 - If out of range detected, panic (veneers deferred to later)
+
+**Out-of-Range Branch Handling** (Deferred):
+
+The current implementation panics if a branch offset exceeds its range. Future work will add:
+
+- **Deadline Tracking**: Monitor forward branch references as code is emitted
+  - Calculate worst-case size of upcoming blocks
+  - Track when branches approach range limits
+- **Island Insertion**: Insert code chunks in the middle of emission to hold veneers
+  - Islands are inserted when deadline is reached (before branch goes out of range)
+  - Islands are placed between blocks or with branch-around protection
+- **Veneer Generation**: Create trampoline instructions that extend branch range
+  - Conditional branch → unconditional jump (extends range from ±4KB to ±1MB)
+  - Veneers are placed in islands
+- **Fixup Processing**: Handle fixups during island emission
+  - Split fixups into pending and final lists
+  - Process fixups efficiently during island emission
+
+See `17-backend3-deferred.md` for more details on island/veneer insertion.
 
 ### 3. Call lowering
 
@@ -231,6 +263,35 @@ For the initial implementation, we keep it simple:
 - Integration test: Compile function with branches
 - Integration test: Compile function with calls
 - Integration test: Compile function with multi-return
+
+## Implementation Notes
+
+### Branch Optimization Strategy
+
+The initial implementation focuses on correctness over optimization:
+
+1. **Two-Dest Resolution**: Convert two-dest branches to single-dest with fallthrough detection
+2. **Block Ordering**: Use emission order to maximize fallthrough opportunities
+3. **Simple Branch Emission**: Emit branches with label-based fixups
+4. **Range Validation**: Panic if branch out of range (acceptable for initial implementation)
+
+Advanced optimizations (branch threading, latest-branches tracking, etc.) are deferred to maintain simplicity and correctness.
+
+### Integration with Emission
+
+Branch resolution is integrated into the emission phase (`emit.rs`):
+
+- Branches are emitted during instruction emission loop
+- Two-dest branches are converted to single-dest before emission
+- Label fixups are resolved as labels are bound
+- Branch range validation happens during patching
+
+### Testing Strategy
+
+- Test two-dest branch conversion with various fallthrough scenarios
+- Test branch range validation (both in-range and out-of-range cases)
+- Test label fixup resolution (forward and backward branches)
+- Integration tests with complex control flow patterns
 
 ## Success Criteria
 

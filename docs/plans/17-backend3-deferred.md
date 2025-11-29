@@ -6,9 +6,21 @@ This document tracks features and optimizations that are **not** part of the ini
 
 ### Branch Optimization
 - **Branch Threading**: Eliminate empty blocks by redirecting labels through unconditional jumps
+  - When a label is bound to an unconditional jump, redirect all references to the jump's target
+  - Creates "label aliases" that effectively remove empty blocks
+  - Requires tracking which labels are bound to which offsets
 - **Empty Block Elimination**: Remove blocks that only contain unconditional branches
 - **Advanced Fallthrough Optimization**: Reorder blocks to maximize fallthrough opportunities
 - **Branch Inversion**: Optimize conditional branches by inverting conditions when beneficial
+  - Track "latest branches" (contiguous branches at buffer tail)
+  - When conditional + unconditional pair is detected, invert condition if it improves fallthrough
+  - Requires tracking both normal and inverted forms of conditional branches
+- **Unnecessary Jump Elimination**: Remove jumps to immediately following blocks
+  - Detect when branch target is bound to fallthrough location
+  - Remove branch instruction entirely
+- **Latest Branches Tracking**: Track contiguous branches at buffer tail for optimization
+  - Enables branch editing by truncating buffer
+  - Cleared when non-branch code is emitted
 
 ### Block Layout Optimization
 - **Profile-Guided Optimization**: Use execution profiles to identify hot/cold blocks
@@ -19,8 +31,16 @@ This document tracks features and optimizations that are **not** part of the ini
 
 ### Out-of-Range Branch Handling
 - **Veneer/Island Insertion**: Handle branches that exceed ±4KB range
+  - **Islands**: Code chunks inserted in the middle of emission to hold veneers
+  - **Veneers**: Trampoline instructions that extend branch range (e.g., conditional branch → unconditional jump)
+  - **Deadline Tracking**: Track when forward branches approach range limits and insert islands proactively
+  - **Current Limitation**: Panic if branch out of range (assumes functions < 4KB)
 - **Long-Range Jump Support**: Support for functions > 4KB
 - **Deadline Tracking**: Track when branches go out of range and insert islands
+  - Monitor forward branch references as code is emitted
+  - Calculate worst-case size of upcoming blocks
+  - Insert islands when deadline is reached (before branch goes out of range)
+  - Process fixups during island emission
 
 ### Constant Pool
 - **Large Constant Storage**: Store large constants in data section
@@ -35,8 +55,17 @@ This document tracks features and optimizations that are **not** part of the ini
 
 ### Debug Information
 - **Debug Tags**: Emit debug metadata for debugging tools
+  - Pre-instruction and post-instruction debug tag placement
+  - Debug tag pooling for efficient storage
 - **Value Label Ranges**: Track where values are live in machine code
+  - Map virtual registers to machine code offsets
+  - Track live ranges for debuggers
+  - Requires instruction offset tracking during emission
 - **DWARF Debug Info**: Generate DWARF debug sections for debugging tools
+- **CFG Metadata**: Track block offsets and edges in final machine code
+  - `bb_offsets`: Code offset of each block start
+  - `bb_edges`: Final CFG edges in terms of code offsets
+  - Useful for debugging and analysis tools
 
 ### Unwind Information
 - **Exception Handling**: Generate unwind info for exception handling
@@ -66,6 +95,20 @@ This document tracks features and optimizations that are **not** part of the ini
 - **Instruction Counting**: Track instruction counts for optimization
 - **Register Pressure Analysis**: Analyze register pressure for optimization
 - **Code Size Optimization**: Optimize for code size vs. performance
+
+### Emission Optimizations
+- **Edit Counting Per Block**: Count edits per block ahead of time for lookahead island emission
+  - Used to estimate worst-case block size
+  - Helps determine when islands are needed
+- **Block Padding**: Optional padding between blocks for stress testing
+  - Tests island/veneer insertion under pressure
+  - Useful for fuzzing and testing edge cases
+
+### Safepoint and Stack Map Handling
+- **Safepoint Detection**: Identify safepoint instructions (`is_safepoint()`)
+- **Stack Map Generation**: Generate stack maps at safepoints for GC
+- **User Stack Maps**: Handle user-provided stack map metadata
+- **Note**: Only needed if garbage collection is required
 
 ## Notes
 

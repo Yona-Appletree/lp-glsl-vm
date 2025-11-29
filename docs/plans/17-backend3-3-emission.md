@@ -934,6 +934,39 @@ This is simpler than Cranelift's byte-patching approach and sufficient for our n
 - Unit tests for edit emission (moves, spills, reloads)
 - Integration test: End-to-end compilation of simple function
 
+## Deferred Features
+
+The following features are **not** part of Phase 3 but may be added later. See `17-backend3-deferred.md` for details.
+
+### Out-of-Range Branch Handling
+- **Current**: Panic if branch offset exceeds ±4KB range (assumes functions < 4KB)
+- **Deferred**: Island/veneer insertion for branches that exceed range limits
+  - Deadline tracking for forward branches
+  - Island insertion with veneer generation
+  - Support for functions > 4KB
+
+### Advanced Branch Optimization
+- **Current**: Basic two-dest to single-dest conversion with fallthrough detection
+- **Deferred**: Advanced peephole optimizations
+  - Branch threading (eliminate empty blocks)
+  - Latest-branches tracking
+  - Conditional branch inversion optimization
+  - Unnecessary jump elimination
+
+### Debug Information
+- **Current**: Source location tracking (for error messages)
+- **Deferred**: Full debug information generation
+  - Value label ranges (where values are live in machine code)
+  - Debug tags (pre/post instruction metadata)
+  - CFG metadata (bb_offsets, bb_edges)
+  - DWARF debug info generation
+
+### Other Deferred Features
+- **Safepoint/Stack Maps**: Only needed if garbage collection is required
+- **Unwind Info**: Exception handling support (SystemV, Windows)
+- **Block Padding**: Stress testing feature for island/veneer insertion
+- **Edit Counting Per Block**: Optimization for lookahead island emission
+
 ## Success Criteria
 
 - ✅ Can emit prologue/epilogue
