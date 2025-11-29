@@ -26,7 +26,7 @@ block0(v0: i32):
             found_call = true;
 
             // Check if relocation is recorded for this instruction
-            let insn_idx = crate::backend3::types::InsnIndex::new(inst_idx as u32);
+            let insn_idx = crate::backend3::types::InsnIndex::new(inst_idx);
             let reloc = vcode.relocations.iter().find(|r| r.inst_idx == insn_idx);
 
             // Note: Currently, relocations are not automatically recorded during lowering
@@ -178,7 +178,7 @@ block0:
     // All relocations should reference valid instruction indices
     for reloc in &vcode.relocations {
         assert!(
-            reloc.inst_idx.index() < vcode.insts.len() as u32,
+            reloc.inst_idx.index() < vcode.insts.len(),
             "Relocation should reference valid instruction index (got {}, max {})",
             reloc.inst_idx.index(),
             vcode.insts.len()

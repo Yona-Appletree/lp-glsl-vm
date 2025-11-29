@@ -26,7 +26,7 @@ block0(v0: i32):
             found_call = true;
 
             // Check if clobbers are recorded for this instruction
-            let insn_idx = crate::backend3::types::InsnIndex::new(inst_idx as u32);
+            let insn_idx = crate::backend3::types::InsnIndex::new(inst_idx);
             // Note: Currently, RISC-V instructions don't implement get_clobbers(),
             // so clobbers may be empty. This test verifies the structure exists.
             let _has_clobbers = vcode.clobbers.contains_key(&insn_idx);
@@ -58,7 +58,7 @@ block0(v0: i32):
             found_syscall = true;
 
             // Check if clobbers are recorded for this instruction
-            let insn_idx = crate::backend3::types::InsnIndex::new(inst_idx as u32);
+            let insn_idx = crate::backend3::types::InsnIndex::new(inst_idx);
             // Note: Currently, RISC-V instructions don't implement get_clobbers(),
             // so clobbers may be empty. This test verifies the structure exists.
             let _has_clobbers = vcode.clobbers.contains_key(&insn_idx);
@@ -87,7 +87,7 @@ block0(v0: i32):
     // Verify that clobbers map uses instruction indices
     for (insn_idx, _clobber_set) in &vcode.clobbers {
         assert!(
-            insn_idx.index() < vcode.insts.len() as u32,
+            insn_idx.index() < vcode.insts.len(),
             "Clobber instruction index {} should be less than instruction count {}",
             insn_idx.index(),
             vcode.insts.len()
@@ -119,7 +119,7 @@ block0(v0: i32, v1: i32):
     for (insn_idx, _clobber_set) in &vcode.clobbers {
         // If there are clobbers, verify they're for valid instructions
         assert!(
-            insn_idx.index() < vcode.insts.len() as u32,
+            insn_idx.index() < vcode.insts.len(),
             "Clobber instruction index should be valid"
         );
     }
@@ -143,12 +143,11 @@ block0(v0: i32):
     // Verify that clobber sets contain valid register indices
     // Note: Currently using placeholder u32 for PRegSet
     for (_insn_idx, clobber_set) in &vcode.clobbers {
-        // Clobber set should be a valid BTreeSet<u32>
-        // Values represent physical register indices (placeholder for now)
-        for reg_idx in clobber_set {
-            // Register indices should be reasonable (not negative, etc.)
-            // Exact validation depends on ISA-specific register count
-            let _ = *reg_idx;
+        // Clobber set should be a valid PRegSet
+        // Values represent physical registers
+        for reg in *clobber_set {
+            // Register should be valid
+            let _ = reg.index();
         }
     }
 }
@@ -176,7 +175,7 @@ block0(v0: i32, v1: i32):
             crate::isa::riscv32::backend3::inst::Riscv32MachInst::Add { .. }
             | crate::isa::riscv32::backend3::inst::Riscv32MachInst::Sub { .. }
             | crate::isa::riscv32::backend3::inst::Riscv32MachInst::Mul { .. } => {
-                let insn_idx = crate::backend3::types::InsnIndex::new(inst_idx as u32);
+                let insn_idx = crate::backend3::types::InsnIndex::new(inst_idx);
                 // These instructions should not have clobbers (unless they implement get_clobbers)
                 // Currently, RISC-V instructions don't implement it, so they won't be in the map
                 if vcode.clobbers.contains_key(&insn_idx) {

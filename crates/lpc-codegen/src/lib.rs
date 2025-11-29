@@ -27,6 +27,3 @@ pub use isa::riscv32::{
     regs::Gpr,
 };
 
-// Old backend removed - see isa/riscv32/backend_old/ for reference
-// pub use backend::{compile_module_to_insts, Abi, CompiledModule, FrameLayout};
-// pub use backend::{expect_ir_a0, expect_ir_ok, expect_ir_syscall};

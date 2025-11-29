@@ -1,6 +1,3 @@
-// Old backend (renamed, kept for reference only)
-// pub mod backend_old;  // Commented out - not compiled
-
 // New backend3 (in development)
 pub mod backend3;
 

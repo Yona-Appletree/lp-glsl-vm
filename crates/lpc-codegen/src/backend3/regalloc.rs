@@ -114,10 +114,7 @@ impl<I: MachInst> RegallocFunction for VCode<I> {
         // Return explicitly clobbered registers for this instruction
         // (e.g., from function calls)
         // Direct return - already regalloc2::PRegSet!
-        self.clobbers
-            .get(&insn)
-            .copied()
-            .unwrap_or_else(PRegSet::empty)
+        self.clobbers.get(&insn).copied().unwrap_or_default()
     }
 
     fn num_vregs(&self) -> usize {

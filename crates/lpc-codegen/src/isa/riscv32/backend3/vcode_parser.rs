@@ -7,7 +7,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_while1},
     character::complete::{char, multispace0, multispace1},
-    combinator::{map, map_res, opt, recognize},
+    combinator::{map_res, opt, recognize},
     multi::separated_list0,
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
@@ -17,7 +17,7 @@ use regalloc2::RegClass;
 
 use crate::{
     backend3::{
-        types::{BlockIndex, Range, Ranges, VReg, Writable},
+        types::{BlockIndex, VReg, Writable},
         vcode::{BlockLoweringOrder, Callee, LoweredBlock, VCode},
         vcode_builder::VCodeBuilder,
     },

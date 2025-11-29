@@ -89,7 +89,7 @@ block2:
     if let Some(succ_range) = vcode.block_succ_range.get(block1_idx) {
         let succs = &vcode.block_succs[succ_range.start..succ_range.end];
         // Block1 should have block1 (itself) as a successor (backedge)
-        let has_backedge = succs.iter().any(|&s| s.index() == block1_idx as u32);
+        let has_backedge = succs.iter().any(|&s| s.index() == block1_idx);
         assert!(
             has_backedge || succs.len() > 0,
             "Loop block should have successors (including possible backedge)"

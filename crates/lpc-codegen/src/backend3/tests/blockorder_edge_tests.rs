@@ -130,7 +130,7 @@ block0:
 
     // Entry block should be valid
     assert!(
-        vcode.entry.index() < vcode.block_ranges.len() as u32,
+        vcode.entry.index() < vcode.block_ranges.len(),
         "Entry block index should be valid"
     );
 

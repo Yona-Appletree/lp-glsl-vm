@@ -103,7 +103,7 @@ block2:
 
     // For each block, verify that if A has B as successor, then B has A as predecessor
     for (pred_idx, succ_range) in vcode.block_succ_range.iter().enumerate() {
-        let pred_block = crate::backend3::types::BlockIndex::new(pred_idx as u32);
+        let pred_block = crate::backend3::types::BlockIndex::new(pred_idx);
         for succ in &vcode.block_succs[succ_range.start..succ_range.end] {
             // Verify that pred_block appears in succ's predecessor list
             if let Some(pred_range) = vcode.block_pred_range.get(succ.index() as usize) {
@@ -122,7 +122,7 @@ block2:
 
     // Also verify reverse: if A has B as predecessor, then B has A as successor
     for (succ_idx, pred_range) in vcode.block_pred_range.iter().enumerate() {
-        let succ_block = crate::backend3::types::BlockIndex::new(succ_idx as u32);
+        let succ_block = crate::backend3::types::BlockIndex::new(succ_idx);
         for pred in &vcode.block_preds[pred_range.start..pred_range.end] {
             // Verify that succ_block appears in pred's successor list
             if let Some(succ_range) = vcode.block_succ_range.get(pred.index() as usize) {
@@ -218,7 +218,7 @@ block0:
 
     // Entry block index should be valid
     assert!(
-        vcode.entry.index() < vcode.block_ranges.len() as u32,
+        vcode.entry.index() < vcode.block_ranges.len(),
         "Entry block index {} should be less than block count {}",
         vcode.entry.index(),
         vcode.block_ranges.len()
@@ -228,7 +228,7 @@ block0:
     // (We need to find the IR block that corresponds to the entry)
     // Since we can't easily get the IR block from VCode, we verify the entry is valid
     assert!(
-        vcode.entry.index() < vcode.block_order.lowered_order.len() as u32,
+        vcode.entry.index() < vcode.block_order.lowered_order.len(),
         "Entry block should be in lowered_order"
     );
 }
@@ -421,7 +421,7 @@ block0:
     // All relocations should reference valid instruction indices
     for reloc in &vcode.relocations {
         assert!(
-            reloc.inst_idx.index() < vcode.insts.len() as u32,
+            reloc.inst_idx.index() < vcode.insts.len(),
             "Relocation should reference valid instruction index"
         );
     }

@@ -249,7 +249,7 @@ fn test_predecessor_computation() {
 
     // Verify that for each successor relationship, there's a corresponding predecessor
     for (block_idx, succ_range) in vcode.block_succ_range.iter().enumerate() {
-        let pred_block = crate::backend3::types::BlockIndex::new(block_idx as u32);
+        let pred_block = crate::backend3::types::BlockIndex::new(block_idx);
         for succ in &vcode.block_succs[succ_range.start..succ_range.end] {
             // Verify that pred_block appears in succ's predecessor list
             if let Some(pred_range) = vcode.block_pred_range.get(succ.index() as usize) {
