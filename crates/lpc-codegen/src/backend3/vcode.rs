@@ -62,13 +62,16 @@
 //! - Respect register class restrictions (from VReg's register class)
 //! - Optimize register allocation based on operand kinds (use/def)
 
-use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use alloc::{collections::BTreeMap, vec::Vec};
 use core::fmt;
 
 use lpc_lpir::RelSourceLoc;
 use regalloc2::Operand;
 
-use crate::backend3::types::{BlockIndex, InsnIndex, Ranges, VReg};
+use crate::backend3::{
+    symbols::Symbol,
+    types::{BlockIndex, InsnIndex, Ranges, VReg},
+};
 
 /// Virtual-register code: machine instructions with virtual registers
 ///
@@ -220,8 +223,8 @@ pub struct VCodeReloc {
     pub inst_idx: InsnIndex,
     /// Relocation kind
     pub kind: RelocKind,
-    /// Target identifier (function name, etc.)
-    pub target: String,
+    /// Target symbol (function name, etc.)
+    pub target: Symbol,
 }
 
 /// Relocation kind

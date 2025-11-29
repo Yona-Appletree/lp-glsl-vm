@@ -6,6 +6,7 @@ use lpc_lpir::RelSourceLoc;
 use regalloc2::{Operand, OperandKind, OperandPos, PRegSet, RegClass};
 
 use crate::backend3::{
+    symbols::Symbol,
     types::{BlockIndex, InsnIndex, Range, Ranges, VReg, PINNED_VREGS},
     vcode::{
         BlockLoweringOrder, BlockMetadata, Callee, Constant, MachInst, OperandVisitor, RelocKind,
@@ -88,7 +89,7 @@ impl<I: MachInst> VCodeBuilder<I> {
     }
 
     /// Record a relocation
-    pub fn record_reloc(&mut self, inst_idx: InsnIndex, kind: RelocKind, target: String) {
+    pub fn record_reloc(&mut self, inst_idx: InsnIndex, kind: RelocKind, target: Symbol) {
         self.relocations.push(VCodeReloc {
             inst_idx,
             kind,

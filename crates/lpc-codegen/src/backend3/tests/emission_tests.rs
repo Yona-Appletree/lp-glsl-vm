@@ -16,7 +16,7 @@ fn build_and_emit(lpir_text: &str) -> InstBuffer {
     let regalloc = vcode
         .run_regalloc()
         .expect("register allocation should succeed");
-    vcode.emit(&regalloc)
+    vcode.emit(&regalloc, None, None)
 }
 
 /// Helper to debug emitted instructions

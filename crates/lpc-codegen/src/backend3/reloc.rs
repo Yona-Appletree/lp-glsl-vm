@@ -23,9 +23,8 @@
 //! Note: Currently, relocations are recorded but not automatically used during lowering.
 //! This will be implemented in a future phase when function call lowering is enhanced.
 
-use alloc::string::String;
-
 use crate::backend3::{
+    symbols::Symbol,
     types::InsnIndex,
     vcode::{RelocKind, VCodeReloc},
 };
@@ -38,7 +37,7 @@ pub fn record_reloc(
     relocations: &mut alloc::vec::Vec<VCodeReloc>,
     inst_idx: InsnIndex,
     kind: RelocKind,
-    target: String,
+    target: Symbol,
 ) {
     relocations.push(VCodeReloc {
         inst_idx,

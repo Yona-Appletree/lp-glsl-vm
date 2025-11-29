@@ -8,6 +8,7 @@ pub mod constants;
 pub mod lower;
 pub mod regalloc;
 pub mod reloc;
+pub mod symbols;
 pub mod types;
 pub mod vcode;
 pub mod vcode_builder;

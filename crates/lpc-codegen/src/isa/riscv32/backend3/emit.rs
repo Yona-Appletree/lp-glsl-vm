@@ -10,6 +10,7 @@ use regalloc2::{Edit, Function as RegallocFunction};
 
 use crate::{
     backend3::{
+        symbols::{Symbol, SymbolTable},
         types::{BlockIndex, InsnIndex},
         vcode::{MachInst, MachTerminator, RelocKind, VCode},
     },
@@ -57,8 +58,8 @@ struct Reloc {
     offset: u32,
     /// Relocation kind
     kind: RelocKind,
-    /// Target identifier (function name, etc.)
-    target: String,
+    /// Target symbol
+    target: Symbol,
 }
 
 /// Special offset value meaning "label not yet bound"
@@ -166,7 +167,18 @@ impl VCode<Riscv32MachInst> {
     /// 3. Emits instructions with allocations applied
     /// 4. Emits edits (spills/reloads/moves) at their program points
     /// 5. Emits epilogue at returns
-    pub fn emit(&self, regalloc: &regalloc2::Output) -> InstBuffer {
+    ///
+    /// # Arguments
+    ///
+    /// * `regalloc` - Register allocation results
+    /// * `symbol_table` - Symbol table for resolving function calls (optional)
+    /// * `function_name` - Name of this function (for registering in symbol table, optional)
+    pub fn emit(
+        &self,
+        regalloc: &regalloc2::Output,
+        symbol_table: Option<&mut SymbolTable>,
+        function_name: Option<&str>,
+    ) -> InstBuffer {
         let mut buffer = InstBuffer::new();
 
         // Compute frame layout from regalloc results
@@ -177,33 +189,100 @@ impl VCode<Riscv32MachInst> {
         state.frame_size = frame_layout.total_size();
         state.clobbered_callee_saved = frame_layout.clobbered_regs.clone();
 
-        // Compute emission order (cold blocks at end)
-        let block_order = self.compute_emission_order();
-
-        // Emit blocks in final order
-        for block_idx in block_order {
-            // Is this the entry block? Emit prologue
-            if block_idx.index() == self.entry.index() {
-                self.gen_prologue(&mut buffer, &mut state, &frame_layout);
+        // Register function start offset in symbol table if provided
+        let function_start_offset = buffer.cur_offset();
+        if let Some(symtab) = symbol_table {
+            if let Some(name) = function_name {
+                symtab.add_local(Symbol::local(name), function_start_offset);
             }
 
-            // Bind label for this block
-            let block_start_offset = buffer.cur_offset();
-            state.bind_label(block_idx, block_start_offset);
-            buffer.bind_label(block_idx.index() as u32);
+            // Compute emission order (cold blocks at end)
+            let block_order = self.compute_emission_order();
 
-            // Emit block instructions and edits
-            self.emit_block(&mut buffer, &mut state, block_idx, regalloc, &frame_layout);
+            // Emit blocks in final order
+            for block_idx in block_order {
+                // Is this the entry block? Emit prologue
+                if block_idx.index() == self.entry.index() {
+                    self.gen_prologue(&mut buffer, &mut state, &frame_layout);
+                }
 
-            // Resolve any pending fixups that targeted this label
-            state.resolve_pending_fixups(&mut buffer, block_idx, block_start_offset);
+                // Check alignment requirement for this block
+                if let Some(align) = self.block_metadata[block_idx.index()].alignment {
+                    let current_offset = buffer.cur_offset();
+                    let padding_needed = (align - (current_offset % align)) % align;
+                    // Emit NOP instructions for padding (ADDI x0, x0, 0)
+                    // Each instruction is 4 bytes
+                    let nop_count = (padding_needed / 4) as usize;
+                    for _ in 0..nop_count {
+                        buffer.emit(Inst::Addi {
+                            rd: Gpr::Zero,
+                            rs1: Gpr::Zero,
+                            imm: 0,
+                        });
+                    }
+                }
+
+                // Bind label for this block
+                let block_start_offset = buffer.cur_offset();
+                state.bind_label(block_idx, block_start_offset);
+                buffer.bind_label(block_idx.index() as u32);
+
+                // Emit block instructions and edits
+                self.emit_block(&mut buffer, &mut state, block_idx, regalloc, &frame_layout);
+
+                // Resolve any pending fixups that targeted this label
+                state.resolve_pending_fixups(&mut buffer, block_idx, block_start_offset);
+            }
+
+            // Resolve any remaining forward references (should be none if order is correct)
+            state.resolve_all_pending_fixups(&mut buffer);
+
+            // Fix external relocations (function calls, etc.)
+            self.fix_external_relocations(&mut buffer, &state, symtab);
+        } else {
+            // No symbol table - emit without relocation resolution
+            // Compute emission order (cold blocks at end)
+            let block_order = self.compute_emission_order();
+
+            // Emit blocks in final order
+            for block_idx in block_order {
+                // Is this the entry block? Emit prologue
+                if block_idx.index() == self.entry.index() {
+                    self.gen_prologue(&mut buffer, &mut state, &frame_layout);
+                }
+
+                // Check alignment requirement for this block
+                if let Some(align) = self.block_metadata[block_idx.index()].alignment {
+                    let current_offset = buffer.cur_offset();
+                    let padding_needed = (align - (current_offset % align)) % align;
+                    // Emit NOP instructions for padding (ADDI x0, x0, 0)
+                    // Each instruction is 4 bytes
+                    let nop_count = (padding_needed / 4) as usize;
+                    for _ in 0..nop_count {
+                        buffer.emit(Inst::Addi {
+                            rd: Gpr::Zero,
+                            rs1: Gpr::Zero,
+                            imm: 0,
+                        });
+                    }
+                }
+
+                // Bind label for this block
+                let block_start_offset = buffer.cur_offset();
+                state.bind_label(block_idx, block_start_offset);
+                buffer.bind_label(block_idx.index() as u32);
+
+                // Emit block instructions and edits
+                self.emit_block(&mut buffer, &mut state, block_idx, regalloc, &frame_layout);
+
+                // Resolve any pending fixups that targeted this label
+                state.resolve_pending_fixups(&mut buffer, block_idx, block_start_offset);
+            }
+
+            // Resolve any remaining forward references (should be none if order is correct)
+            state.resolve_all_pending_fixups(&mut buffer);
+            // No relocation resolution - this is OK for single-function compilation without calls
         }
-
-        // Resolve any remaining forward references (should be none if order is correct)
-        state.resolve_all_pending_fixups(&mut buffer);
-
-        // Fix external relocations (function calls, etc.)
-        self.fix_external_relocations(&mut buffer, &state);
 
         // End any remaining source location range
         if state.cur_srcloc.is_some() {
@@ -217,15 +296,124 @@ impl VCode<Riscv32MachInst> {
     ///
     /// This resolves relocations that were recorded during emission.
     /// For function calls, this patches the call instruction with the function address.
-    fn fix_external_relocations(&self, buffer: &mut InstBuffer, state: &EmitState) {
-        // For now, relocations are recorded but not resolved
-        // In a full implementation, we would:
-        // 1. Look up function addresses from a symbol table
-        // 2. For direct calls: Load function address into a register and emit JALR
-        // 3. Patch the instruction at the relocation offset
-        // TODO: Implement relocation resolution
-        // For now, we just record them - actual resolution requires a symbol table
-        let _relocs = &state.external_relocations;
+    fn fix_external_relocations(
+        &self,
+        buffer: &mut InstBuffer,
+        state: &EmitState,
+        symbol_table: &SymbolTable,
+    ) {
+        for reloc in &state.external_relocations {
+            if reloc.kind != RelocKind::FunctionCall {
+                // Only handle function calls for now
+                continue;
+            }
+
+            // Look up symbol address/offset
+            let target_addr = match symbol_table.lookup(&reloc.target) {
+                Some(addr) => addr,
+                None => {
+                    // Symbol not found - this is an error for now
+                    // In the future, we might want to defer resolution for external symbols
+                    continue;
+                }
+            };
+
+            // Get the current PC (offset of the AUIPC instruction)
+            let auipc_offset = reloc.offset;
+            let pc = auipc_offset as u64;
+
+            // Check if this is a local symbol (PC-relative) or external (absolute)
+            let is_local = !symbol_table.is_external(&reloc.target);
+
+            if is_local {
+                // Local symbol: use PC-relative addressing
+                // AUIPC loads high 20 bits of (target_addr - pc)
+                // ADDI adds low 12 bits
+                let diff = target_addr.wrapping_sub(pc);
+                let hi20 = ((diff >> 12) & 0xFFFFF) as u32;
+                let lo12 = (diff & 0xFFF) as u32;
+
+                // Sign-extend lo12 if needed (for negative offsets)
+                let lo12_signed = if lo12 & 0x800 != 0 {
+                    (lo12 | 0xFFFFF000) as i32
+                } else {
+                    lo12 as i32
+                };
+
+                // Patch AUIPC instruction (high 20 bits)
+                // AUIPC format: rd = (imm << 12) + pc
+                // We need to patch the immediate field (bits [31:12])
+                let auipc_inst_idx = (auipc_offset / 4) as usize;
+                if auipc_inst_idx < buffer.instruction_count() {
+                    let current_inst = &buffer.instructions()[auipc_inst_idx];
+                    if let Inst::Lui { rd, imm: _ } = current_inst {
+                        // Replace LUI with AUIPC
+                        buffer.set_instruction(auipc_inst_idx, Inst::Auipc { rd: *rd, imm: hi20 });
+                    } else if let Inst::Auipc { rd, imm: _ } = current_inst {
+                        // Already AUIPC, just patch immediate
+                        buffer.set_instruction(auipc_inst_idx, Inst::Auipc { rd: *rd, imm: hi20 });
+                    }
+                }
+
+                // Patch ADDI instruction (low 12 bits)
+                // ADDI is the next instruction after AUIPC
+                let addi_inst_idx = auipc_inst_idx + 1;
+                if addi_inst_idx < buffer.instruction_count() {
+                    let current_inst = &buffer.instructions()[addi_inst_idx];
+                    if let Inst::Addi { rd, rs1, imm: _ } = current_inst {
+                        buffer.set_instruction(
+                            addi_inst_idx,
+                            Inst::Addi {
+                                rd: *rd,
+                                rs1: *rs1,
+                                imm: lo12_signed,
+                            },
+                        );
+                    }
+                }
+            } else {
+                // External symbol: use absolute addressing
+                // LUI loads high 20 bits of target_addr
+                // ADDI adds low 12 bits
+                let hi20 = ((target_addr >> 12) & 0xFFFFF) as u32;
+                let lo12 = (target_addr & 0xFFF) as u32;
+
+                // Sign-extend lo12 if needed
+                let lo12_signed = if lo12 & 0x800 != 0 {
+                    (lo12 | 0xFFFFF000) as i32
+                } else {
+                    lo12 as i32
+                };
+
+                // Patch LUI instruction (high 20 bits)
+                let lui_inst_idx = (auipc_offset / 4) as usize;
+                if lui_inst_idx < buffer.instruction_count() {
+                    let current_inst = &buffer.instructions()[lui_inst_idx];
+                    if let Inst::Lui { rd, imm: _ } = current_inst {
+                        buffer.set_instruction(lui_inst_idx, Inst::Lui { rd: *rd, imm: hi20 });
+                    } else if let Inst::Auipc { rd, imm: _ } = current_inst {
+                        // Convert AUIPC to LUI for absolute addressing
+                        buffer.set_instruction(lui_inst_idx, Inst::Lui { rd: *rd, imm: hi20 });
+                    }
+                }
+
+                // Patch ADDI instruction (low 12 bits)
+                let addi_inst_idx = lui_inst_idx + 1;
+                if addi_inst_idx < buffer.instruction_count() {
+                    let current_inst = &buffer.instructions()[addi_inst_idx];
+                    if let Inst::Addi { rd, rs1, imm: _ } = current_inst {
+                        buffer.set_instruction(
+                            addi_inst_idx,
+                            Inst::Addi {
+                                rd: *rd,
+                                rs1: *rs1,
+                                imm: lo12_signed,
+                            },
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// Compute emission order (cold blocks at end)
@@ -311,11 +499,25 @@ impl VCode<Riscv32MachInst> {
         // Sort for consistent ordering (affects frame layout)
         clobbered_callee_saved.sort_by_key(|gpr: &Gpr| gpr.num());
 
+        // Compute maximum outgoing args area size
+        // Scan all Jal instructions to find the maximum number of stack arguments needed
+        let mut max_stack_args = 0u32;
+        for inst in &self.insts {
+            if let Riscv32MachInst::Jal { args, .. } = inst {
+                let stack_args_needed = if args.len() > 8 {
+                    ((args.len() - 8) * 4) as u32 // 4 bytes per stack argument
+                } else {
+                    0
+                };
+                max_stack_args = max_stack_args.max(stack_args_needed);
+            }
+        }
+
         FrameLayout {
             setup_area_size: 8, // FP + RA (8 bytes)
             clobber_area_size: (clobbered_callee_saved.len() * 4) as u32,
             spill_slots_size: spill_slots_size as u32,
-            abi_size: 0, // No ABI requirements for now (outgoing args, etc.)
+            abi_size: max_stack_args,
             clobbered_regs: clobbered_callee_saved,
         }
     }
@@ -479,7 +681,7 @@ impl VCode<Riscv32MachInst> {
                 self.emit_branch(buffer, state, mach_inst, branch_info);
             } else {
                 // Regular instruction - emit directly
-                self.emit_instruction(buffer, &mach_inst, state, InsnIndex::new(inst_idx));
+                self.emit_instruction(buffer, &mach_inst, state, InsnIndex::new(inst_idx), frame);
             }
 
             // Emit edits that come after this instruction
@@ -640,24 +842,52 @@ impl VCode<Riscv32MachInst> {
         inst: &Riscv32MachInst,
         state: &mut EmitState,
         _inst_idx: InsnIndex,
+        frame: &FrameLayout,
     ) {
         // Handle instructions that need multiple instructions specially
         match inst {
             Riscv32MachInst::Trapz { condition, .. } => {
-                // Conditional trap if zero: BEQ condition, zero, trap_label
-                // For now, emit EBREAK directly (condition should be checked by runtime)
-                // TODO: Implement proper conditional trap with branch to trap handler
-                let _condition_gpr = self.reg_to_gpr(*condition);
-                // Emit: BEQ condition, zero, skip_trap (skip EBREAK if condition != 0)
-                // For now, just emit EBREAK unconditionally
+                // Conditional trap if zero: skip EBREAK if condition != 0
+                // Emit: BEQ condition, zero, skip_label (skip EBREAK if condition != 0)
+                let condition_gpr = self.reg_to_gpr(*condition);
+                
+                // Emit branch with placeholder offset
+                let branch_inst_idx = buffer.instructions().len();
+                buffer.emit(Inst::Beq {
+                    rs1: condition_gpr,
+                    rs2: Gpr::Zero,
+                    imm: 0, // Placeholder, will be patched
+                });
+                
+                // Emit EBREAK
                 buffer.emit(Inst::Ebreak);
+                
+                // Patch branch: skip EBREAK (4 bytes = 1 instruction)
+                // Offset is in 2-byte units, so 4 bytes = 2 units
+                let skip_offset = buffer.cur_offset();
+                buffer.patch_branch(branch_inst_idx, skip_offset, BranchType::Conditional);
                 return;
             }
             Riscv32MachInst::Trapnz { condition, .. } => {
-                // Conditional trap if non-zero: BNE condition, zero, trap_label
-                // Similar to Trapz
-                let _condition_gpr = self.reg_to_gpr(*condition);
+                // Conditional trap if non-zero: skip EBREAK if condition == 0
+                // Emit: BNE condition, zero, skip_label (skip EBREAK if condition == 0)
+                let condition_gpr = self.reg_to_gpr(*condition);
+                
+                // Emit branch with placeholder offset
+                let branch_inst_idx = buffer.instructions().len();
+                buffer.emit(Inst::Bne {
+                    rs1: condition_gpr,
+                    rs2: Gpr::Zero,
+                    imm: 0, // Placeholder, will be patched
+                });
+                
+                // Emit EBREAK
                 buffer.emit(Inst::Ebreak);
+                
+                // Patch branch: skip EBREAK (4 bytes = 1 instruction)
+                // Offset is in 2-byte units, so 4 bytes = 2 units
+                let skip_offset = buffer.cur_offset();
+                buffer.patch_branch(branch_inst_idx, skip_offset, BranchType::Conditional);
                 return;
             }
             Riscv32MachInst::Ecall { number, args, result } => {
@@ -711,28 +941,55 @@ impl VCode<Riscv32MachInst> {
                     }
                 }
                 
-                // TODO: Handle additional arguments on stack (outgoing args area)
-                // For now, we only support up to 8 arguments
-                if args.len() > 8 {
-                    // Additional args would go on stack
-                    // This requires outgoing args area in frame layout
-                    // TODO: Implement stack argument passing
+                // Handle additional arguments on stack (outgoing args area)
+                // Outgoing args are stored at the top of the frame (highest addresses)
+                // After prologue, SP points to the bottom of the frame
+                // Outgoing args area starts at: SP + (setup_area + clobber_area + spill_slots)
+                // Which is: SP + (frame_size - abi_size)
+                for (idx, arg) in args.iter().enumerate().skip(8) {
+                    let arg_gpr = self.reg_to_gpr(*arg);
+                    // Stack offset: base offset to outgoing args area + per-arg offset
+                    let base_offset = (frame.setup_area_size + frame.clobber_area_size + frame.spill_slots_size) as i32;
+                    let arg_offset = ((idx - 8) * 4) as i32;
+                    let stack_offset = base_offset + arg_offset;
+                    buffer.push_sw(Gpr::Sp, arg_gpr, stack_offset);
                 }
                 
-                // Record relocation for direct calls
-                let call_offset = buffer.cur_offset();
+                // Emit function call sequence: AUIPC + ADDI + JALR
+                // This allows us to call functions at arbitrary addresses
+                // We'll use a temporary register (t0) to hold the function address
+                let temp_reg = Gpr::T0; // t0 is a caller-saved temporary
+                
+                // Record relocation for the AUIPC instruction
+                // The relocation will patch both AUIPC and ADDI
+                let auipc_offset = buffer.cur_offset();
                 state.external_relocations.push(Reloc {
-                    offset: call_offset,
+                    offset: auipc_offset,
                     kind: RelocKind::FunctionCall,
-                    target: callee.clone(),
+                    target: Symbol::local(callee.clone()), // Convert String to Symbol::local
                 });
                 
-                // Emit JAL with placeholder offset (will be patched by relocation)
-                // For direct calls, we'll need to load the function address and use JALR
-                // For now, emit JAL with 0 offset (will be patched)
-                buffer.emit(Inst::Jal {
+                // Emit AUIPC with placeholder immediate (will be patched by relocation)
+                // AUIPC: temp_reg = (imm << 12) + pc
+                buffer.emit(Inst::Auipc {
+                    rd: temp_reg,
+                    imm: 0, // Placeholder, will be patched
+                });
+                
+                // Emit ADDI with placeholder immediate (will be patched by relocation)
+                // ADDI: temp_reg = temp_reg + imm
+                buffer.emit(Inst::Addi {
+                    rd: temp_reg,
+                    rs1: temp_reg,
+                    imm: 0, // Placeholder, will be patched
+                });
+                
+                // Emit JALR: ra = pc + 4; pc = temp_reg + 0
+                // JALR: rd = pc + 4; pc = rs1 + imm
+                buffer.emit(Inst::Jalr {
                     rd: Gpr::Ra, // Return address goes in RA
-                    imm: 0,      // Placeholder, will be patched
+                    rs1: temp_reg,
+                    imm: 0, // No offset needed
                 });
                 
                 // Move return value from a0 to destination register if needed
